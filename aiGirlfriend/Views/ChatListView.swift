@@ -164,20 +164,28 @@ struct ChatListView: View {
 private struct ChatHistoryRow: View {
     let item: ChatItem
     let isTyping: Bool
+    @State private var showProfile = false
 
     private var hasUnread: Bool { item.unread > 0 }
 
     var body: some View {
         HStack(spacing: 12) {
-            CachedImage(url: item.character.avatarURL ?? item.character.photoURL) { image in
-                image.resizable().scaledToFill()
-            } placeholder: { AppColor.pink }
-            .frame(width: 52, height: 52)
-            .clipShape(Circle())
-            .overlay(alignment: .bottomTrailing) {
-                Circle().fill(Color(hex: 0x22C55E))
-                    .frame(width: 14, height: 14)
-                    .overlay(Circle().strokeBorder(AppColor.bg, lineWidth: 2))
+            // Avatar → opens CharacterProfileView (which has Chat + Gallery buttons)
+            Button { showProfile = true } label: {
+                CachedImage(url: item.character.avatarURL ?? item.character.photoURL) { image in
+                    image.resizable().scaledToFill()
+                } placeholder: { AppColor.pink }
+                .frame(width: 52, height: 52)
+                .clipShape(Circle())
+                .overlay(alignment: .bottomTrailing) {
+                    Circle().fill(Color(hex: 0x22C55E))
+                        .frame(width: 14, height: 14)
+                        .overlay(Circle().strokeBorder(AppColor.bg, lineWidth: 2))
+                }
+            }
+            .buttonStyle(.plain)
+            .fullScreenCover(isPresented: $showProfile) {
+                CharacterProfileView(character: item.character)
             }
 
             VStack(alignment: .leading, spacing: 3) {

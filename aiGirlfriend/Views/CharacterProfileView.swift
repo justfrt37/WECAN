@@ -10,6 +10,7 @@ struct CharacterProfileView: View {
     let character: Character
     @Environment(\.dismiss) private var dismiss
     @State private var page = 0
+    @State private var showGallery = false
 
     /// Kalp ring'inin dolması için varsayılan üst sınır.
     private let maxLevel = 10
@@ -21,27 +22,40 @@ struct CharacterProfileView: View {
     }
 
     var body: some View {
-        ZStack(alignment: .top) {
-            AppColor.bg.ignoresSafeArea()
+        NavigationStack {
+            ZStack(alignment: .top) {
+                AppColor.bg.ignoresSafeArea()
 
-            ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    hero
-                    about
-                        .padding(.horizontal, 24)
-                        .padding(.top, 22)
-                    interestsSection
-                        .padding(.horizontal, 24)
-                        .padding(.top, 22)
-                        .padding(.bottom, 40)
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        hero
+                        about
+                            .padding(.horizontal, 24)
+                            .padding(.top, 22)
+                        interestsSection
+                            .padding(.horizontal, 24)
+                            .padding(.top, 22)
+                            .padding(.bottom, 110) // bottom bar space
+                    }
+                }
+                .ignoresSafeArea(edges: .top)
+
+                closeButton
+                    .padding(.trailing, 20)
+                    .padding(.top, 12)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+
+                // Sticky bottom bar — Gallery + Chat
+                VStack(spacing: 0) {
+                    Spacer()
+                    bottomBar
                 }
             }
-            .ignoresSafeArea(edges: .top)
-
-            closeButton
-                .padding(.trailing, 20)
-                .padding(.top, 12)
-                .frame(maxWidth: .infinity, alignment: .trailing)
+            .navigationDestination(for: Character.self) { ChatView(character: $0) }
+            .toolbar(.hidden, for: .navigationBar)
+        }
+        .fullScreenCover(isPresented: $showGallery) {
+            GalleryView(character: character)
         }
     }
 
@@ -215,6 +229,51 @@ struct CharacterProfileView: View {
                 .background(AppColor.bg.opacity(0.65), in: Circle())
                 .overlay(Circle().strokeBorder(.white.opacity(0.12), lineWidth: 1))
         }
+    }
+
+    // MARK: Bottom bar
+
+    private var bottomBar: some View {
+        HStack(spacing: 12) {
+            // Gallery
+            Button { showGallery = true } label: {
+                Label("Galeri", systemImage: "photo.fill")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity).frame(height: 52)
+                    .background(.white.opacity(0.10), in: RoundedRectangle(cornerRadius: 16))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16)
+                            .strokeBorder(.white.opacity(0.15), lineWidth: 1)
+                    )
+            }
+            .buttonStyle(.plain)
+
+            // Chat — pushes inside this NavigationStack
+            NavigationLink(value: character) {
+                Label("Sohbet", systemImage: "bubble.left.and.bubble.right.fill")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity).frame(height: 52)
+                    .background(
+                        LinearGradient(colors: [AppColor.pink, Color(hex: 0xC4A7E7)],
+                                       startPoint: .leading, endPoint: .trailing),
+                        in: RoundedRectangle(cornerRadius: 16)
+                    )
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 20)
+        .padding(.bottom, 30)
+        .padding(.top, 12)
+        .background(
+            AppColor.bg.opacity(0.95)
+                .overlay(
+                    Rectangle().frame(height: 1).foregroundStyle(.white.opacity(0.08)),
+                    alignment: .top
+                )
+                .ignoresSafeArea(edges: .bottom)
+        )
     }
 }
 

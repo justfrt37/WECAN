@@ -36,6 +36,18 @@ async function grok(prompt: string, maxTokens: number): Promise<string> {
   return d?.choices?.[0]?.message?.content ?? "";
 }
 
+function userIdFromJWT(authHeader: string | null): string | null {
+  if (!authHeader) return null;
+  const jwt = authHeader.replace("Bearer ", "").trim();
+  const parts = jwt.split(".");
+  if (parts.length < 2) return null;
+  try {
+    let b64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+    while (b64.length % 4) b64 += "=";
+    return JSON.parse(atob(b64)).sub ?? null;
+  } catch { return null; }
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   const json = (b: unknown, s = 200) =>
@@ -43,36 +55,86 @@ Deno.serve(async (req: Request) => {
 
   try {
     const b = await req.json();
+    const uid = userIdFromJWT(req.headers.get("Authorization"));
     const interests: string[] = Array.isArray(b.interests) ? b.interests : [];
     const personality = b.personality ?? "romantik";
     const gender = b.gender ?? "Kadın";
     const scenario = b.scenario ?? "";
     const category = b.category ?? "Realistic";
+    const personalityRole: string = b.personality_role ?? "flirty";
+    const builderSelections = {
+      category,
+      personality_role: personalityRole,
+      profession: b.profession ?? null,
+      vibe: b.vibe ?? null,
+      age_range: b.age_range ?? null,
+    };
+    const exHistoryRaw: string | null = b.ex_history ?? null;
 
-    // 1) AI ile isim + yaş + bio (JSON iste)
-    const metaPrompt = `Bir AI sevgili uygulaması için karakter üret. Kimlik: ${gender}, ` +
-      `etnik köken: ${b.ethnicity ?? "-"}, saç: ${b.hair ?? "-"}, göz: ${b.eye ?? "-"}, ` +
-      `kişilik: ${personality}, ilgi alanları: ${interests.join(", ")}. ` +
-      `SADECE şu JSON'u döndür, başka metin yazma: {"name":"<tek kelime isim>","age":<20-30 arası sayı>,"bio":"<birinci ağızdan, sıcak, 1-2 cümlelik Türkçe tanıtım>"}`;
-    let name = "Lumi", age = 23, bio = "Selam, seninle tanışmak için sabırsızlanıyorum 💕";
-    try {
-      const raw = await grok(metaPrompt, 200);
-      const m = raw.match(/\{[\s\S]*\}/);
-      if (m) {
-        const p = JSON.parse(m[0]);
-        if (p.name) name = String(p.name).trim().split(/\s+/)[0];
-        if (p.age) age = Math.max(20, Math.min(30, parseInt(p.age) || 23));
-        if (p.bio) bio = String(p.bio).trim();
+    // Validate ex_history if role is ex
+    let validatedExHistory: string | null = null;
+    if (personalityRole === "ex" && exHistoryRaw) {
+      const valResp = await fetch(
+        `${SUPABASE_URL}/functions/v1/validate-history`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${SERVICE_ROLE}` },
+          body: JSON.stringify({ history: exHistoryRaw }),
+        }
+      );
+      const valResult = await valResp.json();
+      if (!valResult.valid) {
+        return json({ error: valResult.reason ?? "Invalid history text." }, 400);
       }
-    } catch (_) { /* fallback değerler */ }
+      validatedExHistory = exHistoryRaw;
+    }
 
-    // 2) Sistem promptu
+    // 1) Name: use provided name or generate
+    const providedName: string | null = b.name ? String(b.name).trim() : null;
+    const ageRange: string = b.age_range ?? "22-25";
+    const vibe: string = b.vibe ?? "warm";
+    const profession: string = b.profession ?? "free spirit";
+
+    function pickAgeFromRange(range: string): number {
+      const parts = range.split("-").map(Number);
+      if (parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
+        return Math.floor(Math.random() * (parts[1] - parts[0] + 1)) + parts[0];
+      }
+      return 23;
+    }
+
+    let name = providedName ?? "Lumi";
+    let age = pickAgeFromRange(ageRange);
+    let bio = "Looking forward to getting to know you 💕";
+
+    if (providedName) {
+      // Name provided — only generate bio
+      const bioPrompt =
+        `Write a short 1-2 sentence first-person bio for an AI companion character named ${name}, age ${age}. ` +
+        `Vibe: ${vibe}. Profession: ${profession}. ` +
+        `Warm, natural tone. Return ONLY the bio text, no quotes, no JSON.`;
+      try { bio = (await grok(bioPrompt, 120)).trim(); } catch (_) {}
+    } else {
+      // Generate name + bio via Grok
+      const metaPrompt =
+        `Generate an AI companion character. Personality: ${personality}, vibe: ${vibe}, profession: ${profession}. ` +
+        `Return ONLY this JSON, nothing else: {"name":"<single first name>","bio":"<warm 1-2 sentence first-person intro>"}`;
+      try {
+        const raw = await grok(metaPrompt, 200);
+        const m = raw.match(/\{[\s\S]*\}/);
+        if (m) {
+          const p = JSON.parse(m[0]);
+          if (p.name) name = String(p.name).trim().split(/\s+/)[0];
+          if (p.bio) bio = String(p.bio).trim();
+        }
+      } catch (_) {}
+    }
+
+    // 2) System prompt
     const systemPrompt =
-      `Sen ${name}'sin, ${age} yaşında. Kişiliğin: ${personality}. ` +
-      `İlişki türünüz: ${b.relationship ?? "sevgili"}. Köken: ${b.ethnicity ?? "-"}, ` +
-      `saç: ${b.hair ?? "-"}, göz: ${b.eye ?? "-"}. İlgi alanların: ${interests.join(", ")}. ` +
-      (scenario ? `Başlangıç senaryosu: ${scenario}. ` : "") +
-      `Sıcak, doğal, kısa ve flörtöz cevaplar ver. Kullanıcının dilinde konuş, karakterinden çıkma.`;
+      `You are ${name}, ${age} years old. Personality: ${personality}. ` +
+      `Vibe: ${vibe}. Profession: ${profession}. ` +
+      `Reply warmly, naturally, briefly. Match the user's language. Stay in character.`;
 
     // 3) DB'ye ekle (service_role)
     const photoUrl: string | null = b.photoUrl ?? null;
@@ -84,13 +146,17 @@ Deno.serve(async (req: Request) => {
       age,
       city: null,
       country: null,
-      profession: personality,
+      profession: profession,
       category,
       photo_url: photoUrl,
       avatar_url: photoUrl,
       interests,
       relationship_level: 0,
       gallery_urls: photoUrl ? [photoUrl] : [],
+      personality_role: personalityRole,
+      created_by: uid,
+      builder_selections: builderSelections,
+      ex_history: validatedExHistory,
     }).select("*").single();
 
     if (error) return json({ error: error.message }, 500);

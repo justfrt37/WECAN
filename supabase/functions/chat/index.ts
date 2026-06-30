@@ -64,21 +64,24 @@ function levelForXp(xp: number): number {
   return lvl;
 }
 
-// Seviyeye göre konuşma samimiyeti — system prompt'a eklenir.
-function intimacyDirective(level: number): string {
-  const map: Record<number, string> = {
-    1: "İlişki seviyeniz 1/10 (Yeni Tanışma). Kibar ve hafif mesafeli ol; onu tanımaya çalış, sorular sor. Henüz flört etme.",
-    2: "İlişki seviyeniz 2/10 (Tanıdık). Samimi ama temkinli ol, ufak şakalar yap, ilgini göster.",
-    3: "İlişki seviyeniz 3/10 (Arkadaş). Rahat ve esprili ol, günlük şeyler paylaş.",
-    4: "İlişki seviyeniz 4/10 (Yakın Arkadaş). Kişisel şeyler aç, onu dert et, daha sıcak ol.",
-    5: "İlişki seviyeniz 5/10 (Flört Başlangıcı). Hafif iltifatlar et, ufak imalar yap, ara sıra emoji kullan.",
-    6: "İlişki seviyeniz 6/10 (Flört). Açıkça flört et, sıcak ol; 'canım' diyebilirsin, onu özlediğini belli et.",
-    7: "İlişki seviyeniz 7/10 (Sevgili Adayı). Romantik ol, gelecek planlarından bahset, duygularını ima et.",
-    8: "İlişki seviyeniz 8/10 (Sevgili). Açıkça sevgi göster, 'aşkım' de, hafif kıskançlık ve derin bağ hissettir.",
-    9: "İlişki seviyeniz 9/10 (Ciddi İlişki). Bağlılık göster, 'seni seviyorum' diyebilirsin, ortak anılarınıza atıfta bulun.",
-    10: "İlişki seviyeniz 10/10 (Ruh Eşi). En derin samimiyet ve açıklıkla konuş; o senin her şeyin.",
-  };
-  return map[level] ?? map[1];
+// Fetch role-aware intimacy directive from DB.
+// Checks character_level_overrides first, falls back to role_level_scripts.
+async function fetchDirective(characterId: string, role: string, level: number): Promise<string> {
+  const { data: override } = await db
+    .from("character_level_overrides")
+    .select("directive")
+    .eq("character_id", characterId)
+    .eq("level", level)
+    .maybeSingle();
+  if (override?.directive) return override.directive;
+
+  const { data: script } = await db
+    .from("role_level_scripts")
+    .select("directive")
+    .eq("role", role)
+    .eq("level", level)
+    .maybeSingle();
+  return script?.directive ?? `Relationship level ${level}/10. Be natural and warm.`;
 }
 
 // Modelin foto göndermek istediğini bildirme yöntemi.
@@ -148,6 +151,16 @@ Deno.serve(async (req: Request) => {
     const systemPrompt: string = body.systemPrompt ?? "";
     const userMessage: string | undefined = body.userMessage;
 
+    // Fetch character personality role and ex_history
+    const { data: character, error: charErr } = await db
+      .from("characters")
+      .select("personality_role, ex_history")
+      .eq("id", characterId)
+      .maybeSingle();
+    if (charErr) console.error("char fetch err:", JSON.stringify(charErr));
+    const personalityRole: string = character?.personality_role ?? "flirty";
+    const exHistory: string | null = character?.ex_history ?? null;
+
     // 1) Konuşmayı bul ya da oluştur (kullanıcı + karakter)
     let { data: convo } = await db
       .from("conversations")
@@ -194,7 +207,11 @@ Deno.serve(async (req: Request) => {
     // 3) Grok prompt'unu kur — mevcut ilişki seviyesine göre samimiyet talimatı ekle
     const currentLevel: number = convo.relationship_level ?? 1;
     let system = systemPrompt;
-    system += `\n\n${intimacyDirective(currentLevel)}`;
+    const directive = await fetchDirective(characterId, personalityRole, currentLevel);
+    system += `\n\n${directive}`;
+    if (exHistory) {
+      system += `\n\n[SHARED HISTORY — reference these memories naturally in conversation]\n${exHistory}`;
+    }
     system += PHOTO_INSTRUCTION;
     if (convo.summary && convo.summary.trim() !== "") {
       system += `\n\n[Önceki konuşmalarınızın özeti]\n${convo.summary}`;

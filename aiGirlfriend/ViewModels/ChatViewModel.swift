@@ -24,7 +24,7 @@ final class ChatViewModel {
     /// Bir cevapla seviye atlandığında UI bildirimi için (gösterildikten sonra nil yapılır).
     var leveledUpTo: Int?
 
-    var relationshipStage: String { Relationship.stageName(relationshipLevel) }
+    var relationshipStage: String { Relationship.stageName(relationshipLevel, role: character.personalityRole) }
 
     private let service = ChatService()
 

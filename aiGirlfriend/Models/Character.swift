@@ -27,6 +27,7 @@ struct Character: Identifiable, Codable, Hashable {
     var relationshipLevel: Int   // ilişki seviyesi (0 başlar, artar)
     var galleryURLs: [URL]       // profildeki kaydırılabilir resimler
     var chatPhotos: [URL]        // kızın sohbette gönderebileceği hazır fotoğraflar
+    var personalityRole: String  // flirty | distant | shy | playful | devoted | crazy | ex
 
     private enum CodingKeys: String, CodingKey {
         case id, name, tagline
@@ -39,6 +40,7 @@ struct Character: Identifiable, Codable, Hashable {
         case relationshipLevel = "relationship_level"
         case galleryURLs = "gallery_urls"
         case chatPhotos = "chat_photos"
+        case personalityRole = "personality_role"
     }
 
     init(
@@ -57,7 +59,8 @@ struct Character: Identifiable, Codable, Hashable {
         interests: [String] = [],
         relationshipLevel: Int = 0,
         galleryURLs: [URL] = [],
-        chatPhotos: [URL] = []
+        chatPhotos: [URL] = [],
+        personalityRole: String = "flirty"
     ) {
         self.id = id
         self.name = name
@@ -75,6 +78,7 @@ struct Character: Identifiable, Codable, Hashable {
         self.relationshipLevel = relationshipLevel
         self.galleryURLs = galleryURLs
         self.chatPhotos = chatPhotos
+        self.personalityRole = personalityRole
     }
 
     /// Decode sırasında eski/eksik alanlar için güvenli varsayılanlar.
@@ -96,6 +100,7 @@ struct Character: Identifiable, Codable, Hashable {
         relationshipLevel = (try? c.decode(Int.self, forKey: .relationshipLevel)) ?? 0
         galleryURLs = (try? c.decode([URL].self, forKey: .galleryURLs)) ?? []
         chatPhotos = (try? c.decode([URL].self, forKey: .chatPhotos)) ?? []
+        personalityRole = (try? c.decode(String.self, forKey: .personalityRole)) ?? "flirty"
     }
 
     /// "Şehir, Ülke" — ikisi de varsa.

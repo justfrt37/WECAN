@@ -147,3 +147,39 @@ language sql stable as $$
   order by m.embedding <=> p_query_embedding
   limit p_match_count;
 $$;
+
+-- ── Personality role system (migration 001) ──────────────────────────────────
+
+-- New columns on characters
+alter table characters
+  add column if not exists personality_role text not null default 'flirty',
+  add column if not exists created_by uuid references auth.users(id),
+  add column if not exists builder_selections jsonb,
+  add column if not exists ex_history text;
+
+-- Role-level directives: 7 roles x 10 levels = 70 rows (seeded via seed_role_level_scripts.sql)
+create table if not exists role_level_scripts (
+  role      text not null,
+  level     int  not null,
+  directive text not null,
+  primary key (role, level)
+);
+
+alter table role_level_scripts enable row level security;
+drop policy if exists "role_level_scripts_read" on role_level_scripts;
+create policy "role_level_scripts_read" on role_level_scripts
+  for select to authenticated using (true);
+
+-- Optional per-character directive overrides (takes priority over role template)
+create table if not exists character_level_overrides (
+  character_id uuid references characters(id) on delete cascade,
+  level        int  not null,
+  directive    text not null,
+  primary key (character_id, level)
+);
+
+alter table character_level_overrides enable row level security;
+drop policy if exists "character_level_overrides_read" on character_level_overrides;
+create policy "character_level_overrides_read" on character_level_overrides
+  for select to authenticated using (true);
+
