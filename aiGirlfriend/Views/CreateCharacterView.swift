@@ -53,8 +53,8 @@ struct CreateCharacterView: View {
     private let columns2 = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
     private let columns3 = [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)]
 
-    // Steps: 0=name 1=photo 2=role 3=category 4=vibe 5=profession 6=ageRange 7=exHistory(conditional)
-    private var totalSteps: Int { selectedRole == "ex" ? 8 : 7 }
+    // Steps: 0=name 1=photo 2=role 3=category 4=vibe 5=profession 6=ageRange 7=history
+    private var totalSteps: Int { 8 }
     private var isLastStep: Bool { stepIndex == totalSteps - 1 }
 
     var body: some View {
@@ -130,7 +130,7 @@ struct CreateCharacterView: View {
     private var nameStep: some View {
         VStack(spacing: 16) {
             TextField("", text: $characterName,
-                      prompt: Text("Enter a name…").foregroundColor(.white.opacity(0.4)))
+                      prompt: Text("Bir isim gir…").foregroundColor(.white.opacity(0.4)))
                 .font(.system(size: 22, weight: .semibold))
                 .foregroundStyle(.white)
                 .tint(AppColor.pink)
@@ -144,7 +144,7 @@ struct CreateCharacterView: View {
                 )
                 .autocorrectionDisabled()
 
-            Text("She'll always go by this name")
+            Text("Bu isim her zaman kullanılacak")
                 .font(.system(size: 13))
                 .foregroundStyle(.white.opacity(0.4))
         }
@@ -293,20 +293,20 @@ struct CreateCharacterView: View {
         }
     }
 
-    // MARK: Step 7 — Ex History (conditional)
+    // MARK: Step 7 — Geçmiş / Anılar
 
     private var exHistoryStep: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 8) {
                 Image(systemName: "clock.arrow.circlepath")
                     .foregroundStyle(AppColor.pink)
-                Text("This makes her remember your past")
+                Text("Bu, geçmişinizi hatırlamasını sağlar")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.7))
             }
 
             TextField("", text: $exHistory,
-                      prompt: Text("Describe your history together — where you met, memories, why it ended…")
+                      prompt: Text("Geçmişini anlat — nasıl tanıştınız, paylaştığınız anılar, bilmesini istediklerin…")
                           .foregroundColor(.white.opacity(0.35)),
                       axis: .vertical)
                 .lineLimit(5...12)
@@ -320,7 +320,7 @@ struct CreateCharacterView: View {
                                       lineWidth: 1.5)
                 )
 
-            Text("Optional — skip if you want a blank slate.")
+            Text("İsteğe bağlı — boş başlamak istersen geç.")
                 .font(.system(size: 12))
                 .foregroundStyle(.white.opacity(0.4))
         }
@@ -482,7 +482,7 @@ struct CreateCharacterView: View {
         case 4: return "Vibe"
         case 5: return "Meslek"
         case 6: return "Yaş aralığı"
-        default: return "Ortak geçmiş"
+        default: return "Geçmiş & Anılar"
         }
     }
 
@@ -520,13 +520,7 @@ struct CreateCharacterView: View {
         if isLastStep {
             phase = .creating
         } else {
-            // Skip ex history step (index 7) if role is not ex
-            let next = stepIndex + 1
-            if next == 7 && selectedRole != "ex" {
-                phase = .creating
-            } else {
-                stepIndex = next
-            }
+            stepIndex += 1
         }
     }
 

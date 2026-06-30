@@ -17,9 +17,10 @@ struct ExploreView: View {
     @State private var profileCharacter: Character?
     @State private var showCreate = false
 
-    /// Kategori + arama filtresi uygulanmış liste.
+    /// Kategori + arama filtresi uygulanmış liste (engellenenler hariç).
     private var filtered: [Character] {
         store.characters.filter { c in
+            guard !BlockedCharactersStore.isBlocked(c.id) else { return false }
             let catOK = selectedCategory == .all || c.category == selectedCategory.rawValue
             let q = search.trimmingCharacters(in: .whitespaces)
             let searchOK = q.isEmpty || c.name.localizedCaseInsensitiveContains(q)
@@ -80,7 +81,7 @@ struct ExploreView: View {
             TextField(
                 "",
                 text: $search,
-                prompt: Text("Search by name or vibe").foregroundStyle(.white.opacity(0.5))
+                prompt: Text("İsim veya mesleğe göre ara").foregroundStyle(.white.opacity(0.5))
             )
             .foregroundStyle(.white)
             .font(.system(size: 14))
@@ -302,7 +303,14 @@ enum ExploreCategory: String, CaseIterable, Identifiable {
     case fantasy = "Fantasy"
 
     var id: String { rawValue }
-    var title: String { rawValue }
+    var title: String {
+        switch self {
+        case .all: return "Tümü"
+        case .realistic: return "Gerçekçi"
+        case .anime: return "Anime"
+        case .fantasy: return "Fantezi"
+        }
+    }
 }
 
 #Preview {

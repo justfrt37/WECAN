@@ -10,10 +10,10 @@ enum MainTab: Int, CaseIterable, Identifiable {
     case discover, chat, explore, likes, profile
     var id: Int { rawValue }
 
-    var title: String {
+    var titleKey: LocalizedStringKey {
         switch self {
-        case .discover: return "Discover"
-        case .chat: return "Chat"
+        case .discover: return "Keşfet"
+        case .chat: return "Sohbet"
         case .explore: return "Tümünü Gör"
         case .likes: return "Beğeniler"
         case .profile: return "Profil"
@@ -80,7 +80,7 @@ struct CustomTabBar: View {
                         Image(systemName: active ? tab.icon : tab.icon.replacingOccurrences(of: ".fill", with: ""))
                             .font(.system(size: 20, weight: active ? .semibold : .regular))
                             .frame(height: 24)
-                        Text(tab.title)
+                        Text(tab.titleKey)
                             .font(.system(size: 10, weight: active ? .semibold : .medium))
                             .lineLimit(1)
                     }
@@ -116,7 +116,7 @@ struct PlaceholderTab: View {
                 Image(systemName: tab.icon)
                     .font(.system(size: 44))
                     .foregroundStyle(AppColor.pink.opacity(0.8))
-                Text(tab.title)
+                Text(tab.titleKey)
                     .font(.title2.bold())
                     .foregroundStyle(.white)
                 Text("Yakında")

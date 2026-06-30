@@ -33,18 +33,18 @@ struct CachedImage<Content: View, Placeholder: View>: View {
                 placeholder()
             }
         }
-        .task(id: url) { await load() }
+        .task(id: url) { await load(for: url) }
     }
 
-    private func load() async {
+    /// `url` parametresi açıkça alınır: view reuse edildiğinde (örn. feed kartı
+    /// değişince) eski @State uiImage kalıp yeni foto hiç yüklenmiyordu —
+    /// id değişince state'i burada senkron sıfırlıyoruz.
+    private func load(for url: URL?) async {
+        uiImage = url.flatMap { ImageCache.shared.image(for: $0) }
         guard uiImage == nil, let url else { return }
-        if let cached = ImageCache.shared.image(for: url) {
-            uiImage = cached
-            return
-        }
         guard let (data, _) = try? await URLSession.shared.data(from: url),
               let img = UIImage(data: data) else { return }
         ImageCache.shared.insert(img, for: url)
-        uiImage = img
+        if self.url == url { uiImage = img }
     }
 }

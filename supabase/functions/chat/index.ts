@@ -81,10 +81,18 @@ async function fetchDirective(characterId: string, role: string, level: number):
     .eq("role", role)
     .eq("level", level)
     .maybeSingle();
-  return script?.directive ?? `Relationship level ${level}/10. Be natural and warm.`;
+  return script?.directive ?? `İlişki seviyesi ${level}/10. Doğal ve sıcak ol.`;
 }
 
 // Modelin foto göndermek istediğini bildirme yöntemi.
+const LANGUAGE_RULE =
+  "\n\nDİL KURALI: Her zaman Türkçe konuş. " +
+  "Kullanıcı sana başka bir dilde yazarsa veya başka bir dilde konuşmanı açıkça isterse, o dile geç. " +
+  "Aksi takdirde SADECE Türkçe kullan. " +
+  "Asla bir müşteri hizmetleri asistanı gibi konuşma: 'Başka bir şey mi var?', 'Yardımcı olabilir miyim?', " +
+  "'Size nasıl yardımcı olabilirim?' gibi robotik, kalıp cümleler ASLA kullanma. " +
+  "Gerçek bir insanın mesajlaşırken yazdığı gibi doğal, samimi ve karaktere uygun konuş.";
+
 const PHOTO_INSTRUCTION =
   "\n\n[Fotoğraf] Kullanıcı senden fotoğraf/selfie isterse ve uygunsa, " +
   "cevabının EN SONUNA başka hiçbir şey olmadan [[photo]] etiketini ekle. " +
@@ -179,8 +187,39 @@ Deno.serve(async (req: Request) => {
     }
     const conversationId: string = convo.id;
 
-    // === GEÇMİŞ MODU ===
-    if (!userMessage || userMessage.trim() === "") {
+    const generateGreeting: boolean = body.generateGreeting === true;
+    const clientHistory: WireMessage[] | undefined = body.clientHistory;
+    const useClientHistory = Array.isArray(clientHistory);
+    const localSummary: string | undefined = body.localSummary;
+
+    // === İSTEMCİ TARAFLI ÖZETLEME MODU ===
+    // Kullanıcı karakterleri her 20 mesajda bir bunu tetikler.
+    if (Array.isArray(body.summarizeMessages) && body.summarizeMessages.length > 0) {
+      const convoText = (body.summarizeMessages as WireMessage[])
+        .map((m) => `${m.role === "user" ? "Kullanıcı" : "Sen"}: ${m.content}`)
+        .join("\n");
+      const summaryPrompt: WireMessage[] = [
+        {
+          role: "system",
+          content:
+            "Bir sohbet özeti güncelliyorsun. Karakterin İLERİDE hatırlaması " +
+            "gereken kalıcı bilgileri çıkar: kullanıcının adı, tercihleri, " +
+            "ilişki durumu/önemli anlar, söz verilen şeyler, devam eden konular. " +
+            "Kısa madde madde yaz. Önceki özeti koru, yenileri ekle.",
+        },
+        {
+          role: "user",
+          content:
+            `Önceki özet:\n${body.existingSummary || "(yok)"}\n\n` +
+            `Yeni konuşma:\n${convoText}\n\nGüncellenmiş özet:`,
+        },
+      ];
+      const newSummary = await callGrok(summaryPrompt, 400);
+      return json({ summary: newSummary });
+    }
+
+    // === GEÇMİŞ MODU — greeting veya clientHistory yoksa ===
+    if (!generateGreeting && !useClientHistory && (!userMessage || userMessage.trim() === "")) {
       const { data: msgs } = await db
         .from("messages")
         .select("role, content, kind")
@@ -194,17 +233,7 @@ Deno.serve(async (req: Request) => {
       });
     }
 
-    // === CEVAP MODU ===
-    // 2) Özet + son KEEP_RECENT mesajı çek
-    const { data: recentDesc } = await db
-      .from("messages")
-      .select("role, content")
-      .eq("conversation_id", conversationId)
-      .order("created_at", { ascending: false })
-      .limit(KEEP_RECENT);
-    const recent: WireMessage[] = (recentDesc ?? []).reverse();
-
-    // 3) Grok prompt'unu kur — mevcut ilişki seviyesine göre samimiyet talimatı ekle
+    // === CEVAP / SELAMLAMA MODU: sistem promptunu hazırla ===
     const currentLevel: number = convo.relationship_level ?? 1;
     let system = systemPrompt;
     const directive = await fetchDirective(characterId, personalityRole, currentLevel);
@@ -212,14 +241,67 @@ Deno.serve(async (req: Request) => {
     if (exHistory) {
       system += `\n\n[SHARED HISTORY — reference these memories naturally in conversation]\n${exHistory}`;
     }
+
+    // Kullanıcının "Anı Ekle" / "Davranış Ekle" ile eklediği kalıcı notlar
+    // (her rol için geçerli — ex'e özel değil).
+    const { data: memoryRows } = await db
+      .from("memories")
+      .select("content")
+      .eq("conversation_id", conversationId)
+      .order("created_at", { ascending: true });
+    const { data: behaviorRows } = await db
+      .from("conversation_behaviors")
+      .select("content")
+      .eq("conversation_id", conversationId)
+      .order("created_at", { ascending: true });
+    if (memoryRows && memoryRows.length > 0) {
+      system += `\n\n[MEMORIES — facts to remember about the user/relationship]\n` +
+        memoryRows.map((m) => `- ${m.content}`).join("\n");
+    }
+    if (behaviorRows && behaviorRows.length > 0) {
+      system += `\n\n[BEHAVIOR PREFERENCES — how the user wants you to act]\n` +
+        behaviorRows.map((b) => `- ${b.content}`).join("\n");
+    }
+
+    system += LANGUAGE_RULE;
+    if (useClientHistory && localSummary && localSummary.trim() !== "") {
+      system += `\n\n[Önceki konuşmalarınızın özeti]\n${localSummary}`;
+    }
+
+    // === SELAMLAMA MODU ===
+    if (generateGreeting) {
+      const greetingSystem =
+        system +
+        "\n\nKullanıcıyla ilk kez karşılaşıyorsun. Karakterine ve bu ilişki seviyesine tam uygun, " +
+        "samimi ve doğal bir açılış selamı yaz (1-2 cümle). Sadece selamı yaz, başka hiçbir şey ekleme.";
+      const greeting = await callGrok([{ role: "system", content: greetingSystem }], 150);
+      return json({ conversationId, reply: greeting, xp: convo.xp ?? 0, level: currentLevel, leveledUp: false });
+    }
+
     system += PHOTO_INSTRUCTION;
-    if (convo.summary && convo.summary.trim() !== "") {
+    if (!useClientHistory && convo.summary && convo.summary.trim() !== "") {
       system += `\n\n[Önceki konuşmalarınızın özeti]\n${convo.summary}`;
     }
+
+    // === CEVAP MODU ===
+    // 2) Geçmişi al — clientHistory varsa istemciden, yoksa DB'den
+    let recent: WireMessage[];
+    if (useClientHistory) {
+      recent = clientHistory!.slice(-KEEP_RECENT);
+    } else {
+      const { data: recentDesc } = await db
+        .from("messages")
+        .select("role, content")
+        .eq("conversation_id", conversationId)
+        .order("created_at", { ascending: false })
+        .limit(KEEP_RECENT);
+      recent = (recentDesc ?? []).reverse();
+    }
+
     const grokMessages: WireMessage[] = [
       { role: "system", content: system },
       ...recent,
-      { role: "user", content: userMessage },
+      { role: "user", content: userMessage! },
     ];
 
     const rawReply = await callGrok(grokMessages, 600);
@@ -250,20 +332,20 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    // 4) Kullanıcı mesajını ve cevabı DB'ye kaydet (varsa foto ayrı mesaj)
-    await db.from("messages").insert([
-      { conversation_id: conversationId, role: "user", content: userMessage, kind: "text" },
-      { conversation_id: conversationId, role: "assistant", content: reply, kind: "text" },
-    ]);
-    if (photoUrl) {
-      await db.from("messages").insert({
-        conversation_id: conversationId, role: "assistant", content: photoUrl, kind: "image",
-      });
+    // 4) Mesajları kaydet — clientHistory modunda istemci kendi saklıyor, DB'ye yazma
+    if (!useClientHistory) {
+      await db.from("messages").insert([
+        { conversation_id: conversationId, role: "user", content: userMessage!, kind: "text" },
+        { conversation_id: conversationId, role: "assistant", content: reply, kind: "text" },
+      ]);
+      if (photoUrl) {
+        await db.from("messages").insert({
+          conversation_id: conversationId, role: "assistant", content: photoUrl, kind: "image",
+        });
+      }
     }
 
     // 4b) XP / seviye güncelle
-    //   • mesaj sayacı +1; her 5'te bir +20
-    //   • kız foto gönderdiyse +30
     let xp: number = convo.xp ?? 0;
     const counter: number = (convo.msg_counter ?? 0) + 1;
     if (counter % MESSAGE_BATCH_SIZE === 0) xp += XP_PER_MESSAGE_BATCH;
@@ -280,7 +362,11 @@ Deno.serve(async (req: Request) => {
       })
       .eq("id", conversationId);
 
-    // 5) Eskiyen mesajları özete sıkıştır (gerekirse) — her tur değil, sadece taşınca
+    // 5) Özetleme — sadece DB modunda (clientHistory modunda istemci geçmişi yönetiyor)
+    if (useClientHistory) {
+      return json({ conversationId, reply, photoUrl, xp, level: newLevel, leveledUp });
+    }
+
     const { count: total } = await db
       .from("messages")
       .select("*", { count: "exact", head: true })

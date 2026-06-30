@@ -37,7 +37,7 @@ struct ProfileView: View {
 
     private var header: some View {
         HStack {
-            Text("Profile")
+            Text("Profil")
                 .font(.system(size: 22, weight: .bold))
                 .foregroundStyle(.white)
             Spacer()
@@ -129,12 +129,12 @@ struct ProfileView: View {
                     Text("Lumi PRO").font(.system(size: 16, weight: .bold))
                 }
                 .foregroundStyle(.white)
-                Text("Unlimited chats, voice & exclusive personas")
+                Text("Sınırsız sohbet, sesli mesaj ve özel karakterler")
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(.white.opacity(0.85))
             }
             Spacer()
-            Text("Upgrade")
+            Text("Yükselt")
                 .font(.system(size: 13, weight: .bold))
                 .foregroundStyle(Color(hex: 0xFF6F61))
                 .padding(.horizontal, 16)
@@ -192,7 +192,7 @@ struct ProfileView: View {
     private var notificationRow: some View {
         HStack(spacing: 14) {
             rowIcon("bell.fill", tint: Color(hex: 0xC77DFF))
-            Text("Notifications")
+            Text("Bildirimler")
                 .font(.system(size: 15, weight: .medium))
                 .foregroundStyle(.white)
             Spacer()
@@ -219,7 +219,7 @@ struct ProfileView: View {
             HStack(spacing: 8) {
                 Image(systemName: "rectangle.portrait.and.arrow.right")
                     .font(.system(size: 14))
-                Text("Log out").font(.system(size: 14, weight: .semibold))
+                Text("Çıkış Yap").font(.system(size: 14, weight: .semibold))
             }
             .foregroundStyle(Color(hex: 0xFF4081))
             .frame(maxWidth: .infinity)

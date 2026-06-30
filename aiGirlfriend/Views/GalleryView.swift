@@ -86,7 +86,7 @@ struct GalleryView: View {
     private var aiBadge: some View {
         HStack(spacing: 5) {
             Image(systemName: "sparkles").font(.system(size: 10))
-            Text("AI Companion").font(.system(size: 10, weight: .bold)).tracking(0.4)
+            Text("AI Arkadaş").font(.system(size: 10, weight: .bold)).tracking(0.4)
         }
         .foregroundStyle(.white)
         .padding(.horizontal, 10).padding(.vertical, 5)

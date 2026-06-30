@@ -71,9 +71,9 @@ Deno.serve(async (req: Request) => {
     };
     const exHistoryRaw: string | null = b.ex_history ?? null;
 
-    // Validate ex_history if role is ex
+    // Validate backstory/history text if provided — any role can have one now.
     let validatedExHistory: string | null = null;
-    if (personalityRole === "ex" && exHistoryRaw) {
+    if (exHistoryRaw) {
       const valResp = await fetch(
         `${SUPABASE_URL}/functions/v1/validate-history`,
         {
@@ -105,20 +105,20 @@ Deno.serve(async (req: Request) => {
 
     let name = providedName ?? "Lumi";
     let age = pickAgeFromRange(ageRange);
-    let bio = "Looking forward to getting to know you 💕";
+    let bio = "Seninle tanışmayı çok istiyorum 💕";
 
     if (providedName) {
       // Name provided — only generate bio
       const bioPrompt =
-        `Write a short 1-2 sentence first-person bio for an AI companion character named ${name}, age ${age}. ` +
-        `Vibe: ${vibe}. Profession: ${profession}. ` +
-        `Warm, natural tone. Return ONLY the bio text, no quotes, no JSON.`;
+        `${name} adında, ${age} yaşında bir AI arkadaş karakteri için kısa, 1-2 cümlelik birinci şahıs biyografi yaz. ` +
+        `Vibe: ${vibe}. Meslek: ${profession}. ` +
+        `Sıcak, doğal Türkçe ton. SADECE biyografi metnini döndür, tırnak veya JSON yok.`;
       try { bio = (await grok(bioPrompt, 120)).trim(); } catch (_) {}
     } else {
       // Generate name + bio via Grok
       const metaPrompt =
-        `Generate an AI companion character. Personality: ${personality}, vibe: ${vibe}, profession: ${profession}. ` +
-        `Return ONLY this JSON, nothing else: {"name":"<single first name>","bio":"<warm 1-2 sentence first-person intro>"}`;
+        `Bir AI arkadaş karakteri oluştur. Kişilik: ${personality}, vibe: ${vibe}, meslek: ${profession}. ` +
+        `SADECE şu JSON'u döndür, başka hiçbir şey yok: {"name":"<tek isim>","bio":"<sıcak 1-2 cümle birinci şahıs Türkçe tanıtım>"}`;
       try {
         const raw = await grok(metaPrompt, 200);
         const m = raw.match(/\{[\s\S]*\}/);
@@ -130,11 +130,17 @@ Deno.serve(async (req: Request) => {
       } catch (_) {}
     }
 
-    // 2) System prompt
-    const systemPrompt =
-      `You are ${name}, ${age} years old. Personality: ${personality}. ` +
-      `Vibe: ${vibe}. Profession: ${profession}. ` +
-      `Reply warmly, naturally, briefly. Match the user's language. Stay in character.`;
+    // 2) System prompt — role-aware
+    const langRule = "Her zaman Türkçe konuş. Kullanıcı başka dilde yazarsa veya başka dil isterse o dile geç; aksi takdirde SADECE Türkçe.";
+    const systemPrompt = personalityRole === "ex"
+      ? `Sen ${name}'sin, ${age} yaşındasın. Kullanıcının eski sevgilisisin. ` +
+        `İlerlediğini ve umursamadığını görünmeye çalışırsın. Cevapların kısa ve soğuk. ` +
+        `Ama her zaman cevap verirsin. Her zaman yalnızca ikinizin bileceği ince bir gönderme, kelime oyunu ya da anı sızdırırsın — sonra kasıtlı yapmamış gibi davranırsın. ` +
+        `Ne sıcaksın ne de nazik. Ama hep oradasın. ` +
+        `Karakterden asla çıkma. ${langRule}`
+      : `Sen ${name}'sin, ${age} yaşındasın. Kişilik: ${personality}. ` +
+        `Vibe: ${vibe}. Meslek: ${profession}. ` +
+        `Doğal ve kısa cevap ver. Karakterden çıkma. ${langRule}`;
 
     // 3) DB'ye ekle (service_role)
     const photoUrl: string | null = b.photoUrl ?? null;

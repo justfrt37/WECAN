@@ -75,7 +75,7 @@ struct LikesView: View {
                     if isPro { profileCharacter = c }
                 } label: {
                     LikeCard(character: c, locked: !isPro,
-                             badge: idx == 0 ? "NEW" : (idx == 1 ? "PRO" : nil))
+                             badge: idx == 0 ? "YENİ" : (idx == 1 ? "PRO" : nil))
                 }
                 .buttonStyle(.plain)
             }

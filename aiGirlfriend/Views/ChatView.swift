@@ -14,6 +14,7 @@ struct ChatView: View {
     @State private var showProfile = false
     @State private var addSheetTitle: String?
     @State private var addSheetText = ""
+    @State private var showBlockConfirm = false
     @State private var recognizer = SpeechRecognizer()
     @State private var voice = VoicePlayer()
 
@@ -76,6 +77,14 @@ struct ChatView: View {
                                     set: { if !$0 { addSheetTitle = nil; addSheetText = "" } })) {
             addSheet
         }
+        .alert("Bu karakteri engelle?", isPresented: $showBlockConfirm) {
+            Button("İptal", role: .cancel) {}
+            Button("Engelle", role: .destructive) {
+                BlockedCharactersStore.block(viewModel.character.id)
+            }
+        } message: {
+            Text("\(viewModel.character.name) artık Keşfet'te görünmeyecek. Bu sohbet silinmeyecek.")
+        }
     }
 
     /// "Anı Ekle" / "Davranış Ekle" için basit giriş sayfası.
@@ -98,6 +107,8 @@ struct ChatView: View {
                         .padding(12)
                         .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 14))
                     Button {
+                        let kind = addSheetTitle == "Anı Ekle" ? "memory" : "behavior"
+                        viewModel.saveNote(kind: kind, content: addSheetText)
                         addSheetTitle = nil; addSheetText = ""
                     } label: {
                         Text("Kaydet").font(.system(size: 16, weight: .bold))
@@ -198,7 +209,7 @@ struct ChatView: View {
                 Button { addSheetTitle = "Anı Ekle" } label: { Label("Anı Ekle", systemImage: "sparkles") }
                 Button { addSheetTitle = "Davranış Ekle" } label: { Label("Davranış Ekle", systemImage: "face.smiling") }
                 Button(role: .destructive) { viewModel.clearChat() } label: { Label("Sohbeti Temizle", systemImage: "trash") }
-                Button(role: .destructive) { } label: { Label("Blok", systemImage: "nosign") }
+                Button(role: .destructive) { showBlockConfirm = true } label: { Label("Blok", systemImage: "nosign") }
             } label: {
                 headerIcon(icon)
             }

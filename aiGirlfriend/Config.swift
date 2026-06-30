@@ -19,4 +19,9 @@ enum Config {
     static var chatFunctionURL: URL {
         URL(string: "\(supabaseURL)/functions/v1/chat")!
     }
+
+    /// "Anı Ekle" / "Davranış Ekle" notlarını kaydeden Edge Function.
+    static var addCharacterNoteFunctionURL: URL {
+        URL(string: "\(supabaseURL)/functions/v1/add-character-note")!
+    }
 }

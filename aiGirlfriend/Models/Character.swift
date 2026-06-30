@@ -28,6 +28,9 @@ struct Character: Identifiable, Codable, Hashable {
     var galleryURLs: [URL]       // profildeki kaydırılabilir resimler
     var chatPhotos: [URL]        // kızın sohbette gönderebileceği hazır fotoğraflar
     var personalityRole: String  // flirty | distant | shy | playful | devoted | crazy | ex
+    var createdBy: String?       // kullanıcı tarafından oluşturulmuşsa kullanıcı ID'si
+
+    var isUserCreated: Bool { createdBy != nil }
 
     private enum CodingKeys: String, CodingKey {
         case id, name, tagline
@@ -41,6 +44,7 @@ struct Character: Identifiable, Codable, Hashable {
         case galleryURLs = "gallery_urls"
         case chatPhotos = "chat_photos"
         case personalityRole = "personality_role"
+        case createdBy = "created_by"
     }
 
     init(
@@ -60,7 +64,8 @@ struct Character: Identifiable, Codable, Hashable {
         relationshipLevel: Int = 0,
         galleryURLs: [URL] = [],
         chatPhotos: [URL] = [],
-        personalityRole: String = "flirty"
+        personalityRole: String = "flirty",
+        createdBy: String? = nil
     ) {
         self.id = id
         self.name = name
@@ -79,6 +84,7 @@ struct Character: Identifiable, Codable, Hashable {
         self.galleryURLs = galleryURLs
         self.chatPhotos = chatPhotos
         self.personalityRole = personalityRole
+        self.createdBy = createdBy
     }
 
     /// Decode sırasında eski/eksik alanlar için güvenli varsayılanlar.
@@ -101,6 +107,7 @@ struct Character: Identifiable, Codable, Hashable {
         galleryURLs = (try? c.decode([URL].self, forKey: .galleryURLs)) ?? []
         chatPhotos = (try? c.decode([URL].self, forKey: .chatPhotos)) ?? []
         personalityRole = (try? c.decode(String.self, forKey: .personalityRole)) ?? "flirty"
+        createdBy = try? c.decodeIfPresent(String.self, forKey: .createdBy)
     }
 
     /// "Şehir, Ülke" — ikisi de varsa.

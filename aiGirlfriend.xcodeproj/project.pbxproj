@@ -81,9 +81,10 @@
 			};
 			buildConfigurationList = AA0000000000000000000008 /* Build configuration list for PBXProject "aiGirlfriend" */;
 			compatibilityVersion = "Xcode 15.0";
-			developmentRegion = en;
+			developmentRegion = tr;
 			hasScannedForEncodings = 0;
 			knownRegions = (
+				tr,
 				en,
 				Base,
 			);

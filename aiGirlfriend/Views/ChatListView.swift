@@ -73,17 +73,29 @@ struct ChatListView: View {
                 Message(role: ChatRole(rawValue: $0.role) ?? .assistant,
                         content: $0.content, createdAt: $0.date ?? Date())
             }
+            // Sunucuda mesaj yoksa (örn. yalnızca yerelde duran AI selamı) cihazdaki
+            // son mesaja düş — boş zaman tanıtım (tagline) yerine bunu göster.
+            let last = convMsgs.first ?? localLastMessage(for: conv)
             return ChatItem(character: ch, conversationID: conv.id,
-                            last: convMsgs.first, unread: unread, updatedAt: conv.updatedAt)
+                            last: last, unread: unread, updatedAt: conv.updatedAt)
         }
         isLoading = false
+    }
+
+    /// Cihazda saklı sohbetin son mesajını `LastMessage`'a çevirir (sunucuda kayıt yoksa kullanılır).
+    private func localLastMessage(for conv: ConversationSummary) -> LastMessage? {
+        guard let msg = LocalConversationStore.shared.load(for: conv.characterID)?.messages.last else { return nil }
+        let fmt = ISO8601DateFormatter()
+        fmt.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return LastMessage(conversationID: conv.id, content: msg.content,
+                            role: msg.role.rawValue, createdAt: fmt.string(from: msg.createdAt))
     }
 
     // MARK: Header
 
     private var header: some View {
         HStack {
-            Text("Chats")
+            Text("Sohbetler")
                 .font(.system(size: 28, weight: .bold))
                 .foregroundStyle(.white)
             Spacer()
@@ -189,9 +201,19 @@ private struct ChatHistoryRow: View {
             }
 
             VStack(alignment: .leading, spacing: 3) {
-                Text(item.character.name)
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(.white)
+                HStack(spacing: 6) {
+                    Text(item.character.name)
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(.white)
+                    if BlockedCharactersStore.isBlocked(item.character.id) {
+                        Text("Engellendi")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(.white.opacity(0.6))
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(.white.opacity(0.12), in: Capsule())
+                    }
+                }
                 subtitle
                     .font(.system(size: 14, weight: hasUnread ? .semibold : .regular))
                     .lineLimit(1)
