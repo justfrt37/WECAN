@@ -10,6 +10,7 @@ struct FeedView: View {
     @State private var currentIndex = 0
     @State private var dragOffset = CGSize.zero
     @State private var showTutorial = !UserDefaultsManager.shared.hasSeenSwipeTutorial
+    @State private var meetCandidate: Character?
 
     private var characters: [Character] {
         store.characters.filter { !BlockedCharactersStore.isBlocked($0.id) }
@@ -60,6 +61,17 @@ struct FeedView: View {
                         UserDefaultsManager.shared.hasSeenSwipeTutorial = true
                         showTutorial = false
                     }
+                }
+
+                if let candidate = meetCandidate {
+                    MeetConfirmOverlay(
+                        character: candidate,
+                        onYes: {
+                            meetCandidate = nil
+                            store.pendingMeetRequest = MeetRequest(character: candidate, prefillText: IcebreakerPool.next())
+                        },
+                        onNo: { meetCandidate = nil }
+                    )
                 }
             }
             .frame(width: geo.size.width, height: geo.size.height)
@@ -140,6 +152,7 @@ struct FeedView: View {
         let threshold: CGFloat = 100
         if abs(t.width) > threshold {
             let dir: CGFloat = t.width > 0 ? 1 : -1
+            let liked = characters.indices.contains(currentIndex) ? characters[currentIndex] : nil
             withAnimation(.easeOut(duration: 0.35)) {
                 dragOffset = CGSize(width: dir * w * 1.6, height: t.height * 0.3)
             }
@@ -148,6 +161,13 @@ struct FeedView: View {
                 guard !characters.isEmpty else { return }
                 currentIndex = (currentIndex + 1) % characters.count
                 store.currentCharacterID = characters[currentIndex].id
+            }
+            if dir == 1, let liked {
+                if UserDefaultsManager.shared.skipMeetConfirm {
+                    store.pendingMeetRequest = MeetRequest(character: liked, prefillText: IcebreakerPool.next())
+                } else {
+                    meetCandidate = liked
+                }
             }
         } else {
             withAnimation(.spring(response: 0.4, dampingFraction: 0.75)) {
@@ -354,6 +374,77 @@ private struct SwipeTutorialOverlay: View {
         .frame(maxWidth: .infinity)
         .padding(.vertical, 14)
         .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 16))
+    }
+}
+
+/// Beğeniden sonra "tanışmak ister misin?" onayı — evet derse sohbete geçer,
+/// hazır bir açılış mesajı ("prefillText") mesaj kutusuna önceden yazılır.
+private struct MeetConfirmOverlay: View {
+    let character: Character
+    let onYes: () -> Void
+    let onNo: () -> Void
+
+    @State private var dontShowAgain = false
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.6).ignoresSafeArea()
+
+            VStack(spacing: 18) {
+                Text("\(character.name) ile tanışmak ister misin?")
+                    .font(.system(size: 19, weight: .bold))
+                    .foregroundStyle(.white)
+                    .multilineTextAlignment(.center)
+
+                HStack(spacing: 12) {
+                    Button {
+                        persistPreference()
+                        onNo()
+                    } label: {
+                        Text("Vazgeç")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.85))
+                            .frame(maxWidth: .infinity).frame(height: 48)
+                            .background(.white.opacity(0.12), in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+
+                    Button {
+                        persistPreference()
+                        onYes()
+                    } label: {
+                        Text("Tanışalım")
+                            .font(.system(size: 15, weight: .bold))
+                            .foregroundStyle(.white)
+                            .frame(maxWidth: .infinity).frame(height: 48)
+                            .background(LinearGradient(colors: [AppColor.pink, Color(hex: 0xC4A7E7)],
+                                                       startPoint: .leading, endPoint: .trailing), in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                Button {
+                    dontShowAgain.toggle()
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: dontShowAgain ? "checkmark.square.fill" : "square")
+                            .foregroundStyle(dontShowAgain ? AppColor.pink : .white.opacity(0.5))
+                        Text("Bir daha gösterme")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.7))
+                    }
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(24)
+            .background(AppColor.bg2, in: RoundedRectangle(cornerRadius: 24))
+            .padding(.horizontal, 32)
+        }
+        .transition(.opacity)
+    }
+
+    private func persistPreference() {
+        if dontShowAgain { UserDefaultsManager.shared.skipMeetConfirm = true }
     }
 }
 

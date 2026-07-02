@@ -23,6 +23,10 @@ final class CharacterStore {
     /// ChatView anında açılsın diye — her seferinde yeniden yüklenmez).
     var chatCache: [UUID: [Message]] = [:]
 
+    /// Keşfet'te "tanışmak ister misin?" onayından sonra MainTabView bunu
+    /// görüp sohbete programatik olarak geçiş yapar (bkz. MeetRequest).
+    var pendingMeetRequest: MeetRequest?
+
     func setTyping(_ id: UUID, _ value: Bool) {
         if value { typingCharacterIDs.insert(id) } else { typingCharacterIDs.remove(id) }
     }

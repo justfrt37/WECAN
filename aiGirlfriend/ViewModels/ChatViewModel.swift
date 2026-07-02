@@ -49,9 +49,7 @@ final class ChatViewModel {
     func clearChat() {
         messages = []
         hasSyntheticOpening = false
-        store?.chatCache[character.id] = []
-        LocalConversationStore.shared.clear(for: character.id)
-        ReadTracker.setSeen(character.id, 0)
+        if let store { ChatMaintenance.clearChat(characterID: character.id, store: store) }
         Task { await loadHistory() }
     }
 
@@ -129,20 +127,6 @@ final class ChatViewModel {
             messages = [Message(role: .assistant, content: fallbackGreeting())]
         }
         hasSyntheticOpening = true
-    }
-
-    // MARK: - Anı / davranış kaydet
-
-    /// "Anı Ekle" / "Davranış Ekle" sayfasından çağrılır. `kind` "memory" ya da
-    /// "behavior" olmalı. Sunucu reddederse (Grok injection tespiti) ya da ağ
-    /// hatası olursa sessizce yutulur — sheet zaten kapanmış olur (ürün kararı).
-    func saveNote(kind: String, content: String) {
-        let text = content.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
-        let characterId = character.id
-        Task {
-            _ = try? await service.addCharacterNote(characterId: characterId, kind: kind, content: text)
-        }
     }
 
     private func fallbackGreeting() -> String {

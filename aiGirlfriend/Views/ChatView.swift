@@ -13,22 +13,28 @@ struct ChatView: View {
     @State private var showGallery = false
     @State private var showProfile = false
     @State private var addSheetTitle: String?
-    @State private var addSheetText = ""
     @State private var showBlockConfirm = false
+    @State private var isBlocked: Bool
     @State private var recognizer = SpeechRecognizer()
     @State private var voice = VoicePlayer()
+    @State private var didPrefill = false
 
     /// Tab içinde gösterilince alttaki tab bar'ın üstünde kalması için boşluk.
     var bottomInset: CGFloat = 0
     var showsBackButton: Bool = true
+    /// Keşfet'ten "tanışmak ister misin?" onayından geldiyse — mesaj kutusuna
+    /// önceden yazılır, kullanıcı düzenleyip gönderebilir (AI'ın kendi selamını değiştirmez).
+    var prefillText: String? = nil
 
     private let quickReplies = ["Selam 👋", "Naber? 💕", "Seni özledim", "Bugün ne yaptın?"]
     private let maxLevel = 10
 
-    init(character: Character, bottomInset: CGFloat = 0, showsBackButton: Bool = true) {
+    init(character: Character, bottomInset: CGFloat = 0, showsBackButton: Bool = true, prefillText: String? = nil) {
         _viewModel = State(initialValue: ChatViewModel(character: character))
+        _isBlocked = State(initialValue: BlockedCharactersStore.isBlocked(character.id))
         self.bottomInset = bottomInset
         self.showsBackButton = showsBackButton
+        self.prefillText = prefillText
     }
 
     var body: some View {
@@ -66,6 +72,10 @@ struct ChatView: View {
             viewModel.store = store
             viewModel.isVisible = true
             await viewModel.loadHistory()
+            if !didPrefill, let prefillText, !prefillText.isEmpty {
+                viewModel.inputText = prefillText
+                didPrefill = true
+            }
         }
         .fullScreenCover(isPresented: $showGallery) {
             GalleryView(character: viewModel.character)
@@ -74,57 +84,18 @@ struct ChatView: View {
             CharacterProfileView(character: viewModel.character)
         }
         .sheet(isPresented: Binding(get: { addSheetTitle != nil },
-                                    set: { if !$0 { addSheetTitle = nil; addSheetText = "" } })) {
-            addSheet
+                                    set: { if !$0 { addSheetTitle = nil } })) {
+            AddCharacterNoteSheet(character: viewModel.character, titleKey: addSheetTitle ?? "")
         }
         .alert("Bu karakteri engelle?", isPresented: $showBlockConfirm) {
             Button("İptal", role: .cancel) {}
             Button("Engelle", role: .destructive) {
                 BlockedCharactersStore.block(viewModel.character.id)
+                isBlocked = true
             }
         } message: {
             Text("\(viewModel.character.name) artık Keşfet'te görünmeyecek. Bu sohbet silinmeyecek.")
         }
-    }
-
-    /// "Anı Ekle" / "Davranış Ekle" için basit giriş sayfası.
-    private var addSheet: some View {
-        NavigationStack {
-            ZStack {
-                AppColor.bg.ignoresSafeArea()
-                VStack(spacing: 16) {
-                    Text(addSheetTitle == "Anı Ekle"
-                         ? "\(viewModel.character.name) bunu hatırlasın:"
-                         : "\(viewModel.character.name) böyle davransın:")
-                        .font(.system(size: 15))
-                        .foregroundStyle(.white.opacity(0.8))
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    TextField("", text: $addSheetText,
-                              prompt: Text(addSheetTitle == "Anı Ekle" ? "Örn. doğum günüm 5 Mayıs" : "Örn. bana hep 'aşkım' de")
-                                .foregroundColor(.white.opacity(0.4)), axis: .vertical)
-                        .lineLimit(3...6)
-                        .foregroundStyle(.white).tint(AppColor.pink)
-                        .padding(12)
-                        .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 14))
-                    Button {
-                        let kind = addSheetTitle == "Anı Ekle" ? "memory" : "behavior"
-                        viewModel.saveNote(kind: kind, content: addSheetText)
-                        addSheetTitle = nil; addSheetText = ""
-                    } label: {
-                        Text("Kaydet").font(.system(size: 16, weight: .bold))
-                            .foregroundStyle(.white).frame(maxWidth: .infinity).frame(height: 50)
-                            .background(LinearGradient(colors: [AppColor.pink, Color(hex: 0xC4A7E7)],
-                                                       startPoint: .leading, endPoint: .trailing), in: Capsule())
-                    }
-                    .buttonStyle(.plain)
-                    Spacer()
-                }
-                .padding(20)
-            }
-            .navigationTitle(addSheetTitle ?? "")
-            .navigationBarTitleDisplayMode(.inline)
-        }
-        .presentationDetents([.medium])
     }
 
     // MARK: Header
@@ -209,7 +180,14 @@ struct ChatView: View {
                 Button { addSheetTitle = "Anı Ekle" } label: { Label("Anı Ekle", systemImage: "sparkles") }
                 Button { addSheetTitle = "Davranış Ekle" } label: { Label("Davranış Ekle", systemImage: "face.smiling") }
                 Button(role: .destructive) { viewModel.clearChat() } label: { Label("Sohbeti Temizle", systemImage: "trash") }
-                Button(role: .destructive) { showBlockConfirm = true } label: { Label("Blok", systemImage: "nosign") }
+                if isBlocked {
+                    Button {
+                        BlockedCharactersStore.unblock(viewModel.character.id)
+                        isBlocked = false
+                    } label: { Label("Engeli Kaldır", systemImage: "checkmark.circle") }
+                } else {
+                    Button(role: .destructive) { showBlockConfirm = true } label: { Label("Blok", systemImage: "nosign") }
+                }
             } label: {
                 headerIcon(icon)
             }

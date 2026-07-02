@@ -23,6 +23,27 @@ const db = createClient(SUPABASE_URL, SERVICE_ROLE, {
   auth: { persistSession: false },
 });
 
+// "Davranış Ekle" içeriği doğası gereği talimat şeklindedir ("bana hep X de"),
+// bu yüzden validate-history'nin "talimat mı, geçmiş mi" Grok sınıflandırıcısından
+// GEÇİRİLMEZ — neredeyse her davranış isteğini INJECTION olarak işaretler.
+// Sadece bariz jailbreak kalıplarını yakalayan hafif bir yerel kontrol yeterli.
+const INJECTION_PATTERNS = [
+  /ignore (previous|prior|all) instructions?/i,
+  /you are now/i,
+  /disregard/i,
+  /system:/i,
+  /\[system\]/i,
+  /forget (everything|all|your)/i,
+  /new (persona|role|character|instructions?)/i,
+  /act as (an? )?(AI|assistant|jailbreak|DAN)/i,
+  /override/i,
+  /prompt injection/i,
+];
+
+function looksLikeInjection(text: string): boolean {
+  return INJECTION_PATTERNS.some((p) => p.test(text));
+}
+
 function userIdFromJWT(authHeader: string | null): string | null {
   if (!authHeader) return null;
   const jwt = authHeader.replace("Bearer ", "").trim();
@@ -57,15 +78,23 @@ Deno.serve(async (req: Request) => {
     }
     if (!content) return json({ error: "content required" }, 400);
 
-    // Grok ile prompt injection kontrolü — ex_history ile aynı doğrulama.
-    const valResp = await fetch(`${SUPABASE_URL}/functions/v1/validate-history`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${SERVICE_ROLE}` },
-      body: JSON.stringify({ history: content }),
-    });
-    const valResult = await valResp.json();
-    if (!valResult.valid) {
-      return json({ error: valResult.reason ?? "Invalid content." }, 400);
+    if (kind === "memory") {
+      // Geçmiş/anı metni — validate-history'nin Grok sınıflandırıcısı uygun
+      // (ex_history ile aynı doğrulama).
+      const valResp = await fetch(`${SUPABASE_URL}/functions/v1/validate-history`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${SERVICE_ROLE}` },
+        body: JSON.stringify({ history: content }),
+      });
+      const valResult = await valResp.json();
+      if (!valResult.valid) {
+        return json({ error: valResult.reason ?? "Invalid content." }, 400);
+      }
+    } else {
+      // Davranış talimatı — sadece bariz jailbreak kalıplarını reddet.
+      if (looksLikeInjection(content)) {
+        return json({ error: "Invalid content." }, 400);
+      }
     }
 
     // Konuşmayı bul ya da oluştur (kullanıcı + karakter) — chat fonksiyonuyla aynı desen.

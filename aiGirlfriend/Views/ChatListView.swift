@@ -176,9 +176,19 @@ struct ChatListView: View {
 private struct ChatHistoryRow: View {
     let item: ChatItem
     let isTyping: Bool
+    @Environment(CharacterStore.self) private var store
     @State private var showProfile = false
+    @State private var addSheetTitle: String?
+    @State private var showBlockConfirm = false
+    @State private var isBlocked: Bool
 
     private var hasUnread: Bool { item.unread > 0 }
+
+    init(item: ChatItem, isTyping: Bool) {
+        self.item = item
+        self.isTyping = isTyping
+        _isBlocked = State(initialValue: BlockedCharactersStore.isBlocked(item.character.id))
+    }
 
     var body: some View {
         HStack(spacing: 12) {
@@ -189,10 +199,20 @@ private struct ChatHistoryRow: View {
                 } placeholder: { AppColor.pink }
                 .frame(width: 52, height: 52)
                 .clipShape(Circle())
+                .overlay {
+                    if isBlocked {
+                        Circle().fill(Color.black.opacity(0.6))
+                        Image(systemName: "nosign")
+                            .font(.system(size: 20, weight: .semibold))
+                            .foregroundStyle(.white)
+                    }
+                }
                 .overlay(alignment: .bottomTrailing) {
-                    Circle().fill(Color(hex: 0x22C55E))
-                        .frame(width: 14, height: 14)
-                        .overlay(Circle().strokeBorder(AppColor.bg, lineWidth: 2))
+                    if !isBlocked {
+                        Circle().fill(Color(hex: 0x22C55E))
+                            .frame(width: 14, height: 14)
+                            .overlay(Circle().strokeBorder(AppColor.bg, lineWidth: 2))
+                    }
                 }
             }
             .buttonStyle(.plain)
@@ -201,19 +221,9 @@ private struct ChatHistoryRow: View {
             }
 
             VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 6) {
-                    Text(item.character.name)
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(.white)
-                    if BlockedCharactersStore.isBlocked(item.character.id) {
-                        Text("Engellendi")
-                            .font(.system(size: 10, weight: .bold))
-                            .foregroundStyle(.white.opacity(0.6))
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(.white.opacity(0.12), in: Capsule())
-                    }
-                }
+                Text(item.character.name)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(.white)
                 subtitle
                     .font(.system(size: 14, weight: hasUnread ? .semibold : .regular))
                     .lineLimit(1)
@@ -230,6 +240,34 @@ private struct ChatHistoryRow: View {
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 10)
+        .contextMenu {
+            Button { showProfile = true } label: { Label("Profili Görüntüle", systemImage: "person.circle") }
+            Button { addSheetTitle = "Anı Ekle" } label: { Label("Anı Ekle", systemImage: "sparkles") }
+            Button { addSheetTitle = "Davranış Ekle" } label: { Label("Davranış Ekle", systemImage: "face.smiling") }
+            Button(role: .destructive) {
+                ChatMaintenance.clearChat(characterID: item.character.id, store: store)
+            } label: { Label("Sohbeti Temizle", systemImage: "trash") }
+            if isBlocked {
+                Button {
+                    BlockedCharactersStore.unblock(item.character.id)
+                    isBlocked = false
+                } label: { Label("Engeli Kaldır", systemImage: "checkmark.circle") }
+            } else {
+                Button(role: .destructive) { showBlockConfirm = true } label: { Label("Blok", systemImage: "nosign") }
+            }
+        }
+        .sheet(isPresented: Binding(get: { addSheetTitle != nil }, set: { if !$0 { addSheetTitle = nil } })) {
+            AddCharacterNoteSheet(character: item.character, titleKey: addSheetTitle ?? "")
+        }
+        .alert("Bu karakteri engelle?", isPresented: $showBlockConfirm) {
+            Button("İptal", role: .cancel) {}
+            Button("Engelle", role: .destructive) {
+                BlockedCharactersStore.block(item.character.id)
+                isBlocked = true
+            }
+        } message: {
+            Text("\(item.character.name) artık Keşfet'te görünmeyecek. Bu sohbet silinmeyecek.")
+        }
     }
 
     @ViewBuilder

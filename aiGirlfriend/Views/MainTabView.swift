@@ -6,6 +6,13 @@
 
 import SwiftUI
 
+/// Keşfet'te "tanışmak ister misin?" onayından gelen sohbet açma isteği —
+/// mesaj kutusuna önceden yazılacak açılış metnini de taşır.
+struct MeetRequest: Hashable {
+    let character: Character
+    let prefillText: String
+}
+
 enum MainTab: Int, CaseIterable, Identifiable {
     case discover, chat, explore, likes, profile
     var id: Int { rawValue }
@@ -35,11 +42,12 @@ enum MainTab: Int, CaseIterable, Identifiable {
 struct MainTabView: View {
     @Environment(CharacterStore.self) private var store
     @State private var selection: MainTab = .discover
+    @State private var path = NavigationPath()
 
     var body: some View {
         // Tek NavigationStack: ChatView'a push edilince kök (tab bar dahil) yerini
         // alır → chat tam sayfa açılır, tab bar gizlenir (sheet değil).
-        NavigationStack {
+        NavigationStack(path: $path) {
             ZStack(alignment: .bottom) {
                 AppColor.bg.ignoresSafeArea()
 
@@ -59,6 +67,15 @@ struct MainTabView: View {
             .toolbar(.hidden, for: .navigationBar)
             .navigationDestination(for: Character.self) { character in
                 ChatView(character: character)
+            }
+            .navigationDestination(for: MeetRequest.self) { request in
+                ChatView(character: request.character, prefillText: request.prefillText)
+            }
+            .onChange(of: store.pendingMeetRequest) { _, request in
+                if let request {
+                    path.append(request)
+                    store.pendingMeetRequest = nil
+                }
             }
         }
         .tint(AppColor.pink)

@@ -22,4 +22,10 @@ enum BlockedCharactersStore {
         m[characterID.uuidString] = true
         map = m
     }
+
+    static func unblock(_ characterID: UUID) {
+        var m = map
+        m.removeValue(forKey: characterID.uuidString)
+        map = m
+    }
 }

@@ -16,6 +16,7 @@ final class UserDefaultsManager {
         static let accessToken = "auth.accessToken"
         static let refreshToken = "auth.refreshToken"
         static let hasSeenSwipeTutorial = "feed.hasSeenSwipeTutorial"
+        static let skipMeetConfirm = "feed.skipMeetConfirm"
     }
 
     var userId: String? {
@@ -36,5 +37,12 @@ final class UserDefaultsManager {
     var hasSeenSwipeTutorial: Bool {
         get { defaults.bool(forKey: Keys.hasSeenSwipeTutorial) }
         set { defaults.set(newValue, forKey: Keys.hasSeenSwipeTutorial) }
+    }
+
+    /// Kullanıcı "bir daha gösterme" kutucuğunu işaretlediyse, Keşfet'te beğenince
+    /// artık "tanışmak ister misin?" onayı sorulmaz.
+    var skipMeetConfirm: Bool {
+        get { defaults.bool(forKey: Keys.skipMeetConfirm) }
+        set { defaults.set(newValue, forKey: Keys.skipMeetConfirm) }
     }
 }
