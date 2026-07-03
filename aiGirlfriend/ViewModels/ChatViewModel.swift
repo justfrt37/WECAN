@@ -70,6 +70,8 @@ final class ChatViewModel {
     // MARK: - Geçmişi yükle
 
     func loadHistory() async {
+        NotificationScheduler.shared.cancelJealousyTimer(for: character.id)
+
         // 1. Bellek içi önbellek
         if let cached = store?.chatCache[character.id], !cached.isEmpty {
             messages = cached
@@ -163,6 +165,7 @@ final class ChatViewModel {
         let wantsPhoto = photoRequested(text)
         messages.append(Message(role: .user, content: text))
         updateCache()
+        NotificationScheduler.shared.noteUserSent(character: character)
         inputText = ""
         isSending = true
         errorMessage = nil

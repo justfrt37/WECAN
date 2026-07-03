@@ -11,12 +11,15 @@
 //
 
 import SwiftUI
+import UserNotifications
 
 @main
 struct aiGirlfriendApp: App {
     @State private var navigationCenter = NavigationCenter()
     @State private var auth = AuthService()
     @State private var store = CharacterStore()
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var notificationDelegate: NotificationDelegate?
 
     var body: some Scene {
         WindowGroup {
@@ -31,7 +34,22 @@ struct aiGirlfriendApp: App {
             .environment(auth)
             .environment(store)
             .preferredColorScheme(.dark)
-            .task { PurchaseService.shared.configure() }
+            .task {
+                PurchaseService.shared.configure()
+                let delegate = NotificationDelegate(store: store)
+                notificationDelegate = delegate
+                UNUserNotificationCenter.current().delegate = delegate
+            }
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            switch newPhase {
+            case .active:
+                NotificationScheduler.shared.onForeground(characters: store.characters)
+            case .background:
+                NotificationScheduler.shared.onBackground(characters: store.characters)
+            default:
+                break
+            }
         }
     }
 }
