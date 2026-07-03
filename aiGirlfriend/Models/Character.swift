@@ -28,6 +28,7 @@ struct Character: Identifiable, Codable, Hashable {
     var galleryURLs: [URL]       // profildeki kaydırılabilir resimler
     var chatPhotos: [URL]        // kızın sohbette gönderebileceği hazır fotoğraflar
     var personalityRole: String  // flirty | distant | shy | playful | devoted | crazy | ex
+    var vibe: String             // Sweet | Mysterious | Energetic | Elegant — builder_selections.vibe
     var createdBy: String?       // kullanıcı tarafından oluşturulmuşsa kullanıcı ID'si
 
     var isUserCreated: Bool { createdBy != nil }
@@ -45,6 +46,13 @@ struct Character: Identifiable, Codable, Hashable {
         case chatPhotos = "chat_photos"
         case personalityRole = "personality_role"
         case createdBy = "created_by"
+    }
+
+    /// Separate from `CodingKeys` on purpose: `builder_selections` has no matching stored
+    /// property (only its nested `vibe` is kept), and adding it to `CodingKeys` breaks
+    /// `Encodable` synthesis (no property for the synthesizer to encode it from).
+    private enum BuilderSelectionsCodingKey: String, CodingKey {
+        case builderSelections = "builder_selections"
     }
 
     init(
@@ -65,6 +73,7 @@ struct Character: Identifiable, Codable, Hashable {
         galleryURLs: [URL] = [],
         chatPhotos: [URL] = [],
         personalityRole: String = "flirty",
+        vibe: String = "Sweet",
         createdBy: String? = nil
     ) {
         self.id = id
@@ -84,6 +93,7 @@ struct Character: Identifiable, Codable, Hashable {
         self.galleryURLs = galleryURLs
         self.chatPhotos = chatPhotos
         self.personalityRole = personalityRole
+        self.vibe = vibe
         self.createdBy = createdBy
     }
 
@@ -107,7 +117,19 @@ struct Character: Identifiable, Codable, Hashable {
         galleryURLs = (try? c.decode([URL].self, forKey: .galleryURLs)) ?? []
         chatPhotos = (try? c.decode([URL].self, forKey: .chatPhotos)) ?? []
         personalityRole = (try? c.decode(String.self, forKey: .personalityRole)) ?? "flirty"
+        if let bsc = try? decoder.container(keyedBy: BuilderSelectionsCodingKey.self),
+           let builderSelections = try? bsc.decodeIfPresent(BuilderSelections.self, forKey: .builderSelections),
+           let decodedVibe = builderSelections.vibe {
+            vibe = decodedVibe
+        } else {
+            vibe = "Sweet"
+        }
         createdBy = try? c.decodeIfPresent(String.self, forKey: .createdBy)
+    }
+
+    /// `builder_selections` jsonb payload — only `vibe` is needed client-side today.
+    private struct BuilderSelections: Decodable {
+        let vibe: String?
     }
 
     /// "Şehir, Ülke" — ikisi de varsa.
