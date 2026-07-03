@@ -57,7 +57,7 @@ struct ProfileView: View {
         VStack(spacing: 12) {
             ZStack {
                 Circle()
-                    .fill(LinearGradient(colors: [Color(hex: 0xFF4081), Color(hex: 0xA020F0)],
+                    .fill(LinearGradient(colors: [AppColor.pink, AppColor.amber],
                                          startPoint: .topLeading, endPoint: .bottomTrailing))
                     .frame(width: 88, height: 88)
                 Image(systemName: "person.fill")
@@ -73,7 +73,7 @@ struct ProfileView: View {
                     .foregroundStyle(.white)
                 Image(systemName: "checkmark.seal.fill")
                     .font(.system(size: 16))
-                    .foregroundStyle(Color(hex: 0xFF4081))
+                    .foregroundStyle(AppColor.pink)
             }
 
             Text("@alexm  ·  joined Mar 2025")
@@ -83,7 +83,7 @@ struct ProfileView: View {
         .padding(.vertical, 24)
         .frame(maxWidth: .infinity)
         .background(
-            LinearGradient(colors: [Color(hex: 0x2A1238), Color(hex: 0x3D1B4F)],
+            LinearGradient(colors: [Color(hex: 0x2E1E14), Color(hex: 0x3D2A1A)],
                            startPoint: .topLeading, endPoint: .bottomTrailing),
             in: RoundedRectangle(cornerRadius: 24)
         )
@@ -154,7 +154,7 @@ struct ProfileView: View {
 
     private var settingsMenu: some View {
         VStack(spacing: 0) {
-            menuRow("person.crop.circle.fill", "Edit profile", tint: Color(hex: 0xFF4081))
+            menuRow("person.crop.circle.fill", "Edit profile", tint: AppColor.pink)
             divider
             notificationRow
             divider
@@ -191,14 +191,14 @@ struct ProfileView: View {
 
     private var notificationRow: some View {
         HStack(spacing: 14) {
-            rowIcon("bell.fill", tint: Color(hex: 0xC77DFF))
+            rowIcon("bell.fill", tint: AppColor.amber)
             Text("Bildirimler")
                 .font(.system(size: 15, weight: .medium))
                 .foregroundStyle(.white)
             Spacer()
             Toggle("", isOn: $notificationsOn)
                 .labelsHidden()
-                .tint(Color(hex: 0xFF4081))
+                .tint(AppColor.pink)
         }
         .padding(.horizontal, 18)
         .frame(height: 54)
@@ -221,13 +221,13 @@ struct ProfileView: View {
                     .font(.system(size: 14))
                 Text("Çıkış Yap").font(.system(size: 14, weight: .semibold))
             }
-            .foregroundStyle(Color(hex: 0xFF4081))
+            .foregroundStyle(AppColor.pink)
             .frame(maxWidth: .infinity)
             .frame(height: 40)
-            .background(Color(hex: 0xFF4081).opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+            .background(AppColor.pink.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
             .overlay(
                 RoundedRectangle(cornerRadius: 12)
-                    .strokeBorder(Color(hex: 0xFF4081).opacity(0.2), lineWidth: 1)
+                    .strokeBorder(AppColor.pink.opacity(0.2), lineWidth: 1)
             )
         }
         .buttonStyle(.plain)

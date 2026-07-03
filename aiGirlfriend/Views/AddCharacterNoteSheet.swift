@@ -39,7 +39,7 @@ struct AddCharacterNoteSheet: View {
                     } label: {
                         Text("Kaydet").font(.system(size: 16, weight: .bold))
                             .foregroundStyle(.white).frame(maxWidth: .infinity).frame(height: 50)
-                            .background(LinearGradient(colors: [AppColor.pink, Color(hex: 0xC4A7E7)],
+                            .background(LinearGradient(colors: [AppColor.pink, AppColor.amber],
                                                        startPoint: .leading, endPoint: .trailing), in: Capsule())
                     }
                     .buttonStyle(.plain)

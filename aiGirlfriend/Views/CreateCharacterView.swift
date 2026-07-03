@@ -225,7 +225,7 @@ struct CreateCharacterView: View {
                     .background(
                         LinearGradient(
                             colors: selected
-                                ? [AppColor.pink.opacity(0.45), Color(hex: 0x7A3FA0).opacity(0.45)]
+                                ? [AppColor.pink.opacity(0.45), AppColor.amber.opacity(0.45)]
                                 : [Color.white.opacity(0.06), Color.white.opacity(0.06)],
                             startPoint: .topLeading, endPoint: .bottomTrailing),
                         in: RoundedRectangle(cornerRadius: 18)
@@ -269,7 +269,7 @@ struct CreateCharacterView: View {
                     .background(
                         LinearGradient(
                             colors: selected
-                                ? [AppColor.pink.opacity(0.45), Color(hex: 0x7A3FA0).opacity(0.45)]
+                                ? [AppColor.pink.opacity(0.45), AppColor.amber.opacity(0.45)]
                                 : [Color.white.opacity(0.06), Color.white.opacity(0.06)],
                             startPoint: .topLeading, endPoint: .bottomTrailing),
                         in: RoundedRectangle(cornerRadius: 18)
@@ -369,7 +369,7 @@ struct CreateCharacterView: View {
                 .foregroundStyle(.white)
                 .frame(maxWidth: .infinity).frame(height: 54)
                 .background(
-                    LinearGradient(colors: [AppColor.pink, Color(hex: 0xC4A7E7)],
+                    LinearGradient(colors: [AppColor.pink, AppColor.amber],
                                    startPoint: .leading, endPoint: .trailing),
                     in: Capsule()
                 )
@@ -458,7 +458,7 @@ struct CreateCharacterView: View {
                                 .foregroundStyle(.white)
                                 .frame(maxWidth: .infinity).frame(height: 54)
                                 .background(
-                                    LinearGradient(colors: [AppColor.pink, Color(hex: 0xC4A7E7)],
+                                    LinearGradient(colors: [AppColor.pink, AppColor.amber],
                                                    startPoint: .leading, endPoint: .trailing),
                                     in: Capsule())
                         }

@@ -121,7 +121,7 @@ struct ExploreView: View {
                 .padding(.vertical, 10)
                 .background {
                     if active {
-                        LinearGradient(colors: [AppColor.pink, Color(hex: 0xFF4081)],
+                        LinearGradient(colors: [AppColor.pink, AppColor.amber],
                                        startPoint: .top, endPoint: .bottom)
                     } else {
                         Color.white.opacity(0.08)
@@ -216,7 +216,7 @@ struct ExploreView: View {
         .frame(maxWidth: .infinity)
         .frame(height: 220)
         .background(
-            LinearGradient(colors: [AppColor.pink.opacity(0.55), Color(hex: 0x7A3FA0).opacity(0.55)],
+            LinearGradient(colors: [AppColor.pink.opacity(0.55), AppColor.amber.opacity(0.55)],
                            startPoint: .topLeading, endPoint: .bottomTrailing),
             in: RoundedRectangle(cornerRadius: 18)
         )

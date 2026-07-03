@@ -45,7 +45,7 @@ struct ChatView: View {
 
             VStack(spacing: 0) {
                 header
-                    .background(Color(hex: 0x1A0826).opacity(0.8))
+                    .background(AppColor.card.opacity(0.8))
                     .overlay(Rectangle().frame(height: 1).foregroundStyle(.white.opacity(0.08)),
                              alignment: .bottom)
 
@@ -146,7 +146,7 @@ struct ChatView: View {
         return ZStack {
             Circle().stroke(.white.opacity(0.15), lineWidth: 2.5)
             Circle().trim(from: 0, to: progress)
-                .stroke(LinearGradient(colors: [AppColor.pink, Color(hex: 0xC4A7E7)],
+                .stroke(LinearGradient(colors: [AppColor.pink, AppColor.amber],
                                        startPoint: .topLeading, endPoint: .bottomTrailing),
                         style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
                 .rotationEffect(.degrees(-90))
@@ -163,7 +163,7 @@ struct ChatView: View {
                 .foregroundStyle(.white)
                 .frame(width: 20, height: 20)
                 .background(
-                    LinearGradient(colors: [AppColor.pink, Color(hex: 0xC4A7E7)],
+                    LinearGradient(colors: [AppColor.pink, AppColor.amber],
                                    startPoint: .topLeading, endPoint: .bottomTrailing),
                     in: Circle()
                 )
@@ -272,7 +272,7 @@ struct ChatView: View {
             .padding(.horizontal, 14)
         }
         .padding(.vertical, 8)
-        .background(Color(hex: 0x1A0826).opacity(0.6))
+        .background(AppColor.card.opacity(0.6))
     }
 
     // MARK: Input
@@ -307,7 +307,7 @@ struct ChatView: View {
                     .foregroundStyle(.white)
                     .frame(width: 46, height: 46)
                     .background(
-                        LinearGradient(colors: [AppColor.pink, Color(hex: 0xC4A7E7)],
+                        LinearGradient(colors: [AppColor.pink, AppColor.amber],
                                        startPoint: .topLeading, endPoint: .bottomTrailing),
                         in: Circle()
                     )
@@ -318,7 +318,7 @@ struct ChatView: View {
         .padding(.horizontal, 14)
         .padding(.top, 10)
         .padding(.bottom, 10 + bottomInset)
-        .background(Color(hex: 0x1A0826).opacity(0.9))
+        .background(AppColor.card.opacity(0.9))
     }
 
     /// Mikrofon: kaydı başlat/durdur. Durunca metni gönderir (sesli mesaj → metin).
@@ -362,7 +362,7 @@ private struct ChatBubble: View {
                     .padding(.horizontal, 14).padding(.vertical, 10)
                     .background {
                         if message.isUser {
-                            LinearGradient(colors: [AppColor.pink, Color(hex: 0xC4A7E7)],
+                            LinearGradient(colors: [AppColor.pink, AppColor.amber],
                                            startPoint: .topLeading, endPoint: .bottomTrailing)
                         } else {
                             Color.white.opacity(0.1)

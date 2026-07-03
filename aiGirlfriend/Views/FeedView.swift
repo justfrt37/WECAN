@@ -417,7 +417,7 @@ private struct MeetConfirmOverlay: View {
                             .font(.system(size: 15, weight: .bold))
                             .foregroundStyle(.white)
                             .frame(maxWidth: .infinity).frame(height: 48)
-                            .background(LinearGradient(colors: [AppColor.pink, Color(hex: 0xC4A7E7)],
+                            .background(LinearGradient(colors: [AppColor.pink, AppColor.amber],
                                                        startPoint: .leading, endPoint: .trailing), in: Capsule())
                     }
                     .buttonStyle(.plain)

@@ -130,7 +130,7 @@ struct CharacterProfileView: View {
             Circle()
                 .trim(from: 0, to: progress)
                 .stroke(
-                    LinearGradient(colors: [AppColor.pink, Color(hex: 0xC4A7E7)],
+                    LinearGradient(colors: [AppColor.pink, AppColor.amber],
                                    startPoint: .topLeading, endPoint: .bottomTrailing),
                     style: StrokeStyle(lineWidth: 3, lineCap: .round)
                 )
@@ -256,7 +256,7 @@ struct CharacterProfileView: View {
                     .foregroundStyle(.white)
                     .frame(maxWidth: .infinity).frame(height: 52)
                     .background(
-                        LinearGradient(colors: [AppColor.pink, Color(hex: 0xC4A7E7)],
+                        LinearGradient(colors: [AppColor.pink, AppColor.amber],
                                        startPoint: .leading, endPoint: .trailing),
                         in: RoundedRectangle(cornerRadius: 16)
                     )

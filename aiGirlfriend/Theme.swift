@@ -18,11 +18,12 @@ extension Color {
     }
 }
 
-/// Tasarım renk paleti (AIGUI .pen).
+/// Tasarım renk paleti — "Editorial Rust" (2026-07-03, mor/pembe temadan geçiş).
 enum AppColor {
-    static let bg = Color(hex: 0x0F0518)          // koyu arka plan
-    static let bg2 = Color(hex: 0x1F0E2E)         // gradient ortası
-    static let pink = Color(hex: 0xFF4D8F)        // vurgu / aktif
-    static let pinkSoft = Color(hex: 0xFF85B0)    // meslek vb.
-    static let card = Color(hex: 0x241433)        // kart
+    static let bg = Color(hex: 0x141211)          // koyu arka plan
+    static let bg2 = Color(hex: 0x1E1815)         // gradient ortası
+    static let pink = Color(hex: 0xC45C3E)        // vurgu / aktif (kavrulmuş turuncu-kiremit)
+    static let pinkSoft = Color(hex: 0xE09C78)    // meslek vb. (yumuşak kiremit)
+    static let card = Color(hex: 0x241E1C)        // kart
+    static let amber = Color(hex: 0xE8A15C)       // gradient ikinci durağı (sıcak altın)
 }

@@ -13,7 +13,7 @@ struct SplashView: View {
     var body: some View {
         ZStack {
             LinearGradient(
-                colors: [Color(hex: 0x0F0518), Color(hex: 0x1F0E2E), Color(hex: 0x0F0518)],
+                colors: [AppColor.bg, AppColor.bg2, AppColor.bg],
                 startPoint: .top,
                 endPoint: .bottom
             )
@@ -22,7 +22,7 @@ struct SplashView: View {
             VStack(spacing: 20) {
                 Image(systemName: "heart.circle.fill")
                     .font(.system(size: 80))
-                    .foregroundStyle(Color(hex: 0xFF4D8F))
+                    .foregroundStyle(AppColor.pink)
 
                 Text("aiGirlfriend")
                     .font(.largeTitle.bold())
