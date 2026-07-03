@@ -2,7 +2,8 @@
 //  ChatViewModel.swift
 //  Sohbet ekranının durumunu yönetir.
 //  Tüm karakterler için: geçmiş cihazda, yerel özetler (her 20 mesajda bir).
-//  Sunucu yalnızca XP / level / msg_counter tutar.
+//  XP/terfi hesabı istemcide (bkz. RelationshipXP) — sunucu yalnızca güncel
+//  `relationship_level` değerini saklar/döner.
 //
 
 import Foundation
@@ -21,9 +22,17 @@ final class ChatViewModel {
     var isLoadingHistory: Bool = true
     var errorMessage: String?
 
+    struct LevelUpEvent: Equatable {
+        let fromLevel: Int
+        let toLevel: Int
+        let fromStage: String
+        let toStage: String
+    }
+
     var relationshipLevel: Int
-    var xp: Int = 0
-    var leveledUpTo: Int?
+    /// Güncel seviyenin ne kadarı tamamlandı (0...1) — üst bardaki halka için.
+    var levelProgress: Double = 0
+    var levelUpEvent: LevelUpEvent?
 
     var relationshipStage: String { Relationship.stageName(relationshipLevel, role: character.personalityRole) }
 
@@ -75,7 +84,7 @@ final class ChatViewModel {
 
         // 2. Cihaz yerel depolama
         if let stored = LocalConversationStore.shared.load(for: character.id) {
-            xp = stored.xp
+            levelProgress = stored.levelProgress
             relationshipLevel = stored.level
             messages = stored.messages
             hasSyntheticOpening = false
@@ -94,7 +103,9 @@ final class ChatViewModel {
         do {
             let history = try await service.loadHistory(character: character)
             relationshipLevel = history.level
-            xp = history.xp
+            // Eski mutlak XP sistemi kaldırıldı — ilk göç sonrası mevcut seviyenin
+            // ilerlemesi 0'dan başlar (küçük kozmetik sıfırlama, işlevi etkilemez).
+            levelProgress = 0
             if history.messages.isEmpty {
                 await attachAIGreeting()
             } else {
@@ -104,10 +115,11 @@ final class ChatViewModel {
                 // Sunucudan gelen geçmişi cihaza kaydet
                 let stored = LocalConversationStore.Stored(
                     messages: history.messages,
-                    xp: xp,
+                    xp: history.xp,
                     level: relationshipLevel,
                     summary: "",
-                    summarizedCount: 0
+                    summarizedCount: 0,
+                    levelProgress: levelProgress
                 )
                 LocalConversationStore.shared.save(stored, for: character.id)
             }
@@ -132,13 +144,13 @@ final class ChatViewModel {
     private func fallbackGreeting() -> String {
         let name = character.name
         switch character.personalityRole {
-        case "ex":      return String(localized: "…Sen misin? Bir süredir haber vermemiştin.")
-        case "shy":     return String(localized: "O-oh, selam... \(name) burada. Nasılsın? 🙈")
-        case "distant": return String(localized: "\(name). Uzun zaman oldu.")
-        case "playful": return String(localized: "Heyyy! 🎉 \(name) hazır, sen hazır mısın?")
-        case "devoted": return String(localized: "Seni düşünüyordum tam... Selam aşkım 💕")
-        case "crazy":   return String(localized: "NIHAYET geldin!! \(name) sabırsızlanıyordu 😤💥")
-        default:        return String(localized: "Selam 👋 Ben \(name). Nasılsın?")
+        case "ex":      return String(localized: "…Is that you? It's been a while since I heard from you.")
+        case "shy":     return String(localized: "O-oh, hey... it's \(name). How are you? 🙈")
+        case "distant": return String(localized: "\(name). It's been a while.")
+        case "playful": return String(localized: "Heyyy! 🎉 \(name) is here, are you ready?")
+        case "devoted": return String(localized: "I was just thinking about you... Hey babe 💕")
+        case "crazy":   return String(localized: "FINALLY you're here!! \(name) couldn't wait 😤💥")
+        default:        return String(localized: "Hey 👋 I'm \(name). How are you?")
         }
     }
 
@@ -164,17 +176,43 @@ final class ChatViewModel {
                     character: character,
                     localMessages: realMsgs,
                     summary: stored?.summary ?? "",
-                    userMessage: text
+                    userMessage: text,
+                    level: relationshipLevel
                 )
 
+                let gotPhoto = wantsPhoto ? character.chatPhotos.randomElement() : nil
                 messages.append(Message(role: .assistant, content: result.reply))
-                if wantsPhoto, let photo = character.chatPhotos.randomElement() {
-                    messages.append(Message(role: .assistant, content: "", imageURL: photo))
+                if let gotPhoto {
+                    messages.append(Message(role: .assistant, content: "", imageURL: gotPhoto))
                 }
-                xp = result.xp
-                if result.leveledUp { leveledUpTo = result.level }
-                relationshipLevel = result.level
-                updateCache()
+
+                // Terfi hesabı artık istemcide (eskiden chat edge function'daydı,
+                // sunucu şimdi sadece en son seviyeyi saklıyor). Seviye arttıkça
+                // her tık daha az ilerleme katar (bkz. RelationshipXP.gainPercent).
+                let counter = (stored?.msgCounter ?? 0) + 1
+                var fraction = 0.0
+                if counter % RelationshipXP.messageBatchSize == 0 {
+                    fraction += RelationshipXP.messageGainFraction(forLevel: relationshipLevel)
+                }
+                if gotPhoto != nil {
+                    fraction += RelationshipXP.photoGainFraction(forLevel: relationshipLevel)
+                }
+                let previousLevel = relationshipLevel
+                let (newLevel, newProgress) = RelationshipXP.applyGain(
+                    fraction, level: relationshipLevel, progress: levelProgress
+                )
+                if newLevel > previousLevel {
+                    levelUpEvent = LevelUpEvent(
+                        fromLevel: previousLevel,
+                        toLevel: newLevel,
+                        fromStage: Relationship.stageName(previousLevel, role: character.personalityRole),
+                        toStage: Relationship.stageName(newLevel, role: character.personalityRole)
+                    )
+                }
+                relationshipLevel = newLevel
+                levelProgress = newProgress
+
+                updateCache(msgCounter: counter)
                 if isVisible { markReadNow() }
 
                 triggerSummarizationIfNeeded()
@@ -228,17 +266,19 @@ final class ChatViewModel {
         return keys.contains { t.contains($0) }
     }
 
-    private func updateCache() {
+    private func updateCache(msgCounter: Int? = nil) {
         let real = realMessages()
         guard !real.isEmpty else { return }
         store?.chatCache[character.id] = real
         let stored = LocalConversationStore.shared.load(for: character.id)
         let updated = LocalConversationStore.Stored(
             messages: real,
-            xp: xp,
+            xp: stored?.xp ?? 0,
             level: relationshipLevel,
             summary: stored?.summary ?? "",
-            summarizedCount: stored?.summarizedCount ?? 0
+            summarizedCount: stored?.summarizedCount ?? 0,
+            msgCounter: msgCounter ?? stored?.msgCounter ?? 0,
+            levelProgress: levelProgress
         )
         LocalConversationStore.shared.save(updated, for: character.id)
     }

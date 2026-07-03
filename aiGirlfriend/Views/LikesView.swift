@@ -44,7 +44,7 @@ struct LikesView: View {
 
     private var header: some View {
         HStack {
-            Text("Seni Beğenenler")
+            Text("People Who Liked You")
                 .font(.system(size: 22, weight: .bold))
                 .foregroundStyle(.white)
             Spacer()
@@ -59,10 +59,10 @@ struct LikesView: View {
 
     private var infoRow: some View {
         HStack(spacing: 12) {
-            Label("\(likers.count) kişi seni beğendi", systemImage: "heart.fill")
+            Label("\(likers.count) people liked you", systemImage: "heart.fill")
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(AppColor.pink)
-            Label(isPro ? "Lumi PRO aktif" : "PRO değil", systemImage: "crown.fill")
+            Label(isPro ? "Lumi PRO active" : "Not PRO", systemImage: "crown.fill")
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(Color(hex: 0xFFB938))
         }
@@ -75,7 +75,7 @@ struct LikesView: View {
                     if isPro { profileCharacter = c }
                 } label: {
                     LikeCard(character: c, locked: !isPro,
-                             badge: idx == 0 ? "YENİ" : (idx == 1 ? "PRO" : nil))
+                             badge: idx == 0 ? "NEW" : (idx == 1 ? "PRO" : nil))
                 }
                 .buttonStyle(.plain)
             }

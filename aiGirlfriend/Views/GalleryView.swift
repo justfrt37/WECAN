@@ -9,6 +9,7 @@ import SwiftUI
 struct GalleryView: View {
     let character: Character
     @Environment(\.dismiss) private var dismiss
+    @State private var showPaywall = false
 
     // Kilitli grid için galeri resimleri (şimdilik feed fotosu tekrar eder).
     private var lockedImages: [URL] {
@@ -40,6 +41,7 @@ struct GalleryView: View {
 
             proCTA
         }
+        .sheet(isPresented: $showPaywall) { PaywallHostView() }
     }
 
     // MARK: Hero kart
@@ -86,7 +88,7 @@ struct GalleryView: View {
     private var aiBadge: some View {
         HStack(spacing: 5) {
             Image(systemName: "sparkles").font(.system(size: 10))
-            Text("AI Arkadaş").font(.system(size: 10, weight: .bold)).tracking(0.4)
+            Text("AI Companion").font(.system(size: 10, weight: .bold)).tracking(0.4)
         }
         .foregroundStyle(.white)
         .padding(.horizontal, 10).padding(.vertical, 5)
@@ -119,12 +121,12 @@ struct GalleryView: View {
                     Image(systemName: "lock.fill")
                         .font(.system(size: 15))
                         .foregroundStyle(Color(hex: 0xFFA726))
-                    Text("Daha Fazla Fotoğraf")
+                    Text("More Photos")
                         .font(.system(size: 15, weight: .bold))
                         .foregroundStyle(.white)
                 }
                 Spacer()
-                Text("\(lockedImages.count) foto")
+                Text("\(lockedImages.count) photos")
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(.white.opacity(0.5))
             }
@@ -163,10 +165,10 @@ struct GalleryView: View {
     // MARK: PRO CTA
 
     private var proCTA: some View {
-        Button { } label: {
+        Button { showPaywall = true } label: {
             HStack(spacing: 8) {
                 Image(systemName: "crown.fill").font(.system(size: 16))
-                Text("PRO'ya Geç · Tüm Fotoğrafları Gör")
+                Text("Upgrade to PRO · See All Photos")
                     .font(.system(size: 15, weight: .heavy))
             }
             .foregroundStyle(Color(hex: 0x1A0826))

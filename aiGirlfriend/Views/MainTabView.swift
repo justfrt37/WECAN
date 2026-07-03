@@ -19,11 +19,11 @@ enum MainTab: Int, CaseIterable, Identifiable {
 
     var titleKey: LocalizedStringKey {
         switch self {
-        case .discover: return "Keşfet"
-        case .chat: return "Sohbet"
-        case .explore: return "Tümünü Gör"
-        case .likes: return "Beğeniler"
-        case .profile: return "Profil"
+        case .discover: return "Discover"
+        case .chat: return "Chat"
+        case .explore: return "See All"
+        case .likes: return "Likes"
+        case .profile: return "Profile"
         }
     }
 
@@ -136,7 +136,7 @@ struct PlaceholderTab: View {
                 Text(tab.titleKey)
                     .font(.title2.bold())
                     .foregroundStyle(.white)
-                Text("Yakında")
+                Text("Soon")
                     .font(.subheadline)
                     .foregroundStyle(.white.opacity(0.5))
             }

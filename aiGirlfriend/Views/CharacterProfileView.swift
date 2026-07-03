@@ -11,9 +11,11 @@ struct CharacterProfileView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var page = 0
     @State private var showGallery = false
-
-    /// Kalp ring'inin dolması için varsayılan üst sınır.
-    private let maxLevel = 10
+    @State private var showPaywall = false
+    /// Bu kullanıcının bu karakterle olan gerçek seviyesi/ilerlemesi — `character.relationshipLevel`
+    /// eski/global bir alan olduğu için (bkz. gotchas), cihazdaki yerel depodan okunur.
+    @State private var userLevel: Int = 1
+    @State private var userLevelProgress: Double = 0
 
     private var images: [URL] {
         character.galleryURLs.isEmpty
@@ -57,6 +59,16 @@ struct CharacterProfileView: View {
         .fullScreenCover(isPresented: $showGallery) {
             GalleryView(character: character)
         }
+        .sheet(isPresented: $showPaywall) { PaywallHostView() }
+        .task {
+            if let stored = LocalConversationStore.shared.load(for: character.id) {
+                userLevel = stored.level
+                userLevelProgress = stored.levelProgress
+            } else {
+                userLevel = max(1, character.relationshipLevel)
+                userLevelProgress = 0
+            }
+        }
     }
 
     // MARK: Hero (kaydırılabilir resimler + isim + seviye)
@@ -96,7 +108,14 @@ struct CharacterProfileView: View {
         }
         .frame(height: 520)
         .clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
-        .overlay(alignment: .topLeading) { proChip.padding(.top, 60).padding(.leading, 24) }
+        .overlay(alignment: .topLeading) {
+            // PRO olmayan kullanıcılara upsell rozeti — abone olanlara gösterilmez.
+            if !PurchaseService.shared.isPro {
+                Button { showPaywall = true } label: { proChip }
+                    .buttonStyle(.plain)
+                    .padding(.top, 60).padding(.leading, 24)
+            }
+        }
     }
 
     private var nameRow: some View {
@@ -122,24 +141,24 @@ struct CharacterProfileView: View {
         }
     }
 
-    /// Kalp + LV N, ring seviyeyle orantılı dolar (0 → boş).
+    /// Kalp + LV N, ring seviyenin İÇİNDEKİ ilerlemeyle (levelProgress) orantılı dolar (0 → boş).
     private var levelCircle: some View {
-        let progress = min(Double(character.relationshipLevel) / Double(maxLevel), 1)
-        return ZStack {
+        ZStack {
             Circle().stroke(.white.opacity(0.12), lineWidth: 3)
             Circle()
-                .trim(from: 0, to: progress)
+                .trim(from: 0, to: userLevelProgress)
                 .stroke(
                     LinearGradient(colors: [AppColor.pink, AppColor.amber],
                                    startPoint: .topLeading, endPoint: .bottomTrailing),
                     style: StrokeStyle(lineWidth: 3, lineCap: .round)
                 )
                 .rotationEffect(.degrees(-90))
+                .animation(.easeInOut(duration: 0.6), value: userLevelProgress)
             VStack(spacing: 1) {
                 Image(systemName: "heart.fill")
                     .font(.system(size: 13))
                     .foregroundStyle(AppColor.pink)
-                Text("LV \(character.relationshipLevel)")
+                Text("LV \(userLevel)")
                     .font(.system(size: 10, weight: .heavy))
                     .foregroundStyle(.white)
             }
@@ -176,7 +195,7 @@ struct CharacterProfileView: View {
 
     private var about: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("HAKKIMDA")
+            Text("ABOUT")
                 .font(.system(size: 13, weight: .bold))
                 .tracking(0.5)
                 .foregroundStyle(.white.opacity(0.8))
@@ -192,7 +211,7 @@ struct CharacterProfileView: View {
 
     private var interestsSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("İLGİ ALANLARI")
+            Text("INTERESTS")
                 .font(.system(size: 13, weight: .bold))
                 .tracking(0.5)
                 .foregroundStyle(.white.opacity(0.8))
@@ -237,7 +256,7 @@ struct CharacterProfileView: View {
         HStack(spacing: 12) {
             // Gallery
             Button { showGallery = true } label: {
-                Label("Galeri", systemImage: "photo.fill")
+                Label("Gallery", systemImage: "photo.fill")
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(.white)
                     .frame(maxWidth: .infinity).frame(height: 52)
@@ -251,7 +270,7 @@ struct CharacterProfileView: View {
 
             // Chat — pushes inside this NavigationStack
             NavigationLink(value: character) {
-                Label("Sohbet", systemImage: "bubble.left.and.bubble.right.fill")
+                Label("Chat", systemImage: "bubble.left.and.bubble.right.fill")
                     .font(.system(size: 15, weight: .bold))
                     .foregroundStyle(.white)
                     .frame(maxWidth: .infinity).frame(height: 52)

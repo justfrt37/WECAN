@@ -1,0 +1,51 @@
+//
+//  RelationshipXP.swift
+//  İlişki seviyesi terfi mantığı — istemcide hesaplanır (eskiden chat edge
+//  function'daydı). Sunucu sadece güncel `relationship_level` değerini saklar/döner.
+//
+//  Model: XP artık kümülatif bir sayı değil, "şu anki seviyenin ne kadarı
+//  tamamlandı" (0...1) şeklinde bir ORAN. Her mesaj-batch'i (5 mesajda bir) veya
+//  foto gönderimi, seviyenin gerektirdiği ilerlemenin bir YÜZDESİNİ ekler.
+//  Bu yüzde seviye arttıkça küçülür (terfi gittikçe zorlaşır):
+//    Lv 1-2: %10/tık, Lv 3: %8, Lv 5: %7, Lv 7: %5, ... (düz azalan eğri).
+//
+
+import Foundation
+
+enum RelationshipXP {
+    static let maxLevel = 10
+    static let messageBatchSize = 5   // her 5 mesajda bir kazanım tıklaması
+    static let photoGainMultiplier = 1.5   // foto, normal tıktan %50 daha değerli (eski 30/20 oranı)
+
+    /// Bu seviyedeyken bir "kazanım tık"ının seviye ilerlemesine kattığı yüzde (0...100).
+    /// Lv1-2 sabit %10. Lv3+ için düz azalan eğri: p(x) = -0.125x² + 8.125, x = level-2.
+    /// Bu eğri (3,8) (5,7) (7,5) noktalarından tam geçer — terfi üst seviyelerde
+    /// giderek zorlaşsın diye kasıtlı olarak konveks (ivmeli) azalıyor.
+    static func gainPercent(forLevel level: Int) -> Double {
+        guard level > 2 else { return 10 }
+        let x = Double(level - 2)
+        let raw = -0.125 * x * x + 8.125
+        return max(1, raw)   // en tepede bile tamamen tıkanmasın diye %1 taban
+    }
+
+    static func messageGainFraction(forLevel level: Int) -> Double {
+        gainPercent(forLevel: level) / 100
+    }
+
+    static func photoGainFraction(forLevel level: Int) -> Double {
+        messageGainFraction(forLevel: level) * photoGainMultiplier
+    }
+
+    /// Yeni seviye + kalan ilerleme oranını hesaplar (birden fazla seviye atlamayı da destekler).
+    static func applyGain(_ fraction: Double, level: Int, progress: Double) -> (level: Int, progress: Double) {
+        guard level < maxLevel else { return (maxLevel, 0) }
+        var lvl = level
+        var prog = progress + fraction
+        while prog >= 1, lvl < maxLevel {
+            prog -= 1
+            lvl += 1
+        }
+        if lvl >= maxLevel { return (maxLevel, 0) }
+        return (lvl, prog)
+    }
+}

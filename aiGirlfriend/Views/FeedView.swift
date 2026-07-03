@@ -109,7 +109,7 @@ struct FeedView: View {
     private var likeOverlay: some View {
         VStack {
             HStack {
-                swipeBadge(text: "BEĞEN", emoji: "🔥", color: Color(hex: 0x2ECC71), rotation: -18)
+                swipeBadge(text: "LIKE", emoji: "🔥", color: Color(hex: 0x2ECC71), rotation: -18)
                 Spacer()
             }
             .padding(.horizontal, 28)
@@ -122,7 +122,7 @@ struct FeedView: View {
         VStack {
             HStack {
                 Spacer()
-                swipeBadge(text: "HAYIR", emoji: "🙅", color: Color(hex: 0xFF4757), rotation: 18)
+                swipeBadge(text: "NOPE", emoji: "🙅", color: Color(hex: 0xFF4757), rotation: 18)
             }
             .padding(.horizontal, 28)
             .padding(.top, 120)
@@ -277,10 +277,10 @@ private struct FeedCard: View {
 
     private var actionRow: some View {
         HStack(spacing: 12) {
-            bigActionButton(icon: "photo.fill", label: "Galeri") { showGallery = true }
+            bigActionButton(icon: "photo.fill", label: "Gallery") { showGallery = true }
 
             NavigationLink(value: character) {
-                bigActionLabel(icon: "bubble.left.and.bubble.right.fill", label: "Sohbet")
+                bigActionLabel(icon: "bubble.left.and.bubble.right.fill", label: "Chat")
             }
             .buttonStyle(.plain)
         }
@@ -333,8 +333,8 @@ private struct SwipeTutorialOverlay: View {
                 Spacer()
 
                 HStack(spacing: 16) {
-                    tutorialBadge(emoji: "🙅", text: "HAYIR", caption: "Sola kaydır: geç")
-                    tutorialBadge(emoji: "🔥", text: "BEĞEN", caption: "Sağa kaydır: beğen")
+                    tutorialBadge(emoji: "🙅", text: "NOPE", caption: "Swipe left: pass")
+                    tutorialBadge(emoji: "🔥", text: "LIKE", caption: "Swipe right: like")
                 }
 
                 Image(systemName: "hand.draw.fill")
@@ -347,7 +347,7 @@ private struct SwipeTutorialOverlay: View {
                         }
                     }
 
-                Text("Devam etmek için herhangi bir yere dokun")
+                Text("Tap anywhere to continue")
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(.white.opacity(0.7))
 
@@ -391,7 +391,7 @@ private struct MeetConfirmOverlay: View {
             Color.black.opacity(0.6).ignoresSafeArea()
 
             VStack(spacing: 18) {
-                Text("\(character.name) ile tanışmak ister misin?")
+                Text("Want to meet \(character.name)?")
                     .font(.system(size: 19, weight: .bold))
                     .foregroundStyle(.white)
                     .multilineTextAlignment(.center)
@@ -401,7 +401,7 @@ private struct MeetConfirmOverlay: View {
                         persistPreference()
                         onNo()
                     } label: {
-                        Text("Vazgeç")
+                        Text("Cancel")
                             .font(.system(size: 15, weight: .semibold))
                             .foregroundStyle(.white.opacity(0.85))
                             .frame(maxWidth: .infinity).frame(height: 48)
@@ -413,7 +413,7 @@ private struct MeetConfirmOverlay: View {
                         persistPreference()
                         onYes()
                     } label: {
-                        Text("Tanışalım")
+                        Text("Let's meet")
                             .font(.system(size: 15, weight: .bold))
                             .foregroundStyle(.white)
                             .frame(maxWidth: .infinity).frame(height: 48)
@@ -429,7 +429,7 @@ private struct MeetConfirmOverlay: View {
                     HStack(spacing: 8) {
                         Image(systemName: dontShowAgain ? "checkmark.square.fill" : "square")
                             .foregroundStyle(dontShowAgain ? AppColor.pink : .white.opacity(0.5))
-                        Text("Bir daha gösterme")
+                        Text("Don't show again")
                             .font(.system(size: 13, weight: .medium))
                             .foregroundStyle(.white.opacity(0.7))
                     }

@@ -19,6 +19,7 @@ private struct ChatRequest: Codable {
     let localSummary: String?
     let summarizeMessages: [WireHistoryMessage]?
     let existingSummary: String?
+    let level: Int?   // istemci taraflı hesaplanan güncel seviye — sunucu sadece saklar
 }
 
 private struct WireMessage: Codable {
@@ -45,9 +46,7 @@ struct ChatHistory {
 
 struct ChatReply {
     let reply: String
-    let level: Int
-    let xp: Int
-    let leveledUp: Bool
+    let level: Int      // sunucunun sakladığı (istemcinin bir önceki turda gönderdiği) seviye
     let photoURL: URL?
 }
 
@@ -57,8 +56,8 @@ enum ChatServiceError: Error, LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .badStatus(let code, let body): return "Sunucu hatası (\(code)): \(body)"
-        case .decoding: return "Cevap çözümlenemedi."
+        case .badStatus(let code, let body): return "Server error (\(code)): \(body)"
+        case .decoding: return "Couldn't parse the response."
         }
     }
 }
@@ -110,23 +109,24 @@ struct ChatService {
     }
 
     /// Preset karakter: yeni mesaj gönder.
-    func send(character: Character, userMessage: String) async throws -> ChatReply {
-        let resp = try await call(character: character, userMessage: userMessage)
+    func send(character: Character, userMessage: String, level: Int) async throws -> ChatReply {
+        let resp = try await call(character: character, userMessage: userMessage, level: level)
         return ChatReply(
             reply: resp.reply ?? "",
-            level: resp.level ?? 1,
-            xp: resp.xp ?? 0,
-            leveledUp: resp.leveledUp ?? false,
+            level: resp.level ?? level,
             photoURL: resp.photoUrl.flatMap(URL.init(string:))
         )
     }
 
     /// Kullanıcı karakteri: geçmişi + özeti istemciden gönder; Supabase messages'a yazılmaz.
+    /// `level`: istemcinin şu an bildiği (bir önceki turdan hesaplanmış) seviye — sunucu
+    /// bunu bu turun direktif/foto uygunluğu kontrolünden SONRA kalıcı olarak saklar.
     func sendWithLocalHistory(
         character: Character,
         localMessages: [Message],
         summary: String,
-        userMessage: String
+        userMessage: String,
+        level: Int
     ) async throws -> ChatReply {
         let wireHistory = localMessages
             .filter { $0.imageURL == nil }
@@ -135,13 +135,12 @@ struct ChatService {
         let resp = try await perform(
             character: character,
             userMessage: userMessage,
-            extra: .localHistory(wireHistory, summary: summary.isEmpty ? nil : summary)
+            extra: .localHistory(wireHistory, summary: summary.isEmpty ? nil : summary),
+            level: level
         )
         return ChatReply(
             reply: resp.reply ?? "",
-            level: resp.level ?? 1,
-            xp: resp.xp ?? 0,
-            leveledUp: resp.leveledUp ?? false,
+            level: resp.level ?? level,
             photoURL: resp.photoUrl.flatMap(URL.init(string:))
         )
     }
@@ -178,19 +177,20 @@ struct ChatService {
         case summarize([WireHistoryMessage], existing: String)
     }
 
-    private func call(character: Character, userMessage: String?) async throws -> ChatResponse {
+    private func call(character: Character, userMessage: String?, level: Int? = nil) async throws -> ChatResponse {
         do {
-            return try await perform(character: character, userMessage: userMessage, extra: .none)
+            return try await perform(character: character, userMessage: userMessage, extra: .none, level: level)
         } catch ChatServiceError.badStatus(let code, _) where code == 401 {
             _ = await SupabaseAuth.recover()
-            return try await perform(character: character, userMessage: userMessage, extra: .none)
+            return try await perform(character: character, userMessage: userMessage, extra: .none, level: level)
         }
     }
 
     private func perform(
         character: Character,
         userMessage: String?,
-        extra: RequestExtra = .none
+        extra: RequestExtra = .none,
+        level: Int? = nil
     ) async throws -> ChatResponse {
         var request = URLRequest(url: Config.chatFunctionURL)
         request.httpMethod = "POST"
@@ -226,7 +226,8 @@ struct ChatService {
             clientHistory: clientHistory,
             localSummary: localSummary,
             summarizeMessages: summarizeMessages,
-            existingSummary: existingSummary
+            existingSummary: existingSummary,
+            level: level
         )
         request.httpBody = try JSONEncoder().encode(body)
 

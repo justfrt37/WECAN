@@ -130,7 +130,7 @@ struct CreateCharacterView: View {
     private var nameStep: some View {
         VStack(spacing: 16) {
             TextField("", text: $characterName,
-                      prompt: Text("Bir isim gir…").foregroundColor(.white.opacity(0.4)))
+                      prompt: Text("Enter a name…").foregroundColor(.white.opacity(0.4)))
                 .font(.system(size: 22, weight: .semibold))
                 .foregroundStyle(.white)
                 .tint(AppColor.pink)
@@ -144,7 +144,7 @@ struct CreateCharacterView: View {
                 )
                 .autocorrectionDisabled()
 
-            Text("Bu isim her zaman kullanılacak")
+            Text("This name will always be used")
                 .font(.system(size: 13))
                 .foregroundStyle(.white.opacity(0.4))
         }
@@ -300,13 +300,13 @@ struct CreateCharacterView: View {
             HStack(spacing: 8) {
                 Image(systemName: "clock.arrow.circlepath")
                     .foregroundStyle(AppColor.pink)
-                Text("Bu, geçmişinizi hatırlamasını sağlar")
+                Text("This lets them remember your shared history")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.7))
             }
 
             TextField("", text: $exHistory,
-                      prompt: Text("Geçmişini anlat — nasıl tanıştınız, paylaştığınız anılar, bilmesini istediklerin…")
+                      prompt: Text("Tell your story — how you met, memories you share, anything you want them to know…")
                           .foregroundColor(.white.opacity(0.35)),
                       axis: .vertical)
                 .lineLimit(5...12)
@@ -320,9 +320,22 @@ struct CreateCharacterView: View {
                                       lineWidth: 1.5)
                 )
 
-            Text("İsteğe bağlı — boş başlamak istersen geç.")
-                .font(.system(size: 12))
-                .foregroundStyle(.white.opacity(0.4))
+            HStack {
+                Text("Optional.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.white.opacity(0.4))
+                Spacer()
+                Button {
+                    exHistory = ""
+                    advance()
+                } label: {
+                    Text("Leave blank, skip")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(AppColor.pinkSoft)
+                        .underline()
+                }
+                .buttonStyle(.plain)
+            }
         }
         .padding(.top, 4)
     }
@@ -340,7 +353,7 @@ struct CreateCharacterView: View {
                         .background(.white.opacity(0.08), in: Circle())
                 }
                 Spacer()
-                Text("ADIM \(stepIndex + 1) / \(totalSteps)")
+                Text("STEP \(stepIndex + 1) / \(totalSteps)")
                     .font(.system(size: 12, weight: .bold)).tracking(0.5)
                     .foregroundStyle(.white.opacity(0.6))
                 Spacer()
@@ -364,7 +377,7 @@ struct CreateCharacterView: View {
     private var continueButton: some View {
         let enabled = stepIsValid
         return Button { advance() } label: {
-            Text(isLastStep ? "Karakteri Oluştur" : "Devam et")
+            Text(isLastStep ? "Create Character" : "Continue")
                 .font(.system(size: 17, weight: .bold))
                 .foregroundStyle(.white)
                 .frame(maxWidth: .infinity).frame(height: 54)
@@ -386,10 +399,10 @@ struct CreateCharacterView: View {
         VStack(spacing: 20) {
             Spacer()
             ProgressView().tint(AppColor.pink).scaleEffect(1.6)
-            Text("✨ AI karakterini yaratıyor…")
+            Text("✨ Creating your AI character…")
                 .font(.system(size: 18, weight: .semibold))
                 .foregroundStyle(.white)
-            Text("Seçimlerine göre \(characterName) hazırlanıyor")
+            Text("Preparing \(characterName) based on your choices")
                 .font(.subheadline)
                 .foregroundStyle(.white.opacity(0.6))
                 .multilineTextAlignment(.center)
@@ -419,7 +432,7 @@ struct CreateCharacterView: View {
 
                 ScrollView {
                     VStack(spacing: 16) {
-                        Text("✨ Karakterin Hazır!")
+                        Text("✨ Your Character Is Ready!")
                             .font(.system(size: 26, weight: .bold))
                             .foregroundStyle(.white)
 
@@ -453,7 +466,7 @@ struct CreateCharacterView: View {
                         }
 
                         NavigationLink(value: c) {
-                            Text("Sohbete Başla")
+                            Text("Start Chatting")
                                 .font(.system(size: 17, weight: .bold))
                                 .foregroundStyle(.white)
                                 .frame(maxWidth: .infinity).frame(height: 54)
@@ -475,27 +488,27 @@ struct CreateCharacterView: View {
 
     private var stepTitle: String {
         switch stepIndex {
-        case 0: return "İsim ver"
-        case 1: return "Fotoğraf seç"
-        case 2: return "Kişiliği seç"
-        case 3: return "Kategori"
+        case 0: return "Give a name"
+        case 1: return "Pick a photo"
+        case 2: return "Pick a personality"
+        case 3: return "Category"
         case 4: return "Vibe"
-        case 5: return "Meslek"
-        case 6: return "Yaş aralığı"
-        default: return "Geçmiş & Anılar"
+        case 5: return "Profession"
+        case 6: return "Age range"
+        default: return "History & Memories"
         }
     }
 
     private var stepSubtitle: String {
         switch stepIndex {
-        case 0: return "Karakterin adı ne olsun?"
-        case 1: return "Şimdilik mevcut fotoğraflardan seç"
-        case 2: return "Bu onun temel kişiliğini belirler"
-        case 3: return "Hangi dünyadan?"
-        case 4: return "Genel havası nasıl?"
-        case 5: return "Ne iş yapar?"
-        case 6: return "Kaç yaşında olsun?"
-        default: return "İsteğe bağlı — geçmişinizi anlat"
+        case 0: return "What should your character be named?"
+        case 1: return "Pick from the available photos for now"
+        case 2: return "This defines their core personality"
+        case 3: return "Which world are they from?"
+        case 4: return "What's their overall vibe?"
+        case 5: return "What do they do for work?"
+        case 6: return "How old should they be?"
+        default: return "Optional — tell your story"
         }
     }
 

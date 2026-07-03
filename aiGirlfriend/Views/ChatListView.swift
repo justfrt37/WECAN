@@ -95,7 +95,7 @@ struct ChatListView: View {
 
     private var header: some View {
         HStack {
-            Text("Sohbetler")
+            Text("Chats")
                 .font(.system(size: 28, weight: .bold))
                 .foregroundStyle(.white)
             Spacer()
@@ -120,7 +120,7 @@ struct ChatListView: View {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 16)).foregroundStyle(.white.opacity(0.5))
             TextField("", text: $searchText,
-                      prompt: Text("Sohbet ara").foregroundColor(.white.opacity(0.5)))
+                      prompt: Text("Search chats").foregroundColor(.white.opacity(0.5)))
                 .foregroundStyle(.white)
                 .tint(AppColor.pink)
         }
@@ -134,7 +134,7 @@ struct ChatListView: View {
 
     private var messagesSection: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("TÜM MESAJLAR")
+            Text("ALL MESSAGES")
                 .font(.system(size: 11, weight: .bold))
                 .tracking(1.2)
                 .foregroundStyle(.white.opacity(0.5))
@@ -158,10 +158,10 @@ struct ChatListView: View {
             Image(systemName: "bubble.left.and.bubble.right.fill")
                 .font(.system(size: 50))
                 .foregroundStyle(AppColor.pink.opacity(0.85))
-            Text("Henüz sohbetin yok")
+            Text("No chats yet")
                 .font(.title3.bold())
                 .foregroundStyle(.white)
-            Text("Keşfet'ten beğendiğin birine yaz, sohbete başla 💬")
+            Text("Message someone you liked in Discover to start chatting 💬")
                 .font(.subheadline)
                 .multilineTextAlignment(.center)
                 .foregroundStyle(.white.opacity(0.6))
@@ -178,7 +178,7 @@ private struct ChatHistoryRow: View {
     let isTyping: Bool
     @Environment(CharacterStore.self) private var store
     @State private var showProfile = false
-    @State private var addSheetTitle: String?
+    @State private var addSheetKind: NoteKind?
     @State private var showBlockConfirm = false
     @State private var isBlocked: Bool
 
@@ -241,43 +241,43 @@ private struct ChatHistoryRow: View {
         .padding(.horizontal, 20)
         .padding(.vertical, 10)
         .contextMenu {
-            Button { showProfile = true } label: { Label("Profili Görüntüle", systemImage: "person.circle") }
-            Button { addSheetTitle = "Anı Ekle" } label: { Label("Anı Ekle", systemImage: "sparkles") }
-            Button { addSheetTitle = "Davranış Ekle" } label: { Label("Davranış Ekle", systemImage: "face.smiling") }
+            Button { showProfile = true } label: { Label("View Profile", systemImage: "person.circle") }
+            Button { addSheetKind = .memory } label: { Label("Add Memory", systemImage: "sparkles") }
+            Button { addSheetKind = .behavior } label: { Label("Add Behavior", systemImage: "face.smiling") }
             Button(role: .destructive) {
                 ChatMaintenance.clearChat(characterID: item.character.id, store: store)
-            } label: { Label("Sohbeti Temizle", systemImage: "trash") }
+            } label: { Label("Clear Chat", systemImage: "trash") }
             if isBlocked {
                 Button {
                     BlockedCharactersStore.unblock(item.character.id)
                     isBlocked = false
-                } label: { Label("Engeli Kaldır", systemImage: "checkmark.circle") }
+                } label: { Label("Unblock", systemImage: "checkmark.circle") }
             } else {
-                Button(role: .destructive) { showBlockConfirm = true } label: { Label("Blok", systemImage: "nosign") }
+                Button(role: .destructive) { showBlockConfirm = true } label: { Label("Block", systemImage: "nosign") }
             }
         }
-        .sheet(isPresented: Binding(get: { addSheetTitle != nil }, set: { if !$0 { addSheetTitle = nil } })) {
-            AddCharacterNoteSheet(character: item.character, titleKey: addSheetTitle ?? "")
+        .sheet(item: $addSheetKind) { kind in
+            AddCharacterNoteSheet(character: item.character, kind: kind)
         }
-        .alert("Bu karakteri engelle?", isPresented: $showBlockConfirm) {
-            Button("İptal", role: .cancel) {}
-            Button("Engelle", role: .destructive) {
+        .alert("Block this character?", isPresented: $showBlockConfirm) {
+            Button("Cancel", role: .cancel) {}
+            Button("Block", role: .destructive) {
                 BlockedCharactersStore.block(item.character.id)
                 isBlocked = true
             }
         } message: {
-            Text("\(item.character.name) artık Keşfet'te görünmeyecek. Bu sohbet silinmeyecek.")
+            Text("\(item.character.name) will no longer appear in Discover. This chat won't be deleted.")
         }
     }
 
     @ViewBuilder
     private var subtitle: some View {
         if isTyping {
-            Text("Yazıyor…")
+            Text("Typing…")
                 .italic()
                 .foregroundStyle(AppColor.pink)
         } else if let last = item.last {
-            Text(last.isUser ? "Sen: \(last.content)" : last.content)
+            Text(last.isUser ? "You: \(last.content)" : last.content)
                 .foregroundStyle(hasUnread ? .white : .white.opacity(0.6))
         } else {
             Text(item.character.tagline)
@@ -310,11 +310,11 @@ private func relativeTime(_ iso: String?) -> String {
     let date = fmt.date(from: iso) ?? ISO8601DateFormatter().date(from: iso)
     guard let date else { return "" }
     let s = Date().timeIntervalSince(date)
-    if s < 60 { return "şimdi" }
-    if s < 3600 { return "\(Int(s/60))dk" }
-    if s < 86400 { return "\(Int(s/3600))sa" }
-    if s < 172800 { return "Dün" }
-    return "\(Int(s/86400))g"
+    if s < 60 { return String(localized: "now") }
+    if s < 3600 { return "\(Int(s/60))m" }
+    if s < 86400 { return "\(Int(s/3600))h" }
+    if s < 172800 { return String(localized: "Yesterday") }
+    return "\(Int(s/86400))d"
 }
 
 #Preview {

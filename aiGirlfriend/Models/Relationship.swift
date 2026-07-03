@@ -15,94 +15,94 @@ enum Relationship {
         switch role {
         case "distant":
             switch level {
-            case ..<2:  return "Soğuk"
-            case 2:     return "Temkinli"
-            case 3:     return "Mesafeli"
-            case 4:     return "İlk Adım"
-            case 5:     return "Merak"
-            case 6:     return "Açılıyor"
-            case 7:     return "Güven"
-            case 8:     return "Sıcaklık"
-            case 9:     return "Bağlılık"
-            default:    return "Tam Açık"
+            case ..<2:  return String(localized: "Cold")
+            case 2:     return String(localized: "Cautious")
+            case 3:     return String(localized: "Distant")
+            case 4:     return String(localized: "First Step")
+            case 5:     return String(localized: "Curious")
+            case 6:     return String(localized: "Opening Up")
+            case 7:     return String(localized: "Trust")
+            case 8:     return String(localized: "Warmth")
+            case 9:     return String(localized: "Attachment")
+            default:    return String(localized: "Fully Open")
             }
         case "shy":
             switch level {
-            case ..<2:  return "Korkuyor"
-            case 2:     return "Çekingen"
-            case 3:     return "Utangaç"
-            case 4:     return "Tedirgin"
-            case 5:     return "Rahatladı"
-            case 6:     return "Güvendi"
-            case 7:     return "Açıldı"
-            case 8:     return "Sıcakkanlı"
-            case 9:     return "Derinden"
-            default:    return "Tatlı Aşk"
+            case ..<2:  return String(localized: "Scared")
+            case 2:     return String(localized: "Timid")
+            case 3:     return String(localized: "Shy")
+            case 4:     return String(localized: "Nervous")
+            case 5:     return String(localized: "Relaxed")
+            case 6:     return String(localized: "Trusting")
+            case 7:     return String(localized: "Opened Up")
+            case 8:     return String(localized: "Warm")
+            case 9:     return String(localized: "Deeply In")
+            default:    return String(localized: "Sweet Love")
             }
         case "playful":
             switch level {
-            case ..<2:  return "Şakacı"
-            case 2:     return "Esprili"
-            case 3:     return "Çekişme"
-            case 4:     return "Takılma"
-            case 5:     return "Flörtöz Şaka"
-            case 6:     return "Belli Oluyor"
-            case 7:     return "Oyuncu Aşk"
-            case 8:     return "Kahkaha & Öpücük"
-            case 9:     return "Neşeli Bağ"
-            default:    return "Şakayla Gerçek"
+            case ..<2:  return String(localized: "Playful")
+            case 2:     return String(localized: "Witty")
+            case 3:     return String(localized: "Banter")
+            case 4:     return String(localized: "Teasing")
+            case 5:     return String(localized: "Flirty Jokes")
+            case 6:     return String(localized: "It's Showing")
+            case 7:     return String(localized: "Playful Love")
+            case 8:     return String(localized: "Laughs & Kisses")
+            case 9:     return String(localized: "Joyful Bond")
+            default:    return String(localized: "Joking But Real")
             }
         case "devoted":
             switch level {
-            case ..<2:  return "Özenli"
-            case 2:     return "Koruyucu"
-            case 3:     return "Adanmış"
-            case 4:     return "Yoğun Bağ"
-            case 5:     return "Sadık"
-            case 6:     return "Takıntılı Sevgi"
-            case 7:     return "Kıskançlık"
-            case 8:     return "Her Şeyim"
-            case 9:     return "Derin Bağ"
-            default:    return "Ruh Eşi"
+            case ..<2:  return String(localized: "Caring")
+            case 2:     return String(localized: "Protective")
+            case 3:     return String(localized: "Devoted")
+            case 4:     return String(localized: "Deep Bond")
+            case 5:     return String(localized: "Loyal")
+            case 6:     return String(localized: "Obsessive Love")
+            case 7:     return String(localized: "Jealousy")
+            case 8:     return String(localized: "My Everything")
+            case 9:     return String(localized: "Deep Connection")
+            default:    return String(localized: "Soulmate")
             }
         case "crazy":
             switch level {
-            case ..<2:  return "Kuşkulu"
-            case 2:     return "Gözlemci"
-            case 3:     return "Şüpheci"
-            case 4:     return "Paranoid"
-            case 5:     return "Kontrol Ediyor"
-            case 6:     return "Kıskançlık"
-            case 7:     return "Drama"
-            case 8:     return "Duygusal Fırtına"
-            case 9:     return "Çılgın Aşk"
-            default:    return "Takıntılı"
+            case ..<2:  return String(localized: "Suspicious")
+            case 2:     return String(localized: "Watchful")
+            case 3:     return String(localized: "Doubtful")
+            case 4:     return String(localized: "Paranoid")
+            case 5:     return String(localized: "Controlling")
+            case 6:     return String(localized: "Jealousy")
+            case 7:     return String(localized: "Drama")
+            case 8:     return String(localized: "Emotional Storm")
+            case 9:     return String(localized: "Crazy Love")
+            default:    return String(localized: "Obsessive")
             }
         case "ex":
             switch level {
-            case ..<2:  return "Kayıtsız"
-            case 2:     return "Soğuk"
-            case 3:     return "Alaycı"
-            case 4:     return "Çatlak Var"
-            case 5:     return "Kabul Etmiyor"
-            case 6:     return "İtiraf Kırıntısı"
-            case 7:     return "Isınıyor"
-            case 8:     return "Maske Düşüyor"
-            case 9:     return "İtiraf"
-            default:    return "Geri Döndü"
+            case ..<2:  return String(localized: "Indifferent")
+            case 2:     return String(localized: "Cold")
+            case 3:     return String(localized: "Sarcastic")
+            case 4:     return String(localized: "Cracking")
+            case 5:     return String(localized: "In Denial")
+            case 6:     return String(localized: "Confession Slip")
+            case 7:     return String(localized: "Warming Up")
+            case 8:     return String(localized: "Mask Slipping")
+            case 9:     return String(localized: "Confession")
+            default:    return String(localized: "Back Together")
             }
         default: // flirty
             switch level {
-            case ..<2:  return "Yeni Tanışma"
-            case 2:     return "Tanıdık"
-            case 3:     return "Arkadaş"
-            case 4:     return "Yakın Arkadaş"
-            case 5:     return "Flört Başlangıcı"
-            case 6:     return "Flört"
-            case 7:     return "Sevgili Adayı"
-            case 8:     return "Sevgili"
-            case 9:     return "Ciddi İlişki"
-            default:    return "Ruh Eşi"
+            case ..<2:  return String(localized: "New Meeting")
+            case 2:     return String(localized: "Familiar")
+            case 3:     return String(localized: "Friends")
+            case 4:     return String(localized: "Close Friends")
+            case 5:     return String(localized: "Flirting Begins")
+            case 6:     return String(localized: "Flirting")
+            case 7:     return String(localized: "Potential Partner")
+            case 8:     return String(localized: "Partner")
+            case 9:     return String(localized: "Serious Relationship")
+            default:    return String(localized: "Soulmate")
             }
         }
     }

@@ -29,7 +29,7 @@ struct SplashView: View {
                     .foregroundStyle(.white)
 
                 if auth.failed {
-                    Text("Giriş yapılamadı.\nİnternet bağlantını kontrol et.")
+                    Text("Login failed.\nCheck your internet connection.")
                         .multilineTextAlignment(.center)
                         .font(.subheadline)
                         .foregroundStyle(.white.opacity(0.9))
@@ -37,7 +37,7 @@ struct SplashView: View {
                     Button {
                         Task { await loadAll() }
                     } label: {
-                        Text("Tekrar dene")
+                        Text("Try again")
                             .font(.headline)
                             .foregroundStyle(Color(hex: 0x0F0518))
                             .padding(.horizontal, 28)

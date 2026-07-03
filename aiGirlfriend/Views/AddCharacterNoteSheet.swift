@@ -1,16 +1,29 @@
 //
 //  AddCharacterNoteSheet.swift
-//  "Anı Ekle" / "Davranış Ekle" — ChatView'in gear menüsünden ve Sohbetler
-//  listesindeki uzun-basma menüsünden paylaşılan giriş sayfası. Sadece
-//  ChatService.addCharacterNote'a ihtiyaç duyar, tam ChatViewModel gerekmez.
+//  "Add Memory" / "Add Behavior" — shared entry sheet opened from ChatView's
+//  gear menu and ChatListView's long-press menu. Only needs
+//  ChatService.addCharacterNote, not a full ChatViewModel.
 //
 
 import SwiftUI
 
+enum NoteKind: String, Identifiable {
+    case memory
+    case behavior
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .memory: return "Add Memory"
+        case .behavior: return "Add Behavior"
+        }
+    }
+}
+
 struct AddCharacterNoteSheet: View {
     let character: Character
-    /// "Anı Ekle" ya da "Davranış Ekle"
-    let titleKey: String
+    let kind: NoteKind
 
     @Environment(\.dismiss) private var dismiss
     @State private var text = ""
@@ -21,14 +34,14 @@ struct AddCharacterNoteSheet: View {
             ZStack {
                 AppColor.bg.ignoresSafeArea()
                 VStack(spacing: 16) {
-                    Text(titleKey == "Anı Ekle"
-                         ? "\(character.name) bunu hatırlasın:"
-                         : "\(character.name) böyle davransın:")
+                    Text(kind == .memory
+                         ? "\(character.name) should remember this:"
+                         : "\(character.name) should behave like this:")
                         .font(.system(size: 15))
                         .foregroundStyle(.white.opacity(0.8))
                         .frame(maxWidth: .infinity, alignment: .leading)
                     TextField("", text: $text,
-                              prompt: Text(titleKey == "Anı Ekle" ? "Örn. doğum günüm 5 Mayıs" : "Örn. bana hep 'aşkım' de")
+                              prompt: Text(kind == .memory ? "e.g. my birthday is May 5th" : "e.g. always call me 'babe'")
                                 .foregroundColor(.white.opacity(0.4)), axis: .vertical)
                         .lineLimit(3...6)
                         .foregroundStyle(.white).tint(AppColor.pink)
@@ -37,7 +50,7 @@ struct AddCharacterNoteSheet: View {
                     Button {
                         save()
                     } label: {
-                        Text("Kaydet").font(.system(size: 16, weight: .bold))
+                        Text("Save").font(.system(size: 16, weight: .bold))
                             .foregroundStyle(.white).frame(maxWidth: .infinity).frame(height: 50)
                             .background(LinearGradient(colors: [AppColor.pink, AppColor.amber],
                                                        startPoint: .leading, endPoint: .trailing), in: Capsule())
@@ -47,21 +60,21 @@ struct AddCharacterNoteSheet: View {
                 }
                 .padding(20)
             }
-            .navigationTitle(titleKey)
+            .navigationTitle(kind.title)
             .navigationBarTitleDisplayMode(.inline)
         }
         .presentationDetents([.medium])
     }
 
-    /// Sunucu reddederse (Grok injection tespiti) ya da ağ hatası olursa sessizce
-    /// yutulur — sheet zaten kapanmış olur (ürün kararı).
+    /// Rejections (Grok injection detection) or network errors are swallowed
+    /// silently — the sheet is already dismissed by then (product decision).
     private func save() {
         let content = text.trimmingCharacters(in: .whitespacesAndNewlines)
         if !content.isEmpty {
-            let kind = titleKey == "Anı Ekle" ? "memory" : "behavior"
+            let apiKind = kind == .memory ? "memory" : "behavior"
             let characterId = character.id
             Task {
-                _ = try? await service.addCharacterNote(characterId: characterId, kind: kind, content: content)
+                _ = try? await service.addCharacterNote(characterId: characterId, kind: apiKind, content: content)
             }
         }
         dismiss()

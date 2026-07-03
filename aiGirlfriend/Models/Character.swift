@@ -134,10 +134,10 @@ extension Character {
         Character(
             id: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!,
             name: "Elif",
-            tagline: "Sıcak, flörtöz ve sana âşık",
-            systemPrompt: "Sen Elif'sin, 24 yaşında. Kullanıcının sıcak, sevgi dolu sevgilisisin.",
+            tagline: "Warm, flirty, and into you",
+            systemPrompt: "You are Elif, 24 years old. You are the user's warm, loving girlfriend.",
             avatarSymbol: "heart.circle.fill",
-            age: 24, city: "İstanbul", country: "Türkiye", profession: "Fotoğrafçı",
+            age: 24, city: "Istanbul", country: "Turkey", profession: "Photographer",
             category: "Realistic"
         ),
         Character(
@@ -146,7 +146,7 @@ extension Character {
             tagline: "Playful, affectionate, and into you",
             systemPrompt: "You are Aria, 24. You are the user's warm, affectionate girlfriend.",
             avatarSymbol: "sparkles",
-            age: 24, city: "Los Angeles", country: "USA", profession: "Müzisyen",
+            age: 24, city: "Los Angeles", country: "USA", profession: "Musician",
             category: "Realistic"
         )
     ]

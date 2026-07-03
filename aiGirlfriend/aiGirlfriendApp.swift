@@ -31,6 +31,7 @@ struct aiGirlfriendApp: App {
             .environment(auth)
             .environment(store)
             .preferredColorScheme(.dark)
+            .task { PurchaseService.shared.configure() }
         }
     }
 }

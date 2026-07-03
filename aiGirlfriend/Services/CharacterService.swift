@@ -23,7 +23,7 @@ struct CharacterService {
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
             let code = (response as? HTTPURLResponse)?.statusCode ?? -1
             throw NSError(domain: "CharacterService", code: code,
-                          userInfo: [NSLocalizedDescriptionKey: "Karakterler alınamadı (HTTP \(code))"])
+                          userInfo: [NSLocalizedDescriptionKey: "Couldn't fetch characters (HTTP \(code))"])
         }
         return try JSONDecoder().decode([Character].self, from: data)
     }

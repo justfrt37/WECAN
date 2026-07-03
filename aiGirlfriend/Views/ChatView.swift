@@ -12,12 +12,14 @@ struct ChatView: View {
 
     @State private var showGallery = false
     @State private var showProfile = false
-    @State private var addSheetTitle: String?
+    @State private var addSheetKind: NoteKind?
     @State private var showBlockConfirm = false
     @State private var isBlocked: Bool
     @State private var recognizer = SpeechRecognizer()
     @State private var voice = VoicePlayer()
     @State private var didPrefill = false
+    @State private var levelUpBanner: ChatViewModel.LevelUpEvent?
+    @State private var avatarPulse = false
 
     /// Tab içinde gösterilince alttaki tab bar'ın üstünde kalması için boşluk.
     var bottomInset: CGFloat = 0
@@ -26,8 +28,12 @@ struct ChatView: View {
     /// önceden yazılır, kullanıcı düzenleyip gönderebilir (AI'ın kendi selamını değiştirmez).
     var prefillText: String? = nil
 
-    private let quickReplies = ["Selam 👋", "Naber? 💕", "Seni özledim", "Bugün ne yaptın?"]
-    private let maxLevel = 10
+    private let quickReplies = [
+        String(localized: "Hey 👋"),
+        String(localized: "What's up? 💕"),
+        String(localized: "I missed you"),
+        String(localized: "What did you do today?")
+    ]
 
     init(character: Character, bottomInset: CGFloat = 0, showsBackButton: Bool = true, prefillText: String? = nil) {
         _viewModel = State(initialValue: ChatViewModel(character: character))
@@ -83,73 +89,121 @@ struct ChatView: View {
         .fullScreenCover(isPresented: $showProfile) {
             CharacterProfileView(character: viewModel.character)
         }
-        .sheet(isPresented: Binding(get: { addSheetTitle != nil },
-                                    set: { if !$0 { addSheetTitle = nil } })) {
-            AddCharacterNoteSheet(character: viewModel.character, titleKey: addSheetTitle ?? "")
+        .sheet(item: $addSheetKind) { kind in
+            AddCharacterNoteSheet(character: viewModel.character, kind: kind)
         }
-        .alert("Bu karakteri engelle?", isPresented: $showBlockConfirm) {
-            Button("İptal", role: .cancel) {}
-            Button("Engelle", role: .destructive) {
+        .alert("Block this character?", isPresented: $showBlockConfirm) {
+            Button("Cancel", role: .cancel) {}
+            Button("Block", role: .destructive) {
                 BlockedCharactersStore.block(viewModel.character.id)
                 isBlocked = true
             }
         } message: {
-            Text("\(viewModel.character.name) artık Keşfet'te görünmeyecek. Bu sohbet silinmeyecek.")
+            Text("\(viewModel.character.name) will no longer appear in Discover. This chat won't be deleted.")
+        }
+        .onChange(of: viewModel.levelUpEvent) { _, newValue in
+            guard let event = newValue else { return }
+            withAnimation(.spring(response: 0.45, dampingFraction: 0.7)) {
+                levelUpBanner = event
+                avatarPulse = true
+            }
+            Task {
+                try? await Task.sleep(nanoseconds: 2_800_000_000)
+                withAnimation(.easeInOut(duration: 0.4)) {
+                    levelUpBanner = nil
+                    avatarPulse = false
+                }
+                viewModel.levelUpEvent = nil
+            }
         }
     }
 
     // MARK: Header
 
     private var header: some View {
-        HStack(spacing: 10) {
-            if showsBackButton {
-                Button { dismiss() } label: {
-                    Image(systemName: "chevron.left")
-                        .font(.system(size: 20, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .frame(width: 32, height: 32)
-                }
-            }
-
-            Button { showProfile = true } label: {
-                HStack(spacing: 10) {
-                    avatarWithLevel
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(viewModel.character.name)
-                            .font(.system(size: 17, weight: .bold))
+        ZStack {
+            HStack(spacing: 10) {
+                if showsBackButton {
+                    Button { dismiss() } label: {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 20, weight: .semibold))
                             .foregroundStyle(.white)
-                        HStack(spacing: 5) {
-                            Circle().fill(Color(hex: 0x4ADE80)).frame(width: 7, height: 7)
-                            Text("Çevrimiçi")
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundStyle(.white.opacity(0.6))
-                        }
-                        Text("Seviye \(viewModel.relationshipLevel) · \(viewModel.relationshipStage)")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(AppColor.pinkSoft)
+                            .frame(width: 32, height: 32)
                     }
                 }
+
+                Button { showProfile = true } label: {
+                    HStack(spacing: 10) {
+                        avatarWithLevel
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(viewModel.character.name)
+                                .font(.system(size: 17, weight: .bold))
+                                .foregroundStyle(.white)
+                            HStack(spacing: 5) {
+                                Circle().fill(Color(hex: 0x4ADE80)).frame(width: 7, height: 7)
+                                Text("Online")
+                                    .font(.system(size: 12, weight: .medium))
+                                    .foregroundStyle(.white.opacity(0.6))
+                            }
+                            Text("Level \(viewModel.relationshipLevel) · \(viewModel.relationshipStage)")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(AppColor.pinkSoft)
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
+
+                Spacer()
+
+                headerButton("photo.fill") { showGallery = true }
+                headerButton("gearshape.fill", menu: true)
             }
-            .buttonStyle(.plain)
+            .opacity(levelUpBanner == nil ? 1 : 0)
 
-            Spacer()
-
-            headerButton("photo.fill") { showGallery = true }
-            headerButton("gearshape.fill", menu: true)
+            if let event = levelUpBanner {
+                levelUpBannerView(event)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
     }
 
+    private func levelUpBannerView(_ event: ChatViewModel.LevelUpEvent) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "heart.fill")
+                .font(.system(size: 18))
+                .foregroundStyle(.white)
+                .symbolEffect(.bounce, value: event.toLevel)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Relationship level up! 💕")
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(.white)
+                Text("\(event.fromStage) → \(event.toStage)")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.85))
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 14)
+        .frame(maxWidth: .infinity)
+        .frame(height: 48)
+        .background(
+            LinearGradient(colors: [AppColor.pink, AppColor.amber],
+                           startPoint: .leading, endPoint: .trailing),
+            in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+        )
+    }
+
     private var avatarWithLevel: some View {
-        let progress = min(Double(viewModel.relationshipLevel) / Double(maxLevel), 1)
-        return ZStack {
+        ZStack {
             Circle().stroke(.white.opacity(0.15), lineWidth: 2.5)
-            Circle().trim(from: 0, to: progress)
+            Circle().trim(from: 0, to: viewModel.levelProgress)
                 .stroke(LinearGradient(colors: [AppColor.pink, AppColor.amber],
                                        startPoint: .topLeading, endPoint: .bottomTrailing),
                         style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
                 .rotationEffect(.degrees(-90))
+                .animation(.easeInOut(duration: 0.6), value: viewModel.levelProgress)
             CachedImage(url: viewModel.character.avatarURL ?? viewModel.character.photoURL) { image in
                 image.resizable().scaledToFill()
             } placeholder: { AppColor.pink }
@@ -157,6 +211,9 @@ struct ChatView: View {
             .clipShape(Circle())
         }
         .frame(width: 48, height: 48)
+        .scaleEffect(avatarPulse ? 1.15 : 1)
+        .shadow(color: AppColor.pink.opacity(avatarPulse ? 0.9 : 0), radius: avatarPulse ? 12 : 0)
+        .animation(.spring(response: 0.35, dampingFraction: 0.5).repeatCount(3, autoreverses: true), value: avatarPulse)
         .overlay(alignment: .bottomLeading) {
             Text("\(viewModel.relationshipLevel)")
                 .font(.system(size: 11, weight: .heavy))
@@ -176,17 +233,17 @@ struct ChatView: View {
     private func headerButton(_ icon: String, menu: Bool = false, action: @escaping () -> Void = {}) -> some View {
         if menu {
             Menu {
-                Button { showProfile = true } label: { Label("Profili Görüntüle", systemImage: "person.circle") }
-                Button { addSheetTitle = "Anı Ekle" } label: { Label("Anı Ekle", systemImage: "sparkles") }
-                Button { addSheetTitle = "Davranış Ekle" } label: { Label("Davranış Ekle", systemImage: "face.smiling") }
-                Button(role: .destructive) { viewModel.clearChat() } label: { Label("Sohbeti Temizle", systemImage: "trash") }
+                Button { showProfile = true } label: { Label("View Profile", systemImage: "person.circle") }
+                Button { addSheetKind = .memory } label: { Label("Add Memory", systemImage: "sparkles") }
+                Button { addSheetKind = .behavior } label: { Label("Add Behavior", systemImage: "face.smiling") }
+                Button(role: .destructive) { viewModel.clearChat() } label: { Label("Clear Chat", systemImage: "trash") }
                 if isBlocked {
                     Button {
                         BlockedCharactersStore.unblock(viewModel.character.id)
                         isBlocked = false
-                    } label: { Label("Engeli Kaldır", systemImage: "checkmark.circle") }
+                    } label: { Label("Unblock", systemImage: "checkmark.circle") }
                 } else {
-                    Button(role: .destructive) { showBlockConfirm = true } label: { Label("Blok", systemImage: "nosign") }
+                    Button(role: .destructive) { showBlockConfirm = true } label: { Label("Block", systemImage: "nosign") }
                 }
             } label: {
                 headerIcon(icon)
@@ -283,7 +340,7 @@ struct ChatView: View {
                 Image(systemName: "face.smiling")
                     .font(.system(size: 20)).foregroundStyle(.white.opacity(0.5))
                 TextField("", text: $viewModel.inputText,
-                          prompt: Text("Mesaj…").foregroundColor(.white.opacity(0.4)),
+                          prompt: Text("Message…").foregroundColor(.white.opacity(0.4)),
                           axis: .vertical)
                     .foregroundStyle(.white)
                     .lineLimit(1...4)

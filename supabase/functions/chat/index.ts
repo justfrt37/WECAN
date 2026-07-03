@@ -40,29 +40,14 @@ const db = createClient(SUPABASE_URL, SERVICE_ROLE, {
 
 interface WireMessage { role: string; content: string }
 
-// ─────────────────────────── İlişki / XP sistemi ───────────────────────────
-// Eğri: L→L+1 için gereken XP = 30·L. Lv L'ye ulaşmak için kümülatif = 15·(L-1)·L.
-//   Lv10 toplam = 1350 XP. (4-5 saat aktif sohbette son seviyeye ulaşılır.)
-// XP kaynakları (sunucu-otoriter):
-//   • Normal mesaj: her 5 mesajda bir +20 (metin / kullanıcının kendi foto-ses'i dahil)
-//   • Kız foto gönderir (kullanıcı isteyip aldırır): +30 (daha değerli)
-// Günlük tavan YOK.
+// ─────────────────────────── İlişki seviyesi ───────────────────────────
+// XP terfi hesabı (eskiden burada) artık istemcide — bkz. RelationshipXP.swift.
+// Sunucu SADECE `conversations.relationship_level` değerini saklar/döner:
+// bu turun direktifi/foto uygunluğu için OKUNUR, istemcinin hesapladığı
+// güncel değer bir sonraki turda YAZILIR (`body.level`). Sunucu terfi
+// mantığını bilmez, sadece 1..MAX_LEVEL aralığına klemplenmiş bir tamsayı
+// olarak kabul eder.
 const MAX_LEVEL = 10;
-const XP_PER_MESSAGE_BATCH = 20;  // her 5 mesajda bir
-const MESSAGE_BATCH_SIZE = 5;
-const XP_PER_PHOTO = 30;
-
-function cumulativeXpToReach(level: number): number {
-  return 15 * (level - 1) * level;
-}
-
-function levelForXp(xp: number): number {
-  let lvl = 1;
-  for (let L = 2; L <= MAX_LEVEL; L++) {
-    if (xp >= cumulativeXpToReach(L)) lvl = L; else break;
-  }
-  return lvl;
-}
 
 // Fetch role-aware intimacy directive from DB.
 // Checks character_level_overrides first, falls back to role_level_scripts.
@@ -172,7 +157,7 @@ Deno.serve(async (req: Request) => {
     // 1) Konuşmayı bul ya da oluştur (kullanıcı + karakter)
     let { data: convo } = await db
       .from("conversations")
-      .select("id, summary, summarized_count, xp, relationship_level, msg_counter")
+      .select("id, summary, summarized_count, xp, relationship_level")
       .eq("user_id", uid)
       .eq("character_id", characterId)
       .maybeSingle();
@@ -181,7 +166,7 @@ Deno.serve(async (req: Request) => {
       const ins = await db
         .from("conversations")
         .insert({ user_id: uid, character_id: characterId })
-        .select("id, summary, summarized_count, xp, relationship_level, msg_counter")
+        .select("id, summary, summarized_count, xp, relationship_level")
         .single();
       convo = ins.data!;
     }
@@ -191,6 +176,9 @@ Deno.serve(async (req: Request) => {
     const clientHistory: WireMessage[] | undefined = body.clientHistory;
     const useClientHistory = Array.isArray(clientHistory);
     const localSummary: string | undefined = body.localSummary;
+    // İstemcinin terfi hesabından çıkan güncel seviye — bu turdan SONRA yazılır,
+    // bu turun direktif/foto uygunluğu HALA eski `convo.relationship_level`'ı kullanır.
+    const clientLevel: number | undefined = Number.isInteger(body.level) ? body.level : undefined;
 
     // === İSTEMCİ TARAFLI ÖZETLEME MODU ===
     // Kullanıcı karakterleri her 20 mesajda bir bunu tetikler.
@@ -275,7 +263,7 @@ Deno.serve(async (req: Request) => {
         "\n\nKullanıcıyla ilk kez karşılaşıyorsun. Karakterine ve bu ilişki seviyesine tam uygun, " +
         "samimi ve doğal bir açılış selamı yaz (1-2 cümle). Sadece selamı yaz, başka hiçbir şey ekleme.";
       const greeting = await callGrok([{ role: "system", content: greetingSystem }], 150);
-      return json({ conversationId, reply: greeting, xp: convo.xp ?? 0, level: currentLevel, leveledUp: false });
+      return json({ conversationId, reply: greeting, level: currentLevel });
     }
 
     system += PHOTO_INSTRUCTION;
@@ -345,26 +333,23 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    // 4b) XP / seviye güncelle
-    let xp: number = convo.xp ?? 0;
-    const counter: number = (convo.msg_counter ?? 0) + 1;
-    if (counter % MESSAGE_BATCH_SIZE === 0) xp += XP_PER_MESSAGE_BATCH;
-    if (photoUrl) xp += XP_PER_PHOTO;
-    const newLevel = levelForXp(xp);
-    const leveledUp = newLevel > currentLevel;
+    // 4b) Seviye güncelle — terfi hesabı istemcide yapıldı, sunucu sadece saklar.
+    // Bu turun direktif/foto uygunluğu zaten yukarıda eski `currentLevel` ile yapıldı;
+    // burada yazılan değer bir SONRAKİ turda kullanılacak.
+    const newLevel = clientLevel !== undefined
+      ? Math.min(MAX_LEVEL, Math.max(1, clientLevel))
+      : currentLevel;
 
     await db.from("conversations")
       .update({
         updated_at: new Date().toISOString(),
-        xp,
-        msg_counter: counter,
         relationship_level: newLevel,
       })
       .eq("id", conversationId);
 
     // 5) Özetleme — sadece DB modunda (clientHistory modunda istemci geçmişi yönetiyor)
     if (useClientHistory) {
-      return json({ conversationId, reply, photoUrl, xp, level: newLevel, leveledUp });
+      return json({ conversationId, reply, photoUrl, level: newLevel });
     }
 
     const { count: total } = await db
@@ -415,7 +400,7 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    return json({ conversationId, reply, photoUrl, xp, level: newLevel, leveledUp });
+    return json({ conversationId, reply, photoUrl, level: newLevel });
   } catch (e) {
     console.error(String(e));
     return json({ error: String(e) }, 500);

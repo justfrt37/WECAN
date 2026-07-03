@@ -9,18 +9,18 @@ import Foundation
 
 enum IcebreakerPool {
     private static let messages: [String] = [
-        "Selam! Nasılsın? 😊",
-        "Merhaba, seninle tanışmak güzel 👋",
-        "Hey! Bugün nasıl geçiyor?",
-        "Selam, biraz sohbet edelim mi? 💬",
-        "Merhaba! Seni buldum sonunda 😄",
-        "Hey, ne yapıyorsun şu an?",
-        "Selam! Profilini beğendim, tanışalım 🙂",
-        "Merhaba, ilk mesaj bana düştü galiba 😅",
-        "Hey! Günün nasıl geçti?",
-        "Selam, sohbete başlayalım mı? ✨",
-        "Merhaba! Seninle konuşmak isterim.",
-        "Hey, naber? Yeni tanışıyoruz 👋"
+        String(localized: "Hey! How are you? 😊"),
+        String(localized: "Hi, nice to meet you 👋"),
+        String(localized: "Hey! How's your day going?"),
+        String(localized: "Hi, want to chat a bit? 💬"),
+        String(localized: "Hey! Finally found you 😄"),
+        String(localized: "Hey, what are you up to right now?"),
+        String(localized: "Hey! I liked your profile, let's talk 🙂"),
+        String(localized: "Hi, guess I get to send the first message 😅"),
+        String(localized: "Hey! How was your day?"),
+        String(localized: "Hi, shall we start chatting? ✨"),
+        String(localized: "Hello! I'd love to talk to you."),
+        String(localized: "Hey, what's up? Nice to meet you 👋")
     ]
 
     private static let key = "feed.icebreakerIndex"

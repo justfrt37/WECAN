@@ -81,11 +81,11 @@
 			};
 			buildConfigurationList = AA0000000000000000000008 /* Build configuration list for PBXProject "aiGirlfriend" */;
 			compatibilityVersion = "Xcode 15.0";
-			developmentRegion = tr;
+			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
-				tr,
 				en,
+				tr,
 				Base,
 			);
 			mainGroup = AA0000000000000000000004;
@@ -131,8 +131,8 @@
 				DEVELOPMENT_TEAM = 83Q89H28CZ;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Sesli mesaj göndermek için mikrofon erişimi gerekir.";
-				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Sesini yazıya çevirip göndermek için konuşma tanıma kullanılır.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Microphone access is needed to send voice messages.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Speech recognition is used to convert your voice to text before sending.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -158,8 +158,8 @@
 				DEVELOPMENT_TEAM = 83Q89H28CZ;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Sesli mesaj göndermek için mikrofon erişimi gerekir.";
-				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Sesini yazıya çevirip göndermek için konuşma tanıma kullanılır.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Microphone access is needed to send voice messages.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Speech recognition is used to convert your voice to text before sending.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;

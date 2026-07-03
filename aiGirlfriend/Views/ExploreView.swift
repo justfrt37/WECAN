@@ -64,7 +64,7 @@ struct ExploreView: View {
     // MARK: Başlık
 
     private var header: some View {
-        Text("Tümünü Gör")
+        Text("See All")
             .font(.system(size: 22, weight: .bold))
             .foregroundStyle(.white)
             .frame(maxWidth: .infinity)
@@ -81,7 +81,7 @@ struct ExploreView: View {
             TextField(
                 "",
                 text: $search,
-                prompt: Text("İsim veya mesleğe göre ara").foregroundStyle(.white.opacity(0.5))
+                prompt: Text("Search by name or profession").foregroundStyle(.white.opacity(0.5))
             )
             .foregroundStyle(.white)
             .font(.system(size: 14))
@@ -148,15 +148,15 @@ struct ExploreView: View {
             .frame(width: 42, height: 42)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text("PRO'ya geç")
+                Text("Upgrade to PRO")
                     .font(.system(size: 15, weight: .bold))
                     .foregroundStyle(.white)
-                Text("Tüm karakterleri gör")
+                Text("See all characters")
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(.white.opacity(0.85))
             }
             Spacer()
-            Text("PRO'ya Geç")
+            Text("Upgrade to PRO")
                 .font(.system(size: 12, weight: .bold))
                 .foregroundStyle(Color(hex: 0xFF6F61))
                 .padding(.horizontal, 14)
@@ -203,11 +203,11 @@ struct ExploreView: View {
             }
             .frame(width: 64, height: 64)
 
-            Text("Kendi karakterinizi yaratın")
+            Text("Create your own character")
                 .font(.system(size: 14, weight: .bold))
                 .multilineTextAlignment(.center)
                 .foregroundStyle(.white)
-            Text("AI ile sana özel arkadaş")
+            Text("An AI companion made for you")
                 .font(.system(size: 10, weight: .medium))
                 .multilineTextAlignment(.center)
                 .foregroundStyle(.white.opacity(0.8))
@@ -297,7 +297,7 @@ private struct CharacterGridCard: View {
 
 /// "Tümünü Gör" kategori filtreleri. rawValue, Supabase `category` ile eşleşir.
 enum ExploreCategory: String, CaseIterable, Identifiable {
-    case all = "Tümü"
+    case all = "All"
     case realistic = "Realistic"
     case anime = "Anime"
     case fantasy = "Fantasy"
@@ -305,10 +305,10 @@ enum ExploreCategory: String, CaseIterable, Identifiable {
     var id: String { rawValue }
     var title: String {
         switch self {
-        case .all: return "Tümü"
-        case .realistic: return "Gerçekçi"
-        case .anime: return "Anime"
-        case .fantasy: return "Fantezi"
+        case .all: return String(localized: "All")
+        case .realistic: return String(localized: "Realistic")
+        case .anime: return String(localized: "Anime")
+        case .fantasy: return String(localized: "Fantasy")
         }
     }
 }

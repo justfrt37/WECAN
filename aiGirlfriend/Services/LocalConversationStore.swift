@@ -15,10 +15,52 @@ final class LocalConversationStore {
 
     struct Stored: Codable {
         var messages: [Message]       // tüm gerçek mesajlar (görüntüleme için)
-        var xp: Int
+        var xp: Int                   // eski mutlak XP alanı — artık kullanılmıyor, geriye dönük uyum için duruyor
         var level: Int
         var summary: String           // özetlenmiş eski mesajlar
         var summarizedCount: Int      // kaç mesaj özetlendi
+        var msgCounter: Int = 0       // terfi eşiği için mesaj sayacı (istemci taraflı)
+        var levelProgress: Double = 0 // güncel seviyenin ne kadarı tamamlandı (0...1), bkz. RelationshipXP
+
+        enum CodingKeys: String, CodingKey {
+            case messages, xp, level, summary, summarizedCount, msgCounter, levelProgress
+        }
+
+        init(
+            messages: [Message], xp: Int, level: Int, summary: String, summarizedCount: Int,
+            msgCounter: Int = 0, levelProgress: Double = 0
+        ) {
+            self.messages = messages
+            self.xp = xp
+            self.level = level
+            self.summary = summary
+            self.summarizedCount = summarizedCount
+            self.msgCounter = msgCounter
+            self.levelProgress = levelProgress
+        }
+
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            messages = try c.decode([Message].self, forKey: .messages)
+            xp = try c.decode(Int.self, forKey: .xp)
+            level = try c.decode(Int.self, forKey: .level)
+            summary = try c.decode(String.self, forKey: .summary)
+            summarizedCount = try c.decode(Int.self, forKey: .summarizedCount)
+            // Eski kayıtlarda yok — 0'dan başlar (küçük bir kozmetik sıfırlama, sorun değil).
+            msgCounter = (try? c.decode(Int.self, forKey: .msgCounter)) ?? 0
+            levelProgress = (try? c.decode(Double.self, forKey: .levelProgress)) ?? 0
+        }
+
+        func encode(to encoder: Encoder) throws {
+            var c = encoder.container(keyedBy: CodingKeys.self)
+            try c.encode(messages, forKey: .messages)
+            try c.encode(xp, forKey: .xp)
+            try c.encode(level, forKey: .level)
+            try c.encode(summary, forKey: .summary)
+            try c.encode(summarizedCount, forKey: .summarizedCount)
+            try c.encode(msgCounter, forKey: .msgCounter)
+            try c.encode(levelProgress, forKey: .levelProgress)
+        }
     }
 
     // MARK: - Dosya yolu

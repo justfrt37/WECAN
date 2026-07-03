@@ -1,586 +1,873 @@
 {
-  "sourceLanguage" : "tr",
-  "strings" : {
-    "" : {
-
-    },
-    "…Sen misin? Bir süredir haber vermemiştin." : {
-
-    },
-    "@alexm  ·  joined Mar 2025" : {
-
-    },
-    "%@ artık Keşfet'te görünmeyecek. Bu sohbet silinmeyecek." : {
-
-    },
-    "%@ böyle davransın:" : {
-
-    },
-    "%@ bunu hatırlasın:" : {
-
-    },
-    "%@. Uzun zaman oldu." : {
-
-    },
-    "%lld" : {
-
-    },
-    "%lld foto" : {
-
-    },
-    "%lld kişi seni beğendi" : {
-
-    },
-    "✨ AI karakterini yaratıyor…" : {
-
-    },
-    "✨ Karakterin Hazır!" : {
-
-    },
-    "ADIM %lld / %lld" : {
-      "localizations" : {
-        "tr" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "ADIM %1$lld / %2$lld"
+  "sourceLanguage": "en",
+  "strings": {
+    "%@ should behave like this:": {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ böyle davransın:"
           }
         }
       }
     },
-    "AI Arkadaş" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "AI Companion"
+    "%@ should remember this:": {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ bunu hatırlasın:"
           }
         }
       }
     },
-    "AI ile sana özel arkadaş" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Your custom AI companion"
+    "%@ will no longer appear in Discover. This chat won't be deleted.": {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ artık Keşfet'te görünmeyecek. Bu sohbet silinmeyecek."
           }
         }
       }
     },
-    "aiGirlfriend" : {
-
-    },
-    "Alex Morgan" : {
-
-    },
-    "Anime" : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Anime"
+    "%@ → %@": {},
+    "%@. It's been a while.": {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@. Uzun zaman oldu."
           }
         }
       }
     },
-    "Anı Ekle" : {
-
-    },
-    "BEĞEN" : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "LIKE"
+    "%lld": {},
+    "%lld people liked you": {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld kişi seni beğendi"
           }
         }
       }
     },
-    "Beğeniler" : {
-
-    },
-    "Bildirimler" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Notifications"
+    "%lld photos": {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld foto"
           }
         }
       }
     },
-    "Bir isim gir…" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Enter a name…"
+    "ABOUT": {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "HAKKIMDA"
           }
         }
       }
     },
-    "Blok" : {
-
-    },
-    "Bu isim her zaman kullanılacak" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "She'll always go by this name"
+    "AI Companion": {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "AI Arkadaş"
           }
         }
       }
     },
-    "Bu karakteri engelle?" : {
-
-    },
-    "Bu, geçmişinizi hatırlamasını sağlar" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "This makes her remember your past"
+    "ALL MESSAGES": {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "TÜM MESAJLAR"
           }
         }
       }
     },
-    "Çevrimiçi" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Online"
+    "Add Behavior": {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Davranış Ekle"
           }
         }
       }
     },
-    "Çıkış Yap" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Log Out"
+    "Add Memory": {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Anı Ekle"
           }
         }
       }
     },
-    "Daha Fazla Fotoğraf" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "More Photos"
+    "All": {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tümü"
           }
         }
       }
     },
-    "Davranış Ekle" : {
-
-    },
-    "Devam et" : {
-
-    },
-    "Devam etmek için herhangi bir yere dokun" : {
-
-    },
-    "Engelle" : {
-
-    },
-    "Engellendi" : {
-
-    },
-    "Fantezi" : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Fantasy"
+    "An AI companion made for you": {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "AI ile sana özel arkadaş"
           }
         }
       }
     },
-    "Galeri" : {
-
-    },
-    "Geçmişini anlat — nasıl tanıştınız, paylaştığınız anılar, bilmesini istediklerin…" : {
-
-    },
-    "Geçmişinizi anlat — nerede tanıştınız, anılar, neden ayrıldınız…" : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Describe your history together — where you met, memories, why it ended…"
+    "Anime": {},
+    "Block": {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Engelle"
           }
         }
       }
     },
-    "Gerçekçi" : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Realistic"
+    "Block this character?": {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bu karakteri engelle?"
           }
         }
       }
     },
-    "Giriş yapılamadı.\nİnternet bağlantını kontrol et." : {
-
-    },
-    "HAKKIMDA" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "ABOUT ME"
+    "Cancel": {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "İptal"
           }
         }
       }
     },
-    "HAYIR" : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "NOPE"
+    "Chat": {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sohbet"
           }
         }
       }
     },
-    "Henüz sohbetin yok" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "No chats yet"
+    "Chats": {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sohbetler"
           }
         }
       }
     },
-    "Heyyy! 🎉 %@ hazır, sen hazır mısın?" : {
-
-    },
-    "İLGİ ALANLARI" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "INTERESTS"
+    "Clear Chat": {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sohbeti Temizle"
           }
         }
       }
     },
-    "İptal" : {
-
-    },
-    "İsim veya mesleğe göre ara" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Search by name or profession"
+    "Close": {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kapat"
           }
         }
       }
     },
-    "İsteğe bağlı — boş başlamak istersen geç." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Optional — skip if you want a blank slate."
+    "Continue": {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Devam et"
           }
         }
       }
     },
-    "Karakteri Oluştur" : {
-
-    },
-    "Kaydet" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Save"
+    "Create Character": {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Karakteri Oluştur"
           }
         }
       }
     },
-    "Kendi karakterinizi yaratın" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Create your own character"
+    "Create your own character": {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kendi karakterinizi yaratın"
           }
         }
       }
     },
-    "Keşfet" : {
-
-    },
-    "Keşfet'ten beğendiğin birine yaz, sohbete başla 💬" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Message someone you liked from Discover 💬"
+    "Discover": {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keşfet"
           }
         }
       }
     },
-    "Lumi PRO" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Lumi PRO"
+    "Don't show again": {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bir daha gösterme"
           }
         }
       }
     },
-    "Lumi PRO aktif" : {
-
-    },
-    "LV %lld" : {
-
-    },
-    "Mesaj…" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Message…"
+    "Enter a name…": {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bir isim gir…"
           }
         }
       }
     },
-    "NIHAYET geldin!! %@ sabırsızlanıyordu 😤💥" : {
-
-    },
-    "O-oh, selam... %@ burada. Nasılsın? 🙈" : {
-
-    },
-    "Örn. bana hep 'aşkım' de" : {
-
-    },
-    "Örn. doğum günüm 5 Mayıs" : {
-
-    },
-    "PRO" : {
-
-    },
-    "PRO değil" : {
-
-    },
-    "PRO'ya geç" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Go PRO"
+    "FINALLY you're here!! %@ couldn't wait 😤💥": {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "NIHAYET geldin!! %@ sabırsızlanıyordu 😤💥"
           }
         }
       }
     },
-    "PRO'ya Geç" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Go PRO"
+    "FREQUENTLY ASKED QUESTIONS": {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "SIK SORULAN SORULAR"
           }
         }
       }
     },
-    "PRO'ya Geç · Tüm Fotoğrafları Gör" : {
-
-    },
-    "Profil" : {
-
-    },
-    "Profili Görüntüle" : {
-
-    },
-    "Seçimlerine göre %@ hazırlanıyor" : {
-
-    },
-    "Selam 👋 Ben %@. Nasılsın?" : {
-
-    },
-    "Seni Beğenenler" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Who Liked You"
+    "Fantasy": {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fantezi"
           }
         }
       }
     },
-    "Seni düşünüyordum tam... Selam aşkım 💕" : {
-
-    },
-    "Senin için" : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "For You"
+    "Gallery": {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Galeri"
           }
         }
       }
     },
-    "Seviye %lld · %@" : {
-      "localizations" : {
-        "tr" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Seviye %1$lld · %2$@"
+    "Guest User": {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Misafir Kullanıcı"
           }
         }
       }
     },
-    "Sınırsız sohbet, sesli mesaj ve özel karakterler" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Unlimited chats, voice & exclusive personas"
+    "Help & Support": {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Yardım & Destek"
           }
         }
       }
     },
-    "Sohbet" : {
-
-    },
-    "Sohbet ara" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Search chats"
+    "Hey 👋 I'm %@. How are you?": {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Selam 👋 Ben %@. Nasılsın?"
           }
         }
       }
     },
-    "Sohbete Başla" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Start Chat"
+    "Heyyy! 🎉 %@ is here, are you ready?": {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Heyyy! 🎉 %@ hazır, sen hazır mısın?"
           }
         }
       }
     },
-    "Sohbeti Temizle" : {
-
-    },
-    "Sohbetler" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Chats"
+    "I was just thinking about you... Hey babe 💕": {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Seni düşünüyordum tam... Selam aşkım 💕"
           }
         }
       }
     },
-    "Tekrar dene" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Try Again"
+    "INTERESTS": {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "İLGİ ALANLARI"
           }
         }
       }
     },
-    "Tüm karakterleri gör" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "See all characters"
+    "LIKE": {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "BEĞEN"
           }
         }
       }
     },
-    "TÜM MESAJLAR" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "ALL MESSAGES"
+    "LV %lld": {},
+    "Let's meet": {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tanışalım"
           }
         }
       }
     },
-    "Tümü" : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "All"
+    "Level %lld · %@": {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Seviye %lld · %@"
           }
         }
       }
     },
-    "Tümünü Gör" : {
-
-    },
-    "Yakında" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Coming Soon"
+    "Likes": {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Beğeniler"
           }
         }
       }
     },
-    "Yazıyor…" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Typing…"
+    "Login failed.\nCheck your internet connection.": {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Giriş yapılamadı.\nİnternet bağlantını kontrol et."
           }
         }
       }
     },
-    "YENİ" : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "NEW"
+    "Lumi PRO": {},
+    "Lumi PRO active": {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lumi PRO aktif"
           }
         }
       }
     },
-    "Yükselt" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Upgrade"
+    "Lumi PRO coming soon": {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lumi PRO yakında"
+          }
+        }
+      }
+    },
+    "Message someone you liked in Discover to start chatting 💬": {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keşfet'ten beğendiğin birine yaz, sohbete başla 💬"
+          }
+        }
+      }
+    },
+    "Message…": {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mesaj…"
+          }
+        }
+      }
+    },
+    "More Photos": {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Daha Fazla Fotoğraf"
+          }
+        }
+      }
+    },
+    "NEW": {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "YENİ"
+          }
+        }
+      }
+    },
+    "NOPE": {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "HAYIR"
+          }
+        }
+      }
+    },
+    "No chats yet": {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Henüz sohbetin yok"
+          }
+        }
+      }
+    },
+    "Not PRO": {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "PRO değil"
+          }
+        }
+      }
+    },
+    "Notifications": {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bildirimler"
+          }
+        }
+      }
+    },
+    "O-oh, hey... it's %@. How are you? 🙈": {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O-oh, selam... %@ burada. Nasılsın? 🙈"
+          }
+        }
+      }
+    },
+    "Online": {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Çevrimiçi"
+          }
+        }
+      }
+    },
+    "PRO": {},
+    "People Who Liked You": {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Seni Beğenenler"
+          }
+        }
+      }
+    },
+    "Preparing %@ based on your choices": {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Seçimlerine göre %@ hazırlanıyor"
+          }
+        }
+      }
+    },
+    "Profile": {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Profil"
+          }
+        }
+      }
+    },
+    "Realistic": {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gerçekçi"
+          }
+        }
+      }
+    },
+    "Relationship level up! 💕": {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Yakınlık seviyesi arttı! 💕"
+          }
+        }
+      }
+    },
+    "STEP %lld / %lld": {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ADIM %lld / %lld"
+          }
+        }
+      }
+    },
+    "Save": {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kaydet"
+          }
+        }
+      }
+    },
+    "Search by name or profession": {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "İsim veya mesleğe göre ara"
+          }
+        }
+      }
+    },
+    "Search chats": {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sohbet ara"
+          }
+        }
+      }
+    },
+    "See All": {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tümünü Gör"
+          }
+        }
+      }
+    },
+    "See all characters": {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tüm karakterleri gör"
+          }
+        }
+      }
+    },
+    "Send us an email": {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bize e-posta gönder"
+          }
+        }
+      }
+    },
+    "Soon": {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Yakında"
+          }
+        }
+      }
+    },
+    "Start Chatting": {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sohbete Başla"
+          }
+        }
+      }
+    },
+    "Tap anywhere to continue": {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Devam etmek için herhangi bir yere dokun"
+          }
+        }
+      }
+    },
+    "Tell your story — how you met, memories you share, anything you want them to know…": {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Geçmişini anlat — nasıl tanıştınız, paylaştığınız anılar, bilmesini istediklerin…"
+          }
+        }
+      }
+    },
+    "The subscription system isn't set up yet.": {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Abonelik sistemi henüz kurulmadı."
+          }
+        }
+      }
+    },
+    "This lets them remember your shared history": {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bu, geçmişinizi hatırlamasını sağlar"
+          }
+        }
+      }
+    },
+    "This name will always be used": {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bu isim her zaman kullanılacak"
+          }
+        }
+      }
+    },
+    "Try again": {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tekrar dene"
+          }
+        }
+      }
+    },
+    "Typing…": {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Yazıyor…"
+          }
+        }
+      }
+    },
+    "Unblock": {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Engeli Kaldır"
+          }
+        }
+      }
+    },
+    "Unlimited chat, voice messages, and exclusive characters": {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sınırsız sohbet, sesli mesaj ve özel karakterler"
+          }
+        }
+      }
+    },
+    "Upgrade": {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Yükselt"
+          }
+        }
+      }
+    },
+    "Upgrade to PRO": {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "PRO'ya Geç"
+          }
+        }
+      }
+    },
+    "Upgrade to PRO · See All Photos": {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "PRO'ya Geç · Tüm Fotoğrafları Gör"
+          }
+        }
+      }
+    },
+    "View Profile": {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Profili Görüntüle"
+          }
+        }
+      }
+    },
+    "Want to meet %@?": {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ ile tanışmak ister misin?"
+          }
+        }
+      }
+    },
+    "aiGirlfriend": {},
+    "e.g. always call me 'babe'": {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Örn. bana hep 'aşkım' de"
+          }
+        }
+      }
+    },
+    "e.g. my birthday is May 5th": {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Örn. doğum günüm 5 Mayıs"
+          }
+        }
+      }
+    },
+    "…Is that you? It's been a while since I heard from you.": {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "…Sen misin? Bir süredir haber vermemiştin."
+          }
+        }
+      }
+    },
+    "✨ Creating your AI character…": {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "✨ AI karakterini yaratıyor…"
+          }
+        }
+      }
+    },
+    "✨ Your Character Is Ready!": {
+      "localizations": {
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "✨ Karakterin Hazır!"
           }
         }
       }
     }
   },
-  "version" : "1.0"
+  "version": "1.0"
 }
