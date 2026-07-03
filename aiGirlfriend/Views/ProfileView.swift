@@ -165,6 +165,16 @@ struct ProfileView: View {
                 .onChange(of: notificationsOn) { _, wantsOn in
                     Task { await handleNotificationToggle(wantsOn) }
                 }
+            // Master toggle stays independently tappable; this chevron is the only
+            // navigation trigger to the per-bot cap menu (see NotificationSettingsView).
+            NavigationLink {
+                NotificationSettingsView()
+            } label: {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.4))
+            }
+            .frame(width: 24, height: 24)
         }
         .padding(.horizontal, 18)
         .frame(height: 54)
