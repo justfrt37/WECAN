@@ -277,13 +277,19 @@ struct ChatView: View {
                             withAnimation(.easeInOut(duration: 0.2)) {
                                 expandedMessageID = expandedMessageID == message.id ? nil : message.id
                             }
-                        }) {
+                        }, onSpeak: {
                             if voice.speakingMessageID == message.id {
                                 voice.stop()
                             } else {
                                 voice.speak(message.content, id: message.id)
                             }
-                        }
+                        }, isVoicePlaying: voice.speakingMessageID == message.id, onPlayVoice: {
+                            if voice.speakingMessageID == message.id {
+                                voice.stop()
+                            } else if let path = message.voiceLocalPath {
+                                voice.playFile(at: path, id: message.id)
+                            }
+                        })
                         .id(message.id)
                     }
                     if viewModel.showsTypingBubble {
@@ -427,6 +433,8 @@ private struct ChatBubble: View {
     var showsTimestamp: Bool = false
     var onTap: (() -> Void)? = nil
     var onSpeak: (() -> Void)? = nil
+    var isVoicePlaying: Bool = false
+    var onPlayVoice: (() -> Void)? = nil
 
     var body: some View {
         HStack(alignment: .bottom, spacing: 6) {
@@ -436,7 +444,9 @@ private struct ChatBubble: View {
                 timestampLabel
             }
 
-            if let imageURL = message.imageURL {
+            if message.isVoice {
+                VoiceMessageBubble(message: message, isUser: message.isUser, isPlaying: isVoicePlaying, onTap: { onPlayVoice?() })
+            } else if let imageURL = message.imageURL {
                 // Foto mesajı (kızın gönderdiği fotoğraf)
                 CachedImage(url: imageURL) { img in
                     img.resizable().scaledToFill()
@@ -468,7 +478,7 @@ private struct ChatBubble: View {
             }
 
             // Kızın mesajını seslendir (oynat/durdur)
-            if !message.isUser, message.imageURL == nil, let onSpeak {
+            if !message.isUser, message.imageURL == nil, !message.isVoice, let onSpeak {
                 Button(action: onSpeak) {
                     Image(systemName: isSpeaking ? "stop.circle.fill" : "speaker.wave.2.fill")
                         .font(.system(size: 16))
