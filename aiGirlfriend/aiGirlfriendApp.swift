@@ -39,17 +39,26 @@ struct aiGirlfriendApp: App {
                 let delegate = NotificationDelegate(store: store)
                 notificationDelegate = delegate
                 UNUserNotificationCenter.current().delegate = delegate
+                // Uygulama bildirime dokunulmadan (ör. ana ekran ikonuyla) açılmış
+                // olabilir — zaten teslim edilmiş bildirimlerin mesajını işle.
+                delegate.catchUpOnDeliveredNotifications()
             }
         }
         .onChange(of: scenePhase) { _, newPhase in
             switch newPhase {
             case .active:
                 NotificationScheduler.shared.onForeground(characters: store.characters)
+                notificationDelegate?.catchUpOnDeliveredNotifications()
             case .background:
                 NotificationScheduler.shared.onBackground(characters: store.characters)
             default:
                 break
             }
+        }
+        .onChange(of: store.isLoaded) { _, loaded in
+            // Bir bildirime dokunma, karakterler yüklenmeden önce (soğuk başlangıçta)
+            // gelmiş olabilir — o zaman ertelenmişti, burada tekrar oynatılır.
+            if loaded { notificationDelegate?.replayPendingTapIfNeeded() }
         }
     }
 }

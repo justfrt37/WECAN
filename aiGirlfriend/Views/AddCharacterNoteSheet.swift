@@ -15,8 +15,8 @@ enum NoteKind: String, Identifiable {
 
     var title: String {
         switch self {
-        case .memory: return "Add Memory"
-        case .behavior: return "Add Behavior"
+        case .memory: return String(localized: "Add Memory")
+        case .behavior: return String(localized: "Add Behavior")
         }
     }
 }
@@ -34,14 +34,20 @@ struct AddCharacterNoteSheet: View {
             ZStack {
                 AppColor.bg.ignoresSafeArea()
                 VStack(spacing: 16) {
-                    Text(kind == .memory
-                         ? "\(character.name) should remember this:"
-                         : "\(character.name) should behave like this:")
+                    Group {
+                        if kind == .memory {
+                            Text("\(character.name) should remember this:")
+                        } else {
+                            Text("\(character.name) should behave like this:")
+                        }
+                    }
                         .font(.system(size: 15))
                         .foregroundStyle(.white.opacity(0.8))
                         .frame(maxWidth: .infinity, alignment: .leading)
                     TextField("", text: $text,
-                              prompt: Text(kind == .memory ? "e.g. my birthday is May 5th" : "e.g. always call me 'babe'")
+                              prompt: (kind == .memory
+                                        ? Text("e.g. my birthday is May 5th")
+                                        : Text("e.g. always call me 'babe'"))
                                 .foregroundColor(.white.opacity(0.4)), axis: .vertical)
                         .lineLimit(3...6)
                         .foregroundStyle(.white).tint(AppColor.pink)

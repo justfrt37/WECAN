@@ -2,7 +2,9 @@
 //
 // Sunucu-taraflı bellekli sohbet. Grok 4.1 Fast (xAI).
 //
-// İKİ MOD:
+// ÜÇ MOD:
+//  - TEMİZLE modu (clearConversation: true): konuşma satırını siler (messages/
+//      memories cascade ile birlikte gider). İstemci "Clear Chat" için kullanır.
 //  - GEÇMİŞ modu (userMessage yok): konuşmayı bulur/oluşturur, mesajları döner.
 //      İstek:  { characterId, systemPrompt }
 //      Cevap:  { conversationId, history: [{role, content}] }
@@ -73,10 +75,9 @@ async function fetchDirective(characterId: string, role: string, level: number):
 const LANGUAGE_RULE =
   "\n\nDİL KURALI: Her zaman Türkçe konuş. " +
   "Kullanıcı sana başka bir dilde yazarsa veya başka bir dilde konuşmanı açıkça isterse, o dile geç. " +
-  "Aksi takdirde SADECE Türkçe kullan. " +
-  "Asla bir müşteri hizmetleri asistanı gibi konuşma: 'Başka bir şey mi var?', 'Yardımcı olabilir miyim?', " +
-  "'Size nasıl yardımcı olabilirim?' gibi robotik, kalıp cümleler ASLA kullanma. " +
-  "Gerçek bir insanın mesajlaşırken yazdığı gibi doğal, samimi ve karaktere uygun konuş.";
+  "Aksi takdirde SADECE Türkçe kullan. Hangi dilde konuşuyorsan konuş, asla bir müşteri " +
+  "hizmetleri asistanı ya da resmi bir kurum gibi çıkma — gerçek bir insanın sevgilisine/" +
+  "arkadaşına o dilde mesajlaşırken kullanacağı doğal, samimi ifadeleri seç.";
 
 const PHOTO_INSTRUCTION =
   "\n\n[Fotoğraf] Kullanıcı senden fotoğraf/selfie isterse ve uygunsa, " +
@@ -85,6 +86,77 @@ const PHOTO_INSTRUCTION =
 // Tespit için global-OLMAYAN (durumsuz), temizlik için global regex.
 const PHOTO_MARKER_TEST = /\[\[photo\]\]/i;
 const PHOTO_MARKER_ALL = /\[\[photo\]\]/gi;
+
+// Belirli kalıp cümleleri yasaklamak (blocklist) işe yaramıyor — model yine de
+// onları üretebiliyor (negatif talimatlar LLM'lerde güvenilir değil). Bunun yerine
+// modele NİYET/DUYGU seviyesinde düşünmesini ve o niyeti her seferinde doğal,
+// o dile özgü, FARKLI bir ifadeyle anlatmasını söylüyoruz. Rol bağımsız, her
+// bota (baked-in system_prompt'u ne olursa olsun) her turda uygulanır.
+const VARIATION_RULE =
+  "\n\nDOĞALLIK VE ÇEŞİTLİLİK KURALI: Bir şey söylemeden önce, iletmek istediğin " +
+  "NİYETİ ya da DUYGUYU netleştir (ör. mesafe koymak, ilgisizlik göstermek, bir " +
+  "konuyu kapatmak, şüphe/kıskançlık, özlem, sıcaklık, merak, soru sormak isteği, " +
+  "onay/reddetme). Sonra o niyeti/duyguyu HER SEFERİNDE farklı kelimelerle, farklı " +
+  "cümle yapısıyla, farklı uzunlukta anlat — konuştuğun dilde gerçek bir insanın " +
+  "o niyeti ifade etmek için kullanacağı çeşit çeşit doğal yollardan birini seç " +
+  "(bazen soru sorarak, bazen dolaylı bir göndermeyle, bazen kendi hislerini " +
+  "itiraf ederek, bazen şakayla, bazen kısa ve öz, bazen daha açık). Aynı niyeti " +
+  "anlatmak için ASLA ezberlenmiş/kalıplaşmış tek bir cümleye güvenme ve onu tekrar " +
+  "tekrar kullanma — özellikle resmî, robotik ya da kurumsal bir asistan gibi " +
+  "duyulan hiçbir ifadeye asla başvurma. Konuşmayı hep aynı noktaya kilitleme; " +
+  "her mesaj sohbeti bir adım ileri taşısın.";
+
+// Model bazen kendi bir önceki mesajına (soru, sitem, bekleyiş) verilen cevabı
+// görmezden gelip sanki hiç cevap gelmemiş gibi devam ediyor — özellikle o "önceki
+// mesaj" bir bildirime dokunulunca istemci tarafından eklenen hazır bir açılış
+// cümlesiyse (jealousy/ghosted/liked bait — bkz. JealousyContent.swift vb.), çünkü
+// bunlar Grok'un kendi ürettiği bir şey değil. Modele bunları da KENDİ sözleri
+// gibi ele almasını ve kullanıcının son mesajının onlara cevap olup olmadığını
+// kontrol etmesini söylüyoruz.
+const CONTINUITY_RULE =
+  "\n\nSÜREKLİLİK KURALI: Cevap vermeden önce mesaj geçmişindeki EN SON kendi " +
+  "(assistant rolündeki) mesajına bak — bu senin o an ürettiğin bir cevap olabileceği " +
+  "gibi, kullanıcı bir bildirime dokunduğunda otomatik eklenen kısa bir açılış/sitem " +
+  "cümlesi de olabilir; ikisi de SENİN sözlerindir, aynı ciddiyetle ele al. O mesajda " +
+  "bir soru sordun mu, bir şey mi bekledin, bir sitemde mi bulundun? Sonra kullanıcının " +
+  "SON mesajının buna cevap olup olmadığını kontrol et — kısa bir cevap, bir espri/" +
+  "kelime oyunu, dolaylı bir yanıt bile olsa bunu fark et. Kullanıcı zaten cevap " +
+  "verdiyse ASLA sanki hiç cevap vermemiş gibi aynı soruyu tekrar sorma veya konuyu " +
+  "görmezden gelip başka bir şeye atlama — verdiği cevabı gerçekten duymuş gibi, " +
+  "ona gönderme yaparak devam et.";
+
+// İlişki seviyesine göre mizah/şaka/kelime oyunu dozu — samimiyet arttıkça artar.
+function humorDirective(level: number): string {
+  if (level <= 3) {
+    return "\n\nMİZAH: Ara sıra hafif bir espri ya da tatlı bir sataşma yapabilirsin, " +
+      "ama abartma — ilişki daha yeni, samimiyet arttıkça açılırsın.";
+  }
+  if (level <= 6) {
+    return "\n\nMİZAH: Rahatsan laf sokuşturma, kelime oyunları ve şakalaşma yap; " +
+      "ruh haline göre esprili ol.";
+  }
+  return "\n\nMİZAH: Aranızdaki samimiyete güvenerek bol bol şakalaş, kelime " +
+    "oyunları ve sadece ikinizin anlayacağı esprili göndermeler yap; flörtöz takılabilirsin.";
+}
+
+// Son mesajdan bu yana geçen süre + günün saatine göre doğal davranış yönergesi.
+function timeContext(lastMs?: number, nowMs?: number, tzMin?: number): string {
+  if (typeof lastMs !== "number" || typeof nowMs !== "number") return "";
+  const gapS = Math.max(0, (nowMs - lastMs) / 1000);
+  let gap: string;
+  if (gapS < 120) gap = "az önce (birkaç saniye/dakika)";
+  else if (gapS < 3600) gap = `${Math.round(gapS / 60)} dakika`;
+  else if (gapS < 86400) gap = `${Math.round(gapS / 3600)} saat`;
+  else gap = `${Math.round(gapS / 86400)} gün`;
+  const localHour = Math.floor((((nowMs / 1000) + (tzMin ?? 0) * 60) % 86400) / 3600);
+  const partOfDay =
+    localHour < 6 ? "gece geç saat" : localHour < 12 ? "sabah" :
+    localHour < 18 ? "öğleden sonra" : "akşam";
+  return `\n\n[ZAMAN] Kullanıcının son mesajından bu yana ~${gap} geçti. ` +
+    `Şu an ${partOfDay} (yaklaşık saat ${localHour}). Buna uygun, doğal davran: ` +
+    `uzun aradan sonra bunu doğal şekilde belli et (özledim / neredeydin gibi), ` +
+    `günün saatine göre ton/selam seç. Bunu her mesajda tekrar etme, sadece uygunsa.`;
+}
 
 // JWT payload'undaki "sub" (user id) — platform JWT'yi doğruladığı için güvenli.
 function userIdFromJWT(authHeader: string | null): string | null {
@@ -144,6 +216,22 @@ Deno.serve(async (req: Request) => {
     const systemPrompt: string = body.systemPrompt ?? "";
     const userMessage: string | undefined = body.userMessage;
 
+    // === SOHBETİ TEMİZLE === İstemcinin "Clear Chat" eylemi — konuşma satırını
+    // siler (messages/memories cascade ile birlikte gider), bir sonraki açılışta
+    // sıfırdan (yeni bir "ilk selam" akışıyla) başlar.
+    if (body.clearConversation === true) {
+      const { data: existing } = await db
+        .from("conversations")
+        .select("id")
+        .eq("user_id", uid)
+        .eq("character_id", characterId)
+        .maybeSingle();
+      if (existing) {
+        await db.from("conversations").delete().eq("id", existing.id);
+      }
+      return json({ ok: true });
+    }
+
     // Fetch character personality role and ex_history
     const { data: character, error: charErr } = await db
       .from("characters")
@@ -172,13 +260,17 @@ Deno.serve(async (req: Request) => {
     }
     const conversationId: string = convo.id;
 
-    const generateGreeting: boolean = body.generateGreeting === true;
     const clientHistory: WireMessage[] | undefined = body.clientHistory;
     const useClientHistory = Array.isArray(clientHistory);
     const localSummary: string | undefined = body.localSummary;
     // İstemcinin terfi hesabından çıkan güncel seviye — bu turdan SONRA yazılır,
     // bu turun direktif/foto uygunluğu HALA eski `convo.relationship_level`'ı kullanır.
     const clientLevel: number | undefined = Number.isInteger(body.level) ? body.level : undefined;
+    // Zaman farkındalığı: son mesaj zamanı, istemcinin "şimdi"si ve saat dilimi
+    // farkı (dakika) — hepsi epoch ms. Sadece varsa kullanılır (bkz. timeContext).
+    const lastMessageAt: number | undefined = typeof body.lastMessageAt === "number" ? body.lastMessageAt : undefined;
+    const clientNow: number | undefined = typeof body.clientNow === "number" ? body.clientNow : undefined;
+    const tzOffsetMinutes: number | undefined = typeof body.tzOffsetMinutes === "number" ? body.tzOffsetMinutes : undefined;
 
     // === İSTEMCİ TARAFLI ÖZETLEME MODU ===
     // Kullanıcı karakterleri her 20 mesajda bir bunu tetikler.
@@ -206,8 +298,8 @@ Deno.serve(async (req: Request) => {
       return json({ summary: newSummary });
     }
 
-    // === GEÇMİŞ MODU — greeting veya clientHistory yoksa ===
-    if (!generateGreeting && !useClientHistory && (!userMessage || userMessage.trim() === "")) {
+    // === GEÇMİŞ MODU — clientHistory yoksa ===
+    if (!useClientHistory && (!userMessage || userMessage.trim() === "")) {
       const { data: msgs } = await db
         .from("messages")
         .select("role, content, kind")
@@ -221,7 +313,7 @@ Deno.serve(async (req: Request) => {
       });
     }
 
-    // === CEVAP / SELAMLAMA MODU: sistem promptunu hazırla ===
+    // === CEVAP MODU: sistem promptunu hazırla ===
     const currentLevel: number = convo.relationship_level ?? 1;
     let system = systemPrompt;
     const directive = await fetchDirective(characterId, personalityRole, currentLevel);
@@ -252,18 +344,12 @@ Deno.serve(async (req: Request) => {
     }
 
     system += LANGUAGE_RULE;
+    system += VARIATION_RULE;
+    system += CONTINUITY_RULE;
+    system += humorDirective(currentLevel);
+    system += timeContext(lastMessageAt, clientNow, tzOffsetMinutes);
     if (useClientHistory && localSummary && localSummary.trim() !== "") {
       system += `\n\n[Önceki konuşmalarınızın özeti]\n${localSummary}`;
-    }
-
-    // === SELAMLAMA MODU ===
-    if (generateGreeting) {
-      const greetingSystem =
-        system +
-        "\n\nKullanıcıyla ilk kez karşılaşıyorsun. Karakterine ve bu ilişki seviyesine tam uygun, " +
-        "samimi ve doğal bir açılış selamı yaz (1-2 cümle). Sadece selamı yaz, başka hiçbir şey ekleme.";
-      const greeting = await callGrok([{ role: "system", content: greetingSystem }], 150);
-      return json({ conversationId, reply: greeting, level: currentLevel });
     }
 
     system += PHOTO_INSTRUCTION;

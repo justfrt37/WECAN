@@ -77,6 +77,12 @@ struct MainTabView: View {
                     store.pendingMeetRequest = nil
                 }
             }
+            .onChange(of: store.pendingTab) { _, tab in
+                if let tab {
+                    selection = tab
+                    store.pendingTab = nil
+                }
+            }
         }
         .tint(AppColor.pink)
     }

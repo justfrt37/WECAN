@@ -86,7 +86,7 @@ final class NotificationScheduler {
             }
 
             let content = UNMutableNotificationContent()
-            content.title = String(localized: "'\(character.name)' sent you a message.")
+            content.title = String(localized: "\(character.name) sent you a message.")
             content.userInfo = [
                 "type": NotificationKind.ghosted.rawValue,
                 "characterId": character.id.uuidString,
@@ -121,7 +121,7 @@ final class NotificationScheduler {
         jealousyTargetCharacterID = bot.id
 
         let content = UNMutableNotificationContent()
-        content.title = String(localized: "'\(bot.name)' noticed you were online.")
+        content.title = String(localized: "\(bot.name) sent you a message.")
         content.userInfo = ["type": NotificationKind.jealousy.rawValue, "characterId": bot.id.uuidString]
 
         let delay = Double.random(in: 120...600) // 2-10 minutes
@@ -138,25 +138,36 @@ final class NotificationScheduler {
     }
 
     // MARK: - Level-Up Tease (backgrounded only, 80% progress, 1min delay)
+    // Sadece bir bildirim — herhangi bir bot metni yok, sadece o sohbete yönlendirir.
+    // Bot sayısından bağımsız, günde TOPLAM en fazla bir kez gönderilir.
 
     private static func levelUpID(for characterID: UUID) -> String { "notif.levelup.\(characterID.uuidString)" }
+    private static let lastFiredKey = "notif.levelup.lastFiredDate"
+
+    private var canFireLevelUpToday: Bool {
+        guard let last = UserDefaults.standard.object(forKey: Self.lastFiredKey) as? Date else { return true }
+        return !Calendar.current.isDateInToday(last)
+    }
 
     func evaluateLevelUpOnBackground(characters: [Character]) {
-        for character in characters {
-            guard !BlockedCharactersStore.isBlocked(character.id),
-                  let stored = LocalConversationStore.shared.load(for: character.id),
-                  stored.levelProgress >= 0.8,
-                  NotificationPreferencesStore.canSendMore(for: character.id)
-            else { continue }
+        guard canFireLevelUpToday else { return }
 
-            let content = UNMutableNotificationContent()
-            content.title = String(localized: "'\(character.name)' is warming up to you...")
-            content.userInfo = ["type": NotificationKind.levelUp.rawValue, "characterId": character.id.uuidString]
-
-            let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 60, repeats: false)
-            let request = UNNotificationRequest(identifier: Self.levelUpID(for: character.id), content: content, trigger: trigger)
-            center.add(request)
+        let eligible = characters.filter { character in
+            !BlockedCharactersStore.isBlocked(character.id) &&
+            (LocalConversationStore.shared.load(for: character.id)?.levelProgress ?? 0) >= 0.8 &&
+            NotificationPreferencesStore.canSendMore(for: character.id)
         }
+        guard let character = eligible.randomElement() else { return }
+
+        let content = UNMutableNotificationContent()
+        content.title = String(localized: "\(character.name) is warming up to you...")
+        content.body = String(localized: "Keep talking to get your intimacy to the next level.")
+        content.userInfo = ["type": NotificationKind.levelUp.rawValue, "characterId": character.id.uuidString]
+
+        let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 60, repeats: false)
+        let request = UNNotificationRequest(identifier: Self.levelUpID(for: character.id), content: content, trigger: trigger)
+        center.add(request)
+        UserDefaults.standard.set(Date(), forKey: Self.lastFiredKey)
     }
 
     /// Called on app foreground — never let a level-up tease fire while the app is active.

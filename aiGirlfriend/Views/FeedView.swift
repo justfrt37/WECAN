@@ -130,7 +130,7 @@ struct FeedView: View {
         }
     }
 
-    private func swipeBadge(text: String, emoji: String, color: Color, rotation: Double) -> some View {
+    private func swipeBadge(text: LocalizedStringKey, emoji: String, color: Color, rotation: Double) -> some View {
         HStack(spacing: 6) {
             Text(emoji)
                 .font(.system(size: 24))
@@ -287,14 +287,14 @@ private struct FeedCard: View {
         .frame(maxWidth: .infinity)
     }
 
-    private func bigActionButton(icon: String, label: String, action: @escaping () -> Void) -> some View {
+    private func bigActionButton(icon: String, label: LocalizedStringKey, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             bigActionLabel(icon: icon, label: label)
         }
         .buttonStyle(.plain)
     }
 
-    private func bigActionLabel(icon: String, label: String) -> some View {
+    private func bigActionLabel(icon: String, label: LocalizedStringKey) -> some View {
         HStack(spacing: 8) {
             Image(systemName: icon)
                 .font(.system(size: 18, weight: .semibold))
@@ -360,7 +360,7 @@ private struct SwipeTutorialOverlay: View {
         .transition(.opacity)
     }
 
-    private func tutorialBadge(emoji: String, text: String, caption: String) -> some View {
+    private func tutorialBadge(emoji: String, text: LocalizedStringKey, caption: LocalizedStringKey) -> some View {
         VStack(spacing: 6) {
             Text(emoji).font(.system(size: 30))
             Text(text)

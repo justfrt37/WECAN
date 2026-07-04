@@ -62,7 +62,13 @@ struct LikesView: View {
             Label("\(likers.count) people liked you", systemImage: "heart.fill")
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(AppColor.pink)
-            Label(isPro ? "Lumi PRO active" : "Not PRO", systemImage: "crown.fill")
+            Group {
+                if isPro {
+                    Label("Lumi PRO active", systemImage: "crown.fill")
+                } else {
+                    Label("Not PRO", systemImage: "crown.fill")
+                }
+            }
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(Color(hex: 0xFFB938))
         }
@@ -119,7 +125,7 @@ private struct LikeCard: View {
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay(alignment: .topLeading) {
             if let badge {
-                Text(badge)
+                Text(LocalizedStringKey(badge))
                     .font(.system(size: 10, weight: .bold))
                     .foregroundStyle(.white)
                     .padding(.horizontal, 8).padding(.vertical, 4)

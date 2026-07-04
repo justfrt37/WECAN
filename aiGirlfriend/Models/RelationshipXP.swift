@@ -6,8 +6,9 @@
 //  Model: XP artık kümülatif bir sayı değil, "şu anki seviyenin ne kadarı
 //  tamamlandı" (0...1) şeklinde bir ORAN. Her mesaj-batch'i (5 mesajda bir) veya
 //  foto gönderimi, seviyenin gerektirdiği ilerlemenin bir YÜZDESİNİ ekler.
-//  Bu yüzde seviye arttıkça küçülür (terfi gittikçe zorlaşır):
-//    Lv 1-2: %10/tık, Lv 3: %8, Lv 5: %7, Lv 7: %5, ... (düz azalan eğri).
+//  Lv 1-3 hızlı terfi eder (ilk bağ kurulumu kolay olsun diye): %33/%25/%18/tık
+//  (~15/20/28 mesaj). Lv 4+ eskisi gibi düz azalan eğriyle zorlaşır:
+//    Lv 5: %7, Lv 7: %5, ... (konveks, düşük tabanı %1).
 //
 
 import Foundation
@@ -18,14 +19,20 @@ enum RelationshipXP {
     static let photoGainMultiplier = 1.5   // foto, normal tıktan %50 daha değerli (eski 30/20 oranı)
 
     /// Bu seviyedeyken bir "kazanım tık"ının seviye ilerlemesine kattığı yüzde (0...100).
-    /// Lv1-2 sabit %10. Lv3+ için düz azalan eğri: p(x) = -0.125x² + 8.125, x = level-2.
-    /// Bu eğri (3,8) (5,7) (7,5) noktalarından tam geçer — terfi üst seviyelerde
-    /// giderek zorlaşsın diye kasıtlı olarak konveks (ivmeli) azalıyor.
+    /// Lv1-3 hızlı: %33/%25/%18 (ilk bağ kurulumu kolay olsun diye). Lv4+ için
+    /// düz azalan eğri: p(x) = -0.125x² + 8.125, x = level-2 — bu eğri (3,8) (5,7)
+    /// (7,5) noktalarından tam geçer; terfi üst seviyelerde giderek zorlaşsın diye
+    /// kasıtlı olarak konveks (ivmeli) azalıyor.
     static func gainPercent(forLevel level: Int) -> Double {
-        guard level > 2 else { return 10 }
-        let x = Double(level - 2)
-        let raw = -0.125 * x * x + 8.125
-        return max(1, raw)   // en tepede bile tamamen tıkanmasın diye %1 taban
+        switch level {
+        case ...1: return 33   // ~15 mesaj/seviye
+        case 2:    return 25   // ~20 mesaj/seviye
+        case 3:    return 18   // ~28 mesaj/seviye
+        default:
+            let x = Double(level - 2)
+            let raw = -0.125 * x * x + 8.125
+            return max(1, raw)   // en tepede bile tamamen tıkanmasın diye %1 taban
+        }
     }
 
     static func messageGainFraction(forLevel level: Int) -> Double {

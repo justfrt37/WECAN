@@ -136,7 +136,7 @@ struct ProfileView: View {
         Rectangle().fill(.white.opacity(0.06)).frame(height: 1)
     }
 
-    private func menuRow(_ icon: String, _ title: String, tint: Color) -> some View {
+    private func menuRow(_ icon: String, _ title: LocalizedStringKey, tint: Color) -> some View {
         HStack(spacing: 14) {
             rowIcon(icon, tint: tint)
             Text(title)

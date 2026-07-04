@@ -21,14 +21,17 @@ final class LocalConversationStore {
         var summarizedCount: Int      // kaç mesaj özetlendi
         var msgCounter: Int = 0       // terfi eşiği için mesaj sayacı (istemci taraflı)
         var levelProgress: Double = 0 // güncel seviyenin ne kadarı tamamlandı (0...1), bkz. RelationshipXP
+        /// Sohbetin GERÇEKTE hangi dilde geçtiğine dair son tahmin ("tr"/"en") —
+        /// bildirim içeriği (JealousyContent vb.) bunu kullanır. Bkz. ConversationLanguage.
+        var detectedLanguage: String?
 
         enum CodingKeys: String, CodingKey {
-            case messages, xp, level, summary, summarizedCount, msgCounter, levelProgress
+            case messages, xp, level, summary, summarizedCount, msgCounter, levelProgress, detectedLanguage
         }
 
         init(
             messages: [Message], xp: Int, level: Int, summary: String, summarizedCount: Int,
-            msgCounter: Int = 0, levelProgress: Double = 0
+            msgCounter: Int = 0, levelProgress: Double = 0, detectedLanguage: String? = nil
         ) {
             self.messages = messages
             self.xp = xp
@@ -37,6 +40,7 @@ final class LocalConversationStore {
             self.summarizedCount = summarizedCount
             self.msgCounter = msgCounter
             self.levelProgress = levelProgress
+            self.detectedLanguage = detectedLanguage
         }
 
         init(from decoder: Decoder) throws {
@@ -49,6 +53,7 @@ final class LocalConversationStore {
             // Eski kayıtlarda yok — 0'dan başlar (küçük bir kozmetik sıfırlama, sorun değil).
             msgCounter = (try? c.decode(Int.self, forKey: .msgCounter)) ?? 0
             levelProgress = (try? c.decode(Double.self, forKey: .levelProgress)) ?? 0
+            detectedLanguage = try? c.decode(String.self, forKey: .detectedLanguage)
         }
 
         func encode(to encoder: Encoder) throws {
@@ -60,6 +65,7 @@ final class LocalConversationStore {
             try c.encode(summarizedCount, forKey: .summarizedCount)
             try c.encode(msgCounter, forKey: .msgCounter)
             try c.encode(levelProgress, forKey: .levelProgress)
+            try c.encodeIfPresent(detectedLanguage, forKey: .detectedLanguage)
         }
     }
 

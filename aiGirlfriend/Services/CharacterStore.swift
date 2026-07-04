@@ -27,6 +27,10 @@ final class CharacterStore {
     /// görüp sohbete programatik olarak geçiş yapar (bkz. MeetRequest).
     var pendingMeetRequest: MeetRequest?
 
+    /// Bildirime dokunulunca — belirli bir botun sohbetine değil, sadece
+    /// Sohbetler sekmesine geçiş yapmak için (level-up dışındaki tüm bot bildirimleri).
+    var pendingTab: MainTab?
+
     func setTyping(_ id: UUID, _ value: Bool) {
         if value { typingCharacterIDs.insert(id) } else { typingCharacterIDs.remove(id) }
     }

@@ -66,30 +66,44 @@ struct ChatListView: View {
         items = convs.compactMap { conv in
             guard let ch = store.characters.first(where: { $0.id == conv.characterID }) else { return nil }
             let convMsgs = byConv[conv.id] ?? []
-            let assistantCount = convMsgs.filter { !$0.isUser }.count
-            let unread = max(0, assistantCount - ReadTracker.seen(conv.characterID))
-            // Sohbet geçmişini önbelleğe al (eskiden yeniye) → ChatView anında açılır.
-            store.chatCache[ch.id] = convMsgs.reversed().map {
-                Message(role: ChatRole(rawValue: $0.role) ?? .assistant,
-                        content: $0.content, createdAt: $0.date ?? Date())
+            let localStored = LocalConversationStore.shared.load(for: conv.characterID)
+
+            // Yerel depo VARSA baz alınır — sunucu hiçbir zaman görmediği bildirim
+            // enjeksiyonlarını (jealousy/ghosted/liked) da içerir; `ReadTracker.seen`
+            // de zaten bu yerel sayıma göre tutuluyor (bkz. ChatViewModel.markReadNow).
+            let displayMessages: [Message]
+            let unread: Int
+            if let localStored, !localStored.messages.isEmpty {
+                displayMessages = localStored.messages
+                let assistantCount = localStored.messages.filter { $0.role == .assistant }.count
+                unread = max(0, assistantCount - ReadTracker.seen(conv.characterID))
+            } else {
+                displayMessages = convMsgs.reversed().map {
+                    Message(role: ChatRole(rawValue: $0.role) ?? .assistant,
+                            content: $0.content, createdAt: $0.date ?? Date())
+                }
+                let assistantCount = convMsgs.filter { !$0.isUser }.count
+                unread = max(0, assistantCount - ReadTracker.seen(conv.characterID))
             }
-            // Sunucuda mesaj yoksa (örn. yalnızca yerelde duran AI selamı) cihazdaki
-            // son mesaja düş — boş zaman tanıtım (tagline) yerine bunu göster.
-            let last = convMsgs.first ?? localLastMessage(for: conv)
+            // Sohbet geçmişini önbelleğe al → ChatView anında açılır, bildirimle
+            // gelen mesajı da görür (bayat sunucu-only önbellekle ezilmesin diye).
+            store.chatCache[ch.id] = displayMessages
+
+            let last: LastMessage? = displayMessages.last.map {
+                LastMessage(conversationID: conv.id, content: $0.content,
+                            role: $0.role.rawValue, createdAt: Self.iso8601.string(from: $0.createdAt))
+            }
             return ChatItem(character: ch, conversationID: conv.id,
                             last: last, unread: unread, updatedAt: conv.updatedAt)
         }
         isLoading = false
     }
 
-    /// Cihazda saklı sohbetin son mesajını `LastMessage`'a çevirir (sunucuda kayıt yoksa kullanılır).
-    private func localLastMessage(for conv: ConversationSummary) -> LastMessage? {
-        guard let msg = LocalConversationStore.shared.load(for: conv.characterID)?.messages.last else { return nil }
-        let fmt = ISO8601DateFormatter()
-        fmt.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return LastMessage(conversationID: conv.id, content: msg.content,
-                            role: msg.role.rawValue, createdAt: fmt.string(from: msg.createdAt))
-    }
+    private static let iso8601: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
 
     // MARK: Header
 
@@ -240,12 +254,13 @@ private struct ChatHistoryRow: View {
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 10)
+        .background(hasUnread ? AppColor.pink.opacity(0.08) : .clear)
         .contextMenu {
             Button { showProfile = true } label: { Label("View Profile", systemImage: "person.circle") }
             Button { addSheetKind = .memory } label: { Label("Add Memory", systemImage: "sparkles") }
             Button { addSheetKind = .behavior } label: { Label("Add Behavior", systemImage: "face.smiling") }
             Button(role: .destructive) {
-                ChatMaintenance.clearChat(characterID: item.character.id, store: store)
+                Task { await ChatMaintenance.clearChat(character: item.character, store: store) }
             } label: { Label("Clear Chat", systemImage: "trash") }
             if isBlocked {
                 Button {
@@ -277,7 +292,13 @@ private struct ChatHistoryRow: View {
                 .italic()
                 .foregroundStyle(AppColor.pink)
         } else if let last = item.last {
-            Text(last.isUser ? "You: \(last.content)" : last.content)
+            Group {
+                if last.isUser {
+                    Text("You: \(last.content)")
+                } else {
+                    Text(last.content)
+                }
+            }
                 .foregroundStyle(hasUnread ? .white : .white.opacity(0.6))
         } else {
             Text(item.character.tagline)

@@ -14,12 +14,18 @@ private struct ChatRequest: Codable {
     let characterId: String
     let systemPrompt: String
     let userMessage: String?
-    let generateGreeting: Bool?
     let clientHistory: [WireHistoryMessage]?
     let localSummary: String?
     let summarizeMessages: [WireHistoryMessage]?
     let existingSummary: String?
     let level: Int?   // istemci taraflı hesaplanan güncel seviye — sunucu sadece saklar
+    // Zaman farkındalığı — epoch ms cinsinden. Sunucu bunlarla mesaj arasındaki
+    // boşluğu ve günün saatini hesaplayıp bota doğal bir zaman bağlamı verir.
+    let lastMessageAt: Double?
+    let clientNow: Double?
+    let tzOffsetMinutes: Int?
+    /// "Clear Chat" — sunucudaki conversation/messages satırlarını siler.
+    let clearConversation: Bool?
 }
 
 private struct WireMessage: Codable {
@@ -109,8 +115,10 @@ struct ChatService {
     }
 
     /// Preset karakter: yeni mesaj gönder.
-    func send(character: Character, userMessage: String, level: Int) async throws -> ChatReply {
-        let resp = try await call(character: character, userMessage: userMessage, level: level)
+    /// `lastMessageAt`: sohbetteki bir önceki mesajın zamanı — sunucu bunu şu anki
+    /// zamanla karşılaştırıp bota doğal bir zaman/boşluk bağlamı verir.
+    func send(character: Character, userMessage: String, level: Int, lastMessageAt: Date? = nil) async throws -> ChatReply {
+        let resp = try await call(character: character, userMessage: userMessage, level: level, lastMessageAt: lastMessageAt)
         return ChatReply(
             reply: resp.reply ?? "",
             level: resp.level ?? level,
@@ -121,12 +129,14 @@ struct ChatService {
     /// Kullanıcı karakteri: geçmişi + özeti istemciden gönder; Supabase messages'a yazılmaz.
     /// `level`: istemcinin şu an bildiği (bir önceki turdan hesaplanmış) seviye — sunucu
     /// bunu bu turun direktif/foto uygunluğu kontrolünden SONRA kalıcı olarak saklar.
+    /// `lastMessageAt`: sohbetteki bir önceki mesajın zamanı — zaman farkındalığı için.
     func sendWithLocalHistory(
         character: Character,
         localMessages: [Message],
         summary: String,
         userMessage: String,
-        level: Int
+        level: Int,
+        lastMessageAt: Date? = nil
     ) async throws -> ChatReply {
         let wireHistory = localMessages
             .filter { $0.imageURL == nil }
@@ -136,7 +146,8 @@ struct ChatService {
             character: character,
             userMessage: userMessage,
             extra: .localHistory(wireHistory, summary: summary.isEmpty ? nil : summary),
-            level: level
+            level: level,
+            lastMessageAt: lastMessageAt
         )
         return ChatReply(
             reply: resp.reply ?? "",
@@ -145,10 +156,10 @@ struct ChatService {
         )
     }
 
-    /// İlk açılış selamı — AI karaktere + seviyeye özel üretir.
-    func generateGreeting(character: Character) async throws -> String {
-        let resp = try await perform(character: character, userMessage: nil, extra: .greeting)
-        return resp.reply ?? ""
+    /// "Sohbeti Temizle" — sunucudaki conversation/messages satırlarını siler
+    /// (cascade ile memories de gider). İstemci ayrıca kendi yerel kopyasını temizler.
+    func clearConversation(character: Character) async throws {
+        _ = try await perform(character: character, userMessage: nil, extra: .clear)
     }
 
     /// Eski mesajları özetle (yerel mod için istemci tarafı özetleme).
@@ -172,17 +183,17 @@ struct ChatService {
 
     private enum RequestExtra {
         case none
-        case greeting
+        case clear
         case localHistory([WireHistoryMessage], summary: String?)
         case summarize([WireHistoryMessage], existing: String)
     }
 
-    private func call(character: Character, userMessage: String?, level: Int? = nil) async throws -> ChatResponse {
+    private func call(character: Character, userMessage: String?, level: Int? = nil, lastMessageAt: Date? = nil) async throws -> ChatResponse {
         do {
-            return try await perform(character: character, userMessage: userMessage, extra: .none, level: level)
+            return try await perform(character: character, userMessage: userMessage, extra: .none, level: level, lastMessageAt: lastMessageAt)
         } catch ChatServiceError.badStatus(let code, _) where code == 401 {
             _ = await SupabaseAuth.recover()
-            return try await perform(character: character, userMessage: userMessage, extra: .none, level: level)
+            return try await perform(character: character, userMessage: userMessage, extra: .none, level: level, lastMessageAt: lastMessageAt)
         }
     }
 
@@ -190,7 +201,8 @@ struct ChatService {
         character: Character,
         userMessage: String?,
         extra: RequestExtra = .none,
-        level: Int? = nil
+        level: Int? = nil,
+        lastMessageAt: Date? = nil
     ) async throws -> ChatResponse {
         var request = URLRequest(url: Config.chatFunctionURL)
         request.httpMethod = "POST"
@@ -199,7 +211,7 @@ struct ChatService {
         request.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
         request.setValue(Config.supabaseAnonKey, forHTTPHeaderField: "apikey")
 
-        var isGreeting: Bool? = nil
+        var clearConversation: Bool? = nil
         var clientHistory: [WireHistoryMessage]? = nil
         var localSummary: String? = nil
         var summarizeMessages: [WireHistoryMessage]? = nil
@@ -208,8 +220,8 @@ struct ChatService {
         switch extra {
         case .none:
             break
-        case .greeting:
-            isGreeting = true
+        case .clear:
+            clearConversation = true
         case .localHistory(let h, let s):
             clientHistory = h
             localSummary = s
@@ -222,12 +234,15 @@ struct ChatService {
             characterId: character.id.uuidString.lowercased(),
             systemPrompt: character.systemPrompt,
             userMessage: userMessage,
-            generateGreeting: isGreeting,
             clientHistory: clientHistory,
             localSummary: localSummary,
             summarizeMessages: summarizeMessages,
             existingSummary: existingSummary,
-            level: level
+            level: level,
+            lastMessageAt: lastMessageAt.map { $0.timeIntervalSince1970 * 1000 },
+            clientNow: Date().timeIntervalSince1970 * 1000,
+            tzOffsetMinutes: TimeZone.current.secondsFromGMT() / 60,
+            clearConversation: clearConversation
         )
         request.httpBody = try JSONEncoder().encode(body)
 

@@ -27,21 +27,10 @@ enum Config {
 
     /// Sesli mesaj (voice-note) sentezi — 28 ses × 7 dil, Google Cloud TTS.
     /// Var olan `tts` fonksiyonundan (eski konuşma-balonu-seslendirme,
-    /// OpenAI tabanlı) BİLEREK AYRI — bkz. VoicePlayer.swift.
+    /// OpenAI tabanlı) BİLEREK AYRI — bkz. VoicePlayer.swift. Google TTS
+    /// anahtarı bu Edge Function'ın Supabase secret'ı olarak sunucuda durur,
+    /// istemcide hiç bulunmaz.
     static var voiceMessageTTSFunctionURL: URL {
         URL(string: "\(supabaseURL)/functions/v1/voice-message-tts")!
     }
-
-    // ⚠️ GEÇİCİ GÜVENLİK AÇIĞI — SADECE STOPGAP ⚠️
-    // Supabase projesinde admin/owner yetkisi olmadığı için GOOGLE_TTS_API_KEY
-    // Edge Function secret olarak eklenemedi (Dashboard > Edge Functions >
-    // Secrets, rol bazlı yetki gerektiriyor). Bu key normalde İSTEMCİDE ASLA
-    // durmamalı — burada duruyor olması app binary'sinden çıkarılabilir demek.
-    // GCP Console'da bu key'in "Application restrictions" > "iOS apps" >
-    // bundle ID (com.firat.aiGirlfriend) ile kısıtlandığı varsayılıyor — bu,
-    // riski azaltır ama SIFIRLAMAZ (bundle ID sahteciliği mümkün).
-    // Admin/owner erişimi olan biri secret'ı sunucuya taşıdığında: bu satırı
-    // ve VoiceMap.swift'i sil, TTSService.synthesizeVoiceMessage'ı tekrar
-    // voiceMessageTTSFunctionURL'i çağıracak şekilde geri al.
-    static let googleTTSAPIKey = "AIzaSyAQMAOvGmL7Flth-Q65qrq0ZBT6gCHy6cE"
 }

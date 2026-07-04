@@ -91,35 +91,27 @@ extension TTSService {
     /// Sesli mesaj için tek seferlik sentez — role/vibe/lang'e göre 28 sesten
     /// birini seçer. Var olan `synthesize(text:)`'ten (yeniden-seslendirme,
     /// cihaz-içi fallback'li) FARKLI — burada fallback yok, başarısızlık gerçek hata.
-    ///
-    /// ⚠️ GEÇİCİ: normalde `voiceMessageTTSFunctionURL` (Supabase Edge Function,
-    /// key sunucuda) çağrılmalı. Şu an admin/owner erişimi olmadığı için
-    /// Google Cloud TTS'i DOĞRUDAN istemciden çağırıyoruz (bkz. Config.googleTTSAPIKey'deki
-    /// uyarı). Secret sunucuya taşındığında bu metod tekrar Edge Function'ı
-    /// çağıracak şekilde geri alınmalı; `voice-message-tts` fonksiyonu ve
-    /// `voiceMap.ts` zaten deploy edilmiş durumda, bekliyor.
+    /// `voice-message-tts` Edge Function'ı çağırır — Google TTS anahtarı
+    /// sunucuda (Supabase secret), istemcide hiç bulunmaz.
     func synthesizeVoiceMessage(text: String, role: String, vibe: String, lang: String) async -> Data? {
-        let voiceName = VoiceMap.voiceName(role: role, vibe: vibe, lang: lang)
-        let localeCode = VoiceMap.localeCode(forLang: lang)
-        guard let url = URL(string: "https://texttospeech.googleapis.com/v1/text:synthesize?key=\(Config.googleTTSAPIKey)"),
-              let body = try? JSONSerialization.data(withJSONObject: [
-                "input": ["text": text],
-                "voice": ["languageCode": localeCode, "name": voiceName],
-                "audioConfig": ["audioEncoding": "MP3"],
-              ]) else { return nil }
-        var req = URLRequest(url: url)
+        guard let body = try? JSONSerialization.data(withJSONObject: [
+            "text": text, "role": role, "vibe": vibe, "lang": lang,
+        ]) else { return nil }
+        var req = URLRequest(url: Config.voiceMessageTTSFunctionURL)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let bearer = UserDefaultsManager.shared.accessToken ?? Config.supabaseAnonKey
+        req.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
+        req.setValue(Config.supabaseAnonKey, forHTTPHeaderField: "apikey")
         req.httpBody = body
         req.timeoutInterval = 30
 
         guard let (data, resp) = try? await URLSession.shared.data(for: req),
               let http = resp as? HTTPURLResponse, http.statusCode == 200,
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let base64Audio = json["audioContent"] as? String,
-              let audioData = Data(base64Encoded: base64Audio)
+              http.value(forHTTPHeaderField: "Content-Type")?.contains("audio") == true,
+              !data.isEmpty
         else { return nil }
-        return audioData
+        return data
     }
 }
 
