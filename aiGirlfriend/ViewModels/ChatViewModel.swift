@@ -8,6 +8,7 @@
 
 import Foundation
 import Observation
+import AVFoundation
 
 private let localKeepRecent = 20
 
@@ -19,6 +20,9 @@ final class ChatViewModel {
     var messages: [Message] = []
     var inputText: String = ""
     var isSending: Bool = false
+    /// "Yazıyor..." balonu — `isSending` true olduktan bir süre sonra açılır,
+    /// cevabın uzunluğuna göre hesaplanan süre kadar açık kalır (bkz. TypingTiming).
+    var showsTypingBubble: Bool = false
     var isLoadingHistory: Bool = true
     var errorMessage: String?
 
@@ -58,8 +62,10 @@ final class ChatViewModel {
     func clearChat() {
         messages = []
         hasSyntheticOpening = false
-        if let store { ChatMaintenance.clearChat(characterID: character.id, store: store) }
-        Task { await loadHistory() }
+        Task {
+            if let store { await ChatMaintenance.clearChat(character: character, store: store) }
+            await loadHistory()
+        }
     }
 
     var canSend: Bool {
@@ -109,7 +115,7 @@ final class ChatViewModel {
             // ilerlemesi 0'dan başlar (küçük kozmetik sıfırlama, işlevi etkilemez).
             levelProgress = 0
             if history.messages.isEmpty {
-                await attachAIGreeting()
+                await attachFirstHello()
             } else {
                 messages = history.messages
                 hasSyntheticOpening = false
@@ -121,39 +127,34 @@ final class ChatViewModel {
                     level: relationshipLevel,
                     summary: "",
                     summarizedCount: 0,
-                    levelProgress: levelProgress
+                    levelProgress: levelProgress,
+                    detectedLanguage: ConversationLanguage.resolve(
+                        latestAssistantText: history.messages.last(where: { $0.role == .assistant })?.content,
+                        previouslyDetected: nil
+                    )
                 )
                 LocalConversationStore.shared.save(stored, for: character.id)
             }
         } catch {
             errorMessage = error.localizedDescription
-            if messages.isEmpty { await attachAIGreeting() }
+            if messages.isEmpty { await attachFirstHello() }
         }
     }
 
-    // MARK: - AI selamı
+    // MARK: - İlk selam
 
-    private func attachAIGreeting() async {
-        do {
-            let greeting = try await service.generateGreeting(character: character)
-            messages = [Message(role: .assistant, content: greeting)]
-        } catch {
-            messages = [Message(role: .assistant, content: fallbackGreeting())]
-        }
+    /// Botun ilk mesajı artık AI ile üretilmiyor (gecikme + tutarsızlık yaratıyordu) —
+    /// sabit 3 varyanttan rastgele biri, normal mesajlaşmadaki gibi kısa bir
+    /// "yazıyor" balonu gecikmesinden sonra gelir (bkz. TypingTiming).
+    private func attachFirstHello() async {
+        isLoadingHistory = false // mesaj listesi görünür olsun ki "yazıyor" balonu gösterilebilsin
+        try? await Task.sleep(nanoseconds: UInt64(TypingTiming.randomStartDelay() * 1_000_000_000))
+        showsTypingBubble = true
+        let line = FirstHelloContent.randomLine()
+        try? await Task.sleep(nanoseconds: UInt64(TypingTiming.duration(forReplyLength: line.count) * 1_000_000_000))
+        showsTypingBubble = false
+        messages = [Message(role: .assistant, content: line)]
         hasSyntheticOpening = true
-    }
-
-    private func fallbackGreeting() -> String {
-        let name = character.name
-        switch character.personalityRole {
-        case "ex":      return String(localized: "…Is that you? It's been a while since I heard from you.")
-        case "shy":     return String(localized: "O-oh, hey... it's \(name). How are you? 🙈")
-        case "distant": return String(localized: "\(name). It's been a while.")
-        case "playful": return String(localized: "Heyyy! 🎉 \(name) is here, are you ready?")
-        case "devoted": return String(localized: "I was just thinking about you... Hey babe 💕")
-        case "crazy":   return String(localized: "FINALLY you're here!! \(name) couldn't wait 😤💥")
-        default:        return String(localized: "Hey 👋 I'm \(name). How are you?")
-        }
     }
 
     // MARK: - Mesaj gönder
@@ -163,15 +164,22 @@ final class ChatViewModel {
         guard !text.isEmpty, !isSending, !isLoadingHistory else { return }
 
         let wantsPhoto = photoRequested(text)
+        // Zaman farkındalığı için — yeni mesajı eklemeden ÖNCEki son mesajın zamanı.
+        let lastMessageAt = messages.last?.createdAt
         messages.append(Message(role: .user, content: text))
         updateCache()
         NotificationScheduler.shared.noteUserSent(character: character)
         inputText = ""
         isSending = true
         errorMessage = nil
-        store?.setTyping(character.id, true)
 
         Task {
+            // Balon anında değil, insan gibi kısa bir tereddütten sonra belirir.
+            try? await Task.sleep(nanoseconds: UInt64(TypingTiming.randomStartDelay() * 1_000_000_000))
+            showsTypingBubble = true
+            store?.setTyping(character.id, true)
+            let bubbleStartedAt = Date()
+
             do {
                 let stored = LocalConversationStore.shared.load(for: character.id)
                 let realMsgs = realMessages()
@@ -180,8 +188,20 @@ final class ChatViewModel {
                     localMessages: realMsgs,
                     summary: stored?.summary ?? "",
                     userMessage: text,
-                    level: relationshipLevel
+                    level: relationshipLevel,
+                    lastMessageAt: lastMessageAt
                 )
+
+                // Cevap hazır olsa bile, balon en az "bunu yazmak ne kadar sürerdi"
+                // kadar açık kalsın (2x insan hızı, ama üst sınırla sıkıştırılmış).
+                let elapsed = Date().timeIntervalSince(bubbleStartedAt)
+                let wanted = TypingTiming.duration(forReplyLength: result.reply.count)
+                let remaining = wanted - elapsed
+                if remaining > 0 {
+                    try? await Task.sleep(nanoseconds: UInt64(remaining * 1_000_000_000))
+                }
+                showsTypingBubble = false
+                store?.setTyping(character.id, false)
 
                 let gotPhoto = wantsPhoto ? character.chatPhotos.randomElement() : nil
                 messages.append(Message(role: .assistant, content: result.reply))
@@ -189,42 +209,124 @@ final class ChatViewModel {
                     messages.append(Message(role: .assistant, content: "", imageURL: gotPhoto))
                 }
 
-                // Terfi hesabı artık istemcide (eskiden chat edge function'daydı,
-                // sunucu şimdi sadece en son seviyeyi saklıyor). Seviye arttıkça
-                // her tık daha az ilerleme katar (bkz. RelationshipXP.gainPercent).
-                let counter = (stored?.msgCounter ?? 0) + 1
-                var fraction = 0.0
-                if counter % RelationshipXP.messageBatchSize == 0 {
-                    fraction += RelationshipXP.messageGainFraction(forLevel: relationshipLevel)
-                }
-                if gotPhoto != nil {
-                    fraction += RelationshipXP.photoGainFraction(forLevel: relationshipLevel)
-                }
-                let previousLevel = relationshipLevel
-                let (newLevel, newProgress) = RelationshipXP.applyGain(
-                    fraction, level: relationshipLevel, progress: levelProgress
-                )
-                if newLevel > previousLevel {
-                    levelUpEvent = LevelUpEvent(
-                        fromLevel: previousLevel,
-                        toLevel: newLevel,
-                        fromStage: Relationship.stageName(previousLevel, role: character.personalityRole),
-                        toStage: Relationship.stageName(newLevel, role: character.personalityRole)
-                    )
-                }
-                relationshipLevel = newLevel
-                levelProgress = newProgress
-
-                updateCache(msgCounter: counter)
-                if isVisible { markReadNow() }
-
-                triggerSummarizationIfNeeded()
+                applyPostReplyEffects(gotPhoto: gotPhoto, stored: stored)
             } catch {
                 errorMessage = error.localizedDescription
+                showsTypingBubble = false
+                store?.setTyping(character.id, false)
             }
             isSending = false
-            store?.setTyping(character.id, false)
         }
+    }
+
+    /// Sesli mesaj isteği bayrağı — `quickReplyRow`'daki dalga formu düğmesiyle
+    /// açılır/kapanır (bkz. ChatView). Açıkken gönder butonu `sendVoiceRequest()`e yönlenir.
+    var isVoiceArmed: Bool = false
+
+    /// `send()`'in sesli-mesaj karşılığı: aynı metni gönderir, ama cevap
+    /// metin balonu yerine sesli mesaj balonu olarak eklenir. `canSend` ile
+    /// aynı boş-metin koruması — "boş dürtme" senaryosu yok, chat edge
+    /// function'ında değişiklik gerekmiyor.
+    func sendVoiceRequest() {
+        let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, !isSending, !isLoadingHistory else { return }
+
+        let lastMessageAt = messages.last?.createdAt
+        messages.append(Message(role: .user, content: text))
+        updateCache()
+        NotificationScheduler.shared.noteUserSent(character: character)
+        inputText = ""
+        isVoiceArmed = false
+        isSending = true
+        errorMessage = nil
+
+        Task {
+            try? await Task.sleep(nanoseconds: UInt64(TypingTiming.randomStartDelay() * 1_000_000_000))
+            showsTypingBubble = true
+            store?.setTyping(character.id, true)
+            let bubbleStartedAt = Date()
+
+            do {
+                let stored = LocalConversationStore.shared.load(for: character.id)
+                let realMsgs = realMessages()
+                let result = try await service.sendWithLocalHistory(
+                    character: character,
+                    localMessages: realMsgs,
+                    summary: stored?.summary ?? "",
+                    userMessage: text,
+                    level: relationshipLevel,
+                    lastMessageAt: lastMessageAt
+                )
+
+                let elapsed = Date().timeIntervalSince(bubbleStartedAt)
+                let wanted = TypingTiming.duration(forReplyLength: result.reply.count)
+                let remaining = wanted - elapsed
+                if remaining > 0 {
+                    try? await Task.sleep(nanoseconds: UInt64(remaining * 1_000_000_000))
+                }
+
+                let lang = VoiceLanguage.detect(from: result.reply)
+                let messageID = UUID()
+                guard let audioData = await TTSService().synthesizeVoiceMessage(
+                    text: result.reply, role: character.personalityRole, vibe: character.vibe, lang: lang
+                ), let savedPath = VoicePlayer.saveVoiceMessage(audioData, messageID: messageID) else {
+                    showsTypingBubble = false
+                    store?.setTyping(character.id, false)
+                    errorMessage = "Voice message failed to generate."
+                    isSending = false
+                    return
+                }
+                let duration = (try? AVAudioPlayer(data: audioData))?.duration
+
+                showsTypingBubble = false
+                store?.setTyping(character.id, false)
+
+                messages.append(Message(
+                    id: messageID, role: .assistant, content: result.reply,
+                    voiceLocalPath: savedPath, voiceDuration: duration
+                ))
+
+                applyPostReplyEffects(gotPhoto: nil, stored: stored)
+            } catch {
+                errorMessage = error.localizedDescription
+                showsTypingBubble = false
+                store?.setTyping(character.id, false)
+            }
+            isSending = false
+        }
+    }
+
+    /// `send()` ve `sendVoiceRequest()` ortak kuyruğu: XP/terfi hesabı,
+    /// cache güncelleme, özetleme tetikleme. `gotPhoto` sesli mesaj yolunda
+    /// her zaman nil (fotoğraf isteği metin mesajlarına özgü).
+    private func applyPostReplyEffects(gotPhoto: URL?, stored: LocalConversationStore.Stored?) {
+        let counter = (stored?.msgCounter ?? 0) + 1
+        var fraction = 0.0
+        if counter % RelationshipXP.messageBatchSize == 0 {
+            fraction += RelationshipXP.messageGainFraction(forLevel: relationshipLevel)
+        }
+        if gotPhoto != nil {
+            fraction += RelationshipXP.photoGainFraction(forLevel: relationshipLevel)
+        }
+        let previousLevel = relationshipLevel
+        let (newLevel, newProgress) = RelationshipXP.applyGain(
+            fraction, level: relationshipLevel, progress: levelProgress
+        )
+        if newLevel > previousLevel {
+            levelUpEvent = LevelUpEvent(
+                fromLevel: previousLevel,
+                toLevel: newLevel,
+                fromStage: Relationship.stageName(previousLevel, role: character.personalityRole),
+                toStage: Relationship.stageName(newLevel, role: character.personalityRole)
+            )
+        }
+        relationshipLevel = newLevel
+        levelProgress = newProgress
+
+        updateCache(msgCounter: counter)
+        if isVisible { markReadNow() }
+
+        triggerSummarizationIfNeeded()
     }
 
     // MARK: - Yerel özetleme
@@ -281,7 +383,11 @@ final class ChatViewModel {
             summary: stored?.summary ?? "",
             summarizedCount: stored?.summarizedCount ?? 0,
             msgCounter: msgCounter ?? stored?.msgCounter ?? 0,
-            levelProgress: levelProgress
+            levelProgress: levelProgress,
+            detectedLanguage: ConversationLanguage.resolve(
+                latestAssistantText: real.last(where: { $0.role == .assistant })?.content,
+                previouslyDetected: stored?.detectedLanguage
+            )
         )
         LocalConversationStore.shared.save(updated, for: character.id)
     }
