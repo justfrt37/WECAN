@@ -293,7 +293,13 @@ struct ChatView: View {
                         .id(message.id)
                     }
                     if viewModel.showsTypingBubble {
-                        TypingIndicator()
+                        Group {
+                            if viewModel.isSendingVoiceReply {
+                                VoicePendingIndicator()
+                            } else {
+                                TypingIndicator()
+                            }
+                        }
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.horizontal, 16)
                             .id("typing")
@@ -525,5 +531,34 @@ private struct TypingIndicator: View {
         .clipShape(.rect(topLeadingRadius: 16, bottomLeadingRadius: 4,
                          bottomTrailingRadius: 16, topTrailingRadius: 16))
         .onAppear { animating = true }
+    }
+}
+
+// MARK: - Sesli mesaj bekleme animasyonu (3-nokta yazma balonundan BİLEREK farklı)
+
+private struct VoicePendingIndicator: View {
+    @State private var animating = false
+
+    var body: some View {
+        HStack(spacing: 3) {
+            ForEach(0..<5, id: \.self) { i in
+                Capsule()
+                    .fill(AppColor.pink.opacity(0.9))
+                    .frame(width: 3, height: animating ? barHeight(i) : 6)
+                    .animation(
+                        .easeInOut(duration: 0.5).repeatForever().delay(Double(i) * 0.12),
+                        value: animating
+                    )
+            }
+        }
+        .padding(.horizontal, 16).padding(.vertical, 13)
+        .background(AppColor.pink.opacity(0.12))
+        .clipShape(Capsule())
+        .overlay(Capsule().strokeBorder(AppColor.pink.opacity(0.3), lineWidth: 1))
+        .onAppear { animating = true }
+    }
+
+    private func barHeight(_ index: Int) -> CGFloat {
+        [10, 18, 8, 20, 12][index % 5]
     }
 }

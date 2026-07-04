@@ -223,6 +223,11 @@ final class ChatViewModel {
     /// açılır/kapanır (bkz. ChatView). Açıkken gönder butonu `sendVoiceRequest()`e yönlenir.
     var isVoiceArmed: Bool = false
 
+    /// `showsTypingBubble` açıkken hangi bekleme balonunun gösterileceğini
+    /// ayırt eder — sesli mesaj beklerken normal "yazıyor" 3-nokta balonuyla
+    /// AYNI görünmesin diye (bkz. ChatView.messagesList).
+    var isSendingVoiceReply: Bool = false
+
     /// `send()`'in sesli-mesaj karşılığı: aynı metni gönderir, ama cevap
     /// metin balonu yerine sesli mesaj balonu olarak eklenir. `canSend` ile
     /// aynı boş-metin koruması — "boş dürtme" senaryosu yok, chat edge
@@ -243,6 +248,7 @@ final class ChatViewModel {
         Task {
             try? await Task.sleep(nanoseconds: UInt64(TypingTiming.randomStartDelay() * 1_000_000_000))
             showsTypingBubble = true
+            isSendingVoiceReply = true
             store?.setTyping(character.id, true)
             let bubbleStartedAt = Date()
 
@@ -271,14 +277,16 @@ final class ChatViewModel {
                     text: result.reply, role: character.personalityRole, vibe: character.vibe, lang: lang
                 ), let savedPath = VoicePlayer.saveVoiceMessage(audioData, messageID: messageID) else {
                     showsTypingBubble = false
+                    isSendingVoiceReply = false
                     store?.setTyping(character.id, false)
-                    errorMessage = "Voice message failed to generate."
+                    errorMessage = String(localized: "Voice message failed to generate.")
                     isSending = false
                     return
                 }
                 let duration = (try? AVAudioPlayer(data: audioData))?.duration
 
                 showsTypingBubble = false
+                isSendingVoiceReply = false
                 store?.setTyping(character.id, false)
 
                 messages.append(Message(
@@ -290,6 +298,7 @@ final class ChatViewModel {
             } catch {
                 errorMessage = error.localizedDescription
                 showsTypingBubble = false
+                isSendingVoiceReply = false
                 store?.setTyping(character.id, false)
             }
             isSending = false
