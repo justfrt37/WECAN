@@ -86,3 +86,59 @@ struct TTSService {
         return data
     }
 }
+
+extension TTSService {
+    /// Sesli mesaj için tek seferlik sentez — role/vibe/lang'e göre 28 sesten
+    /// birini seçer. Var olan `synthesize(text:)`'ten (yeniden-seslendirme,
+    /// cihaz-içi fallback'li) FARKLI — burada fallback yok, başarısızlık gerçek hata.
+    func synthesizeVoiceMessage(text: String, role: String, vibe: String, lang: String) async -> Data? {
+        guard let body = try? JSONSerialization.data(withJSONObject: [
+            "text": text, "role": role, "vibe": vibe, "lang": lang,
+        ]) else { return nil }
+        var req = URLRequest(url: Config.voiceMessageTTSFunctionURL)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let bearer = UserDefaultsManager.shared.accessToken ?? Config.supabaseAnonKey
+        req.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
+        req.setValue(Config.supabaseAnonKey, forHTTPHeaderField: "apikey")
+        req.httpBody = body
+        req.timeoutInterval = 30
+
+        guard let (data, resp) = try? await URLSession.shared.data(for: req),
+              let http = resp as? HTTPURLResponse, http.statusCode == 200,
+              http.value(forHTTPHeaderField: "Content-Type")?.contains("audio") == true,
+              !data.isEmpty
+        else { return nil }
+        return data
+    }
+}
+
+extension VoicePlayer {
+    /// Sesli mesaj dosyalarının kaydedildiği klasör (LocalConversationStore'un
+    /// deseniyle aynı: Application Support altında, cihaz-yerel).
+    static var voiceMessagesDirectory: URL {
+        let dir = FileManager.default
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("VoiceMessages", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    /// Sentezlenen mp3'ü cihaza kaydeder, göreli dosya adını döner (Message.voiceLocalPath'e konur).
+    static func saveVoiceMessage(_ data: Data, messageID: UUID) -> String? {
+        let filename = "\(messageID.uuidString).mp3"
+        let url = voiceMessagesDirectory.appendingPathComponent(filename)
+        guard (try? data.write(to: url, options: .atomic)) != nil else { return nil }
+        return filename
+    }
+
+    /// Kaydedilmiş bir sesli mesajı çalar. `synthesize` YOK burada — dosya
+    /// yoksa/bozuksa gerçek bir hata, robot-sese düşmüyoruz.
+    func playFile(at relativePath: String, id: UUID) {
+        stop()
+        let url = VoicePlayer.voiceMessagesDirectory.appendingPathComponent(relativePath)
+        guard let data = try? Data(contentsOf: url) else { return }
+        speakingMessageID = id
+        playData(data)
+    }
+}

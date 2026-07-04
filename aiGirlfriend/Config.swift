@@ -24,4 +24,11 @@ enum Config {
     static var addCharacterNoteFunctionURL: URL {
         URL(string: "\(supabaseURL)/functions/v1/add-character-note")!
     }
+
+    /// Sesli mesaj (voice-note) sentezi — 28 ses × 7 dil, Google Cloud TTS.
+    /// Var olan `tts` fonksiyonundan (eski konuşma-balonu-seslendirme,
+    /// OpenAI tabanlı) BİLEREK AYRI — bkz. VoicePlayer.swift.
+    static var voiceMessageTTSFunctionURL: URL {
+        URL(string: "\(supabaseURL)/functions/v1/voice-message-tts")!
+    }
 }
