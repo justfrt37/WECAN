@@ -93,9 +93,9 @@ extension TTSService {
     /// cihaz-içi fallback'li) FARKLI — burada fallback yok, başarısızlık gerçek hata.
     /// `voice-message-tts` Edge Function'ı çağırır — Google TTS anahtarı
     /// sunucuda (Supabase secret), istemcide hiç bulunmaz.
-    func synthesizeVoiceMessage(text: String, role: String, vibe: String, lang: String) async -> Data? {
+    func synthesizeVoiceMessage(text: String, role: String, vibe: String, lang: String, useElevenLabs: Bool = false) async -> Data? {
         guard let body = try? JSONSerialization.data(withJSONObject: [
-            "text": text, "role": role, "vibe": vibe, "lang": lang,
+            "text": text, "role": role, "vibe": vibe, "lang": lang, "useElevenLabs": useElevenLabs,
         ]) else { return nil }
         var req = URLRequest(url: Config.voiceMessageTTSFunctionURL)
         req.httpMethod = "POST"

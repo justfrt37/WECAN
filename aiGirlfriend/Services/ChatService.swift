@@ -26,6 +26,9 @@ private struct ChatRequest: Codable {
     let tzOffsetMinutes: Int?
     /// "Clear Chat" — sunucudaki conversation/messages satırlarını siler.
     let clearConversation: Bool?
+    /// true ise cevap sesli mesaj olarak seslendirilecek — sunucu Grok'a
+    /// ElevenLabs v3 ses etiketleri (ör. [laughs], [whispers]) eklemesini söyler.
+    let voiceChat: Bool?
 }
 
 private struct WireMessage: Codable {
@@ -130,13 +133,16 @@ struct ChatService {
     /// `level`: istemcinin şu an bildiği (bir önceki turdan hesaplanmış) seviye — sunucu
     /// bunu bu turun direktif/foto uygunluğu kontrolünden SONRA kalıcı olarak saklar.
     /// `lastMessageAt`: sohbetteki bir önceki mesajın zamanı — zaman farkındalığı için.
+    /// `voiceChat`: true ise (sesli mesaj isteği, bkz. ChatViewModel.sendVoiceRequest)
+    /// sunucu Grok'a ElevenLabs v3 ses etiketleri eklemesini söyler.
     func sendWithLocalHistory(
         character: Character,
         localMessages: [Message],
         summary: String,
         userMessage: String,
         level: Int,
-        lastMessageAt: Date? = nil
+        lastMessageAt: Date? = nil,
+        voiceChat: Bool = false
     ) async throws -> ChatReply {
         let wireHistory = localMessages
             .filter { $0.imageURL == nil }
@@ -147,7 +153,8 @@ struct ChatService {
             userMessage: userMessage,
             extra: .localHistory(wireHistory, summary: summary.isEmpty ? nil : summary),
             level: level,
-            lastMessageAt: lastMessageAt
+            lastMessageAt: lastMessageAt,
+            voiceChat: voiceChat
         )
         return ChatReply(
             reply: resp.reply ?? "",
@@ -202,7 +209,8 @@ struct ChatService {
         userMessage: String?,
         extra: RequestExtra = .none,
         level: Int? = nil,
-        lastMessageAt: Date? = nil
+        lastMessageAt: Date? = nil,
+        voiceChat: Bool = false
     ) async throws -> ChatResponse {
         var request = URLRequest(url: Config.chatFunctionURL)
         request.httpMethod = "POST"
@@ -242,7 +250,8 @@ struct ChatService {
             lastMessageAt: lastMessageAt.map { $0.timeIntervalSince1970 * 1000 },
             clientNow: Date().timeIntervalSince1970 * 1000,
             tzOffsetMinutes: TimeZone.current.secondsFromGMT() / 60,
-            clearConversation: clearConversation
+            clearConversation: clearConversation,
+            voiceChat: voiceChat
         )
         request.httpBody = try JSONEncoder().encode(body)
 

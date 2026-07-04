@@ -6,7 +6,7 @@
 
 import SwiftUI
 
-private struct ChatItem: Identifiable {
+private struct ChatItem: Identifiable, Codable {
     let character: Character
     let conversationID: UUID
     let last: LastMessage?
@@ -22,6 +22,12 @@ struct ChatListView: View {
     @State private var searchText = ""
 
     private let service = ConversationsService()
+
+    /// Sohbet listesinin diskteki önbelleği — sekme her açıldığında sunucu
+    /// cevabını beklemeden ANINDA bir önceki durumu gösterir, arkada tazeler.
+    private let cacheURL: URL = FileManager.default
+        .urls(for: .cachesDirectory, in: .userDomainMask)[0]
+        .appendingPathComponent("chatlist_cache.json")
 
     private var filtered: [ChatItem] {
         guard !searchText.isEmpty else { return items }
@@ -55,6 +61,13 @@ struct ChatListView: View {
     }
 
     private func load() async {
+        // Diskteki önbellekten ANINDA göster — sadece ilk (soğuk) yüklemede;
+        // typing-değişikliği gibi sonraki tetiklemelerde zaten canlı veri var.
+        if items.isEmpty, let cached = loadCachedItems(), !cached.isEmpty {
+            items = cached
+            isLoading = false
+        }
+
         async let convsT = service.fetchConversations()
         async let msgsT = service.fetchAllMessages()
         let (convs, msgs) = await (convsT, msgsT)
@@ -97,6 +110,17 @@ struct ChatListView: View {
                             last: last, unread: unread, updatedAt: conv.updatedAt)
         }
         isLoading = false
+        saveCachedItems(items)
+    }
+
+    private func loadCachedItems() -> [ChatItem]? {
+        guard let data = try? Data(contentsOf: cacheURL) else { return nil }
+        return try? JSONDecoder().decode([ChatItem].self, from: data)
+    }
+
+    private func saveCachedItems(_ items: [ChatItem]) {
+        guard let data = try? JSONEncoder().encode(items) else { return }
+        try? data.write(to: cacheURL, options: .atomic)
     }
 
     private static let iso8601: ISO8601DateFormatter = {

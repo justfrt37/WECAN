@@ -261,7 +261,8 @@ final class ChatViewModel {
                     summary: stored?.summary ?? "",
                     userMessage: text,
                     level: relationshipLevel,
-                    lastMessageAt: lastMessageAt
+                    lastMessageAt: lastMessageAt,
+                    voiceChat: true
                 )
 
                 let elapsed = Date().timeIntervalSince(bubbleStartedAt)
@@ -274,7 +275,8 @@ final class ChatViewModel {
                 let lang = VoiceLanguage.detect(from: result.reply)
                 let messageID = UUID()
                 guard let audioData = await TTSService().synthesizeVoiceMessage(
-                    text: result.reply, role: character.personalityRole, vibe: character.vibe, lang: lang
+                    text: result.reply, role: character.personalityRole, vibe: character.vibe, lang: lang,
+                    useElevenLabs: true
                 ), let savedPath = VoicePlayer.saveVoiceMessage(audioData, messageID: messageID) else {
                     showsTypingBubble = false
                     isSendingVoiceReply = false

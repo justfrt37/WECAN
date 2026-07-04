@@ -44,16 +44,35 @@ final class CharacterStore {
 
     private let service = CharacterService()
 
+    /// Karakter listesinin diskteki önbelleği — her açılışta sunucuyu beklemeden
+    /// aynı anda göstermek için (splash "yükleniyor" ekranında takılmasın diye).
+    private let cacheURL: URL = FileManager.default
+        .urls(for: .cachesDirectory, in: .userDomainMask)[0]
+        .appendingPathComponent("characters_cache.json")
+
     /// Splash'te çağrılır. Hata olursa yedek (samples) ile devam eder ki
     /// uygulama boş ekranda takılmasın.
     func load() async {
         errorMessage = nil
+
+        // 1) Diskteki önbellekten ANINDA göster — sunucu cevabını beklemeden.
+        if let cached = loadCachedCharacters(), !cached.isEmpty {
+            characters = cached
+            isLoaded = true
+        }
+
+        // 2) Sunucudan taze veriyi çek, güncelle + önbelleğe yaz.
         do {
             let fetched = try await service.fetchAll()
-            characters = fetched.isEmpty ? Character.samples : fetched
+            if !fetched.isEmpty {
+                characters = fetched
+                saveCachedCharacters(fetched)
+            } else if characters.isEmpty {
+                characters = Character.samples
+            }
         } catch {
             errorMessage = error.localizedDescription
-            characters = Character.samples
+            if characters.isEmpty { characters = Character.samples }
         }
 
         // Tüm görselleri splash'te önceden indir ve cache'le; feed'de
@@ -63,5 +82,15 @@ final class CharacterStore {
         await ImageCache.shared.prefetch(Array(Set(urls)))
 
         isLoaded = true
+    }
+
+    private func loadCachedCharacters() -> [Character]? {
+        guard let data = try? Data(contentsOf: cacheURL) else { return nil }
+        return try? JSONDecoder().decode([Character].self, from: data)
+    }
+
+    private func saveCachedCharacters(_ chars: [Character]) {
+        guard let data = try? JSONEncoder().encode(chars) else { return }
+        try? data.write(to: cacheURL, options: .atomic)
     }
 }

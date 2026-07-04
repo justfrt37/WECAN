@@ -125,6 +125,25 @@ const CONTINUITY_RULE =
   "görmezden gelip başka bir şeye atlama — verdiği cevabı gerçekten duymuş gibi, " +
   "ona gönderme yaparak devam et.";
 
+// Sesli mesaj isteklerinde (voiceChat: true) SADECE eklenir — ElevenLabs v3
+// modelinin anladığı köşeli-parantez ses etiketleri (docs.elevenlabs.io ile
+// doğrulandı, 2026-07). Google TTS (mevcut voice-message-tts akışı) bu
+// etiketleri ANLAMAZ — bu kural sadece ElevenLabs ile test/entegrasyon içindir.
+const VOICE_TAGS_RULE =
+  "\n\nSES ETİKETİ KURALI: Bu cevap sesli olarak seslendirilecek (ElevenLabs v3 " +
+  "modeli). Bu etiketler seslendirmeyi İNANILMAZ derecede gerçekçi yapıyor — bu " +
+  "yüzden onları YOĞUN ve CÖMERT biçimde kullan, nadiren değil. Neredeyse HER " +
+  "cümlenin başına (bazen cümle ortasında bir vurgu için de) uygun bir etiket " +
+  "koy — amaç minimum değil, mümkün olduğunca doğal ve duygu dolu bir seslendirme. " +
+  "Kullanabileceğin etiketler (İngilizce, köşeli parantez içinde, tam bu şekilde " +
+  "yaz): [laughs], [sighs], [whispers], [gasps], [excited], [nervous], [curious], " +
+  "[playfully], [flatly], [sarcastic tone], [pauses], [hesitates], [cheerfully], " +
+  "[wistful], [giggles], [teasing], [breathless], [softly], [moans]. Karakterine " +
+  "ve o anki duygu durumuna uygun etiketleri seç, ama az kullanmaktan ÇEKİNME — " +
+  "her cümlede en az bir etiket olsun. Etiketler dışındaki metin yine konuştuğun " +
+  "dilde kalsın; sadece etiketlerin kendisi İngilizce ve köşeli parantez " +
+  "biçiminde olmalı.";
+
 // İlişki seviyesine göre mizah/şaka/kelime oyunu dozu — samimiyet arttıkça artar.
 function humorDirective(level: number): string {
   if (level <= 3) {
@@ -271,6 +290,8 @@ Deno.serve(async (req: Request) => {
     const lastMessageAt: number | undefined = typeof body.lastMessageAt === "number" ? body.lastMessageAt : undefined;
     const clientNow: number | undefined = typeof body.clientNow === "number" ? body.clientNow : undefined;
     const tzOffsetMinutes: number | undefined = typeof body.tzOffsetMinutes === "number" ? body.tzOffsetMinutes : undefined;
+    // Sesli mesaj isteği mi? (bkz. VOICE_TAGS_RULE — ElevenLabs v3 ses etiketleri)
+    const voiceChat: boolean = body.voiceChat === true;
 
     // === İSTEMCİ TARAFLI ÖZETLEME MODU ===
     // Kullanıcı karakterleri her 20 mesajda bir bunu tetikler.
@@ -348,6 +369,9 @@ Deno.serve(async (req: Request) => {
     system += CONTINUITY_RULE;
     system += humorDirective(currentLevel);
     system += timeContext(lastMessageAt, clientNow, tzOffsetMinutes);
+    if (voiceChat) {
+      system += VOICE_TAGS_RULE;
+    }
     if (useClientHistory && localSummary && localSummary.trim() !== "") {
       system += `\n\n[Önceki konuşmalarınızın özeti]\n${localSummary}`;
     }

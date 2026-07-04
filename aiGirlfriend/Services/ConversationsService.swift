@@ -6,7 +6,7 @@
 
 import Foundation
 
-struct ConversationSummary: Decodable {
+struct ConversationSummary: Codable {
     let id: UUID
     let characterID: UUID
     let updatedAt: String?
@@ -18,7 +18,7 @@ struct ConversationSummary: Decodable {
     }
 }
 
-struct LastMessage: Decodable {
+struct LastMessage: Codable {
     let conversationID: UUID
     let content: String
     let role: String

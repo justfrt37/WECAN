@@ -46,6 +46,11 @@ struct Character: Identifiable, Codable, Hashable {
         case chatPhotos = "chat_photos"
         case personalityRole = "personality_role"
         case createdBy = "created_by"
+        // Sunucu yanıtında YOK (orada builder_selections.vibe içinde gelir) — sadece
+        // kendi disk önbelleğimize (CharacterStore/ChatListView cache) encode/decode
+        // ederken kullanılır, aksi halde synthesized Encodable `vibe`'ı sessizce
+        // atlar ve bir önbellek round-trip'inden sonra "Sweet"e sıfırlanırdı.
+        case vibe
     }
 
     /// Separate from `CodingKeys` on purpose: `builder_selections` has no matching stored
@@ -117,7 +122,11 @@ struct Character: Identifiable, Codable, Hashable {
         galleryURLs = (try? c.decode([URL].self, forKey: .galleryURLs)) ?? []
         chatPhotos = (try? c.decode([URL].self, forKey: .chatPhotos)) ?? []
         personalityRole = (try? c.decode(String.self, forKey: .personalityRole)) ?? "flirty"
-        if let bsc = try? decoder.container(keyedBy: BuilderSelectionsCodingKey.self),
+        // Önce düz `vibe` anahtarına bak (kendi disk önbelleğimizin formatı) —
+        // yoksa sunucunun iç içe `builder_selections.vibe`'ına düş.
+        if let topLevelVibe = try? c.decodeIfPresent(String.self, forKey: .vibe) {
+            vibe = topLevelVibe
+        } else if let bsc = try? decoder.container(keyedBy: BuilderSelectionsCodingKey.self),
            let builderSelections = try? bsc.decodeIfPresent(BuilderSelections.self, forKey: .builderSelections),
            let decodedVibe = builderSelections.vibe {
             vibe = decodedVibe
