@@ -20,6 +20,8 @@ struct ChatView: View {
     @State private var didPrefill = false
     @State private var levelUpBanner: ChatViewModel.LevelUpEvent?
     @State private var avatarPulse = false
+    /// Bir mesaja dokununca saatini göster — tekrar dokununca gizlenir.
+    @State private var expandedMessageID: Message.ID?
 
     /// Tab içinde gösterilince alttaki tab bar'ın üstünde kalması için boşluk.
     var bottomInset: CGFloat = 0
@@ -269,7 +271,13 @@ struct ChatView: View {
                 LazyVStack(spacing: 10) {
                     ForEach(viewModel.messages) { message in
                         ChatBubble(message: message,
-                                   isSpeaking: voice.speakingMessageID == message.id) {
+                                   isSpeaking: voice.speakingMessageID == message.id,
+                                   showsTimestamp: expandedMessageID == message.id,
+                                   onTap: {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                expandedMessageID = expandedMessageID == message.id ? nil : message.id
+                            }
+                        }) {
                             if voice.speakingMessageID == message.id {
                                 voice.stop()
                             } else {
@@ -278,7 +286,7 @@ struct ChatView: View {
                         }
                         .id(message.id)
                     }
-                    if viewModel.isSending {
+                    if viewModel.showsTypingBubble {
                         TypingIndicator()
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.horizontal, 16)
@@ -289,7 +297,7 @@ struct ChatView: View {
             }
             .defaultScrollAnchor(.bottom)   // ilk girişte en altta başla
             .onChange(of: viewModel.messages.count) { scrollToBottom(proxy) }
-            .onChange(of: viewModel.isSending) { scrollToBottom(proxy) }
+            .onChange(of: viewModel.showsTypingBubble) { scrollToBottom(proxy) }
             .onChange(of: viewModel.isLoadingHistory) {
                 if !viewModel.isLoadingHistory { scrollToBottom(proxy) }
             }
@@ -309,24 +317,37 @@ struct ChatView: View {
     // MARK: Hızlı yanıtlar
 
     private var quickReplyRow: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ForEach(quickReplies, id: \.self) { reply in
-                    Button {
-                        viewModel.send(reply)
-                    } label: {
-                        Text(reply)
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.9))
-                            .padding(.horizontal, 14).frame(height: 34)
-                            .background(.white.opacity(0.08), in: Capsule())
-                            .overlay(Capsule().strokeBorder(.white.opacity(0.12), lineWidth: 1))
+        HStack(spacing: 8) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(quickReplies, id: \.self) { reply in
+                        Button {
+                            viewModel.send(reply)
+                        } label: {
+                            Text(reply)
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(.white.opacity(0.9))
+                                .padding(.horizontal, 14).frame(height: 34)
+                                .background(.white.opacity(0.08), in: Capsule())
+                                .overlay(Capsule().strokeBorder(.white.opacity(0.12), lineWidth: 1))
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(viewModel.isSending || viewModel.isLoadingHistory)
                     }
-                    .buttonStyle(.plain)
-                    .disabled(viewModel.isSending || viewModel.isLoadingHistory)
                 }
+                .padding(.leading, 14)
             }
-            .padding(.horizontal, 14)
+
+            Button {
+                viewModel.isVoiceArmed.toggle()
+            } label: {
+                Image(systemName: viewModel.isVoiceArmed ? "waveform.circle.fill" : "waveform.circle")
+                    .font(.system(size: 26))
+                    .foregroundStyle(viewModel.isVoiceArmed ? AppColor.pink : .white.opacity(0.6))
+            }
+            .buttonStyle(.plain)
+            .disabled(viewModel.isSending || viewModel.isLoadingHistory)
+            .padding(.trailing, 14)
         }
         .padding(.vertical, 8)
         .background(AppColor.card.opacity(0.6))
@@ -356,9 +377,14 @@ struct ChatView: View {
             }
             .padding(.horizontal, 14).frame(minHeight: 46)
             .background(.white.opacity(0.1), in: Capsule())
-            .overlay(Capsule().strokeBorder(recognizer.isRecording ? AppColor.pink.opacity(0.6) : .white.opacity(0.1), lineWidth: 1))
+            .overlay(Capsule().strokeBorder(
+                (recognizer.isRecording || viewModel.isVoiceArmed) ? AppColor.pink.opacity(0.6) : .white.opacity(0.1),
+                lineWidth: viewModel.isVoiceArmed ? 2 : 1
+            ))
 
-            Button { viewModel.send() } label: {
+            Button {
+                if viewModel.isVoiceArmed { viewModel.sendVoiceRequest() } else { viewModel.send() }
+            } label: {
                 Image(systemName: "paperplane.fill")
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(.white)
@@ -398,11 +424,17 @@ struct ChatView: View {
 private struct ChatBubble: View {
     let message: Message
     var isSpeaking: Bool = false
+    var showsTimestamp: Bool = false
+    var onTap: (() -> Void)? = nil
     var onSpeak: (() -> Void)? = nil
 
     var body: some View {
         HStack(alignment: .bottom, spacing: 6) {
             if message.isUser { Spacer(minLength: 50) }
+
+            if showsTimestamp, message.isUser {
+                timestampLabel
+            }
 
             if let imageURL = message.imageURL {
                 // Foto mesajı (kızın gönderdiği fotoğraf)
@@ -412,6 +444,7 @@ private struct ChatBubble: View {
                 .frame(width: 200, height: 280)
                 .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                 .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(.white.opacity(0.1), lineWidth: 1))
+                .onTapGesture { onTap?() }
             } else {
                 Text(message.content)
                     .font(.system(size: 15))
@@ -427,6 +460,11 @@ private struct ChatBubble: View {
                     }
                     .clipShape(.rect(topLeadingRadius: 16, bottomLeadingRadius: message.isUser ? 16 : 4,
                                      bottomTrailingRadius: message.isUser ? 4 : 16, topTrailingRadius: 16))
+                    .onTapGesture { onTap?() }
+            }
+
+            if showsTimestamp, !message.isUser {
+                timestampLabel
             }
 
             // Kızın mesajını seslendir (oynat/durdur)
@@ -444,6 +482,14 @@ private struct ChatBubble: View {
             if !message.isUser { Spacer(minLength: 50) }
         }
         .padding(.horizontal, 16)
+    }
+
+    private var timestampLabel: some View {
+        Text(message.createdAt, format: .dateTime.hour().minute())
+            .font(.system(size: 11, weight: .medium))
+            .foregroundStyle(.white.opacity(0.5))
+            .fixedSize()
+            .transition(.opacity.combined(with: .scale(scale: 0.8, anchor: message.isUser ? .trailing : .leading)))
     }
 }
 
