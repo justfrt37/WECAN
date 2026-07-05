@@ -35,10 +35,17 @@ const SCHEDULE_PROMPT_INSTRUCTIONS =
   "üret. Kişiliğine ve mesleğine uygun, somut zaman blokları yaz — uyku " +
   "dahil GÜNÜN TAMAMINI boşluksuz kapla. Hafta sonu hafta içinden FARKLI " +
   "olmalı (çoğu meslek 7 gün çalışmaz). " +
+  "`label` alanı KISA bir DURUM ifadesi olmalı — \"şu an ne yapıyor\" " +
+  "sorusuna doğal bir cevap gibi oku (ör. \"Work\" değil \"At work\", " +
+  "\"Dinner\" değil \"Having dinner\", \"Commute\" değil \"Commuting home\", " +
+  "\"Sleep\" değil \"Asleep\"). " +
+  "Her zaman karakterin kendi konuştuğu dilde yaz (bkz. sistem promptundaki " +
+  "dil kuralı) — karakter Türkçe konuşuyorsa label/detail de Türkçe olsun, " +
+  "asla otomatik İngilizceye geçme. " +
   "SADECE şu JSON şemasında cevap ver, başka hiçbir şey yazma (markdown " +
   "kod bloğu da yok):\n" +
-  '{"weekday":[{"start":"HH:mm","end":"HH:mm","label":"kısa İngilizce ' +
-  'etiket","detail":"daha ayrıntılı İngilizce açıklama"}],"weekend":[...]}';
+  '{"weekday":[{"start":"HH:mm","end":"HH:mm","label":"kısa durum ' +
+  'ifadesi","detail":"daha ayrıntılı açıklama"}],"weekend":[...]}';
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
@@ -65,7 +72,7 @@ Deno.serve(async (req: Request) => {
           { role: "user", content: "Generate the schedule JSON now." },
         ],
         temperature: 0.8,
-        max_tokens: 900,
+        max_tokens: 1500,
       }),
     });
     if (!resp.ok) return json({ error: `LLM ${resp.status}: ${await resp.text()}` }, 502);
@@ -74,7 +81,12 @@ Deno.serve(async (req: Request) => {
     const match = raw.match(/\{[\s\S]*\}/);
     if (!match) return json({ error: "no_json_in_response" }, 502);
 
-    const parsed = JSON.parse(match[0]);
+    let parsed: any;
+    try {
+      parsed = JSON.parse(match[0]);
+    } catch (e) {
+      return json({ error: `invalid_json: ${String(e)}` }, 502);
+    }
     if (!Array.isArray(parsed.weekday) || !Array.isArray(parsed.weekend)) {
       return json({ error: "invalid_schedule_shape" }, 502);
     }

@@ -361,10 +361,16 @@ Deno.serve(async (req: Request) => {
             "konuşmada rutinini değiştiren bir gerçek varsa (ör. işten " +
             "ayrıldı, gece vardiyasına geçti) rutini buna göre güncelle; " +
             "yoksa MEVCUT rutini olduğu gibi koru (uydurma, değiştirme). " +
+            "Rutindeki `label` alanı KISA bir DURUM ifadesi olmalı — \"şu an " +
+            "ne yapıyor\" sorusuna doğal bir cevap gibi oku (ör. \"Work\" " +
+            "değil \"At work\", \"Dinner\" değil \"Having dinner\", " +
+            "\"Sleep\" değil \"Asleep\") ve konuşmanın geçtiği dille AYNI " +
+            "dilde yaz — asla otomatik İngilizceye geçme. " +
             "SADECE şu JSON şemasında cevap ver, başka hiçbir şey yazma: " +
             '{"summary":"kısa madde madde, önceki özeti koruyup yenileri ' +
             'ekleyerek","schedule":{"weekday":[{"start":"HH:mm","end":"HH:mm",' +
-            '"label":"...","detail":"..."}],"weekend":[...]}}',
+            '"label":"kısa durum ifadesi","detail":"daha ayrıntılı ' +
+            'açıklama"}],"weekend":[...]}}',
         },
         {
           role: "user",
@@ -374,7 +380,7 @@ Deno.serve(async (req: Request) => {
             `Yeni konuşma:\n${convoText}\n\nGüncellenmiş JSON:`,
         },
       ];
-      const raw = await callGrok(summaryPrompt, 900);
+      const raw = await callGrok(summaryPrompt, 1500);
       const parsed = extractJson(raw);
       const summary: string = typeof parsed?.summary === "string" ? parsed.summary : raw.trim();
       const schedule = (parsed && Array.isArray(parsed.schedule?.weekday) && Array.isArray(parsed.schedule?.weekend))
