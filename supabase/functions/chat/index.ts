@@ -20,6 +20,7 @@
 // DB erişimi service_role ile (RLS'yi bypass eder; istemci doğrudan DB'ye giremez).
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { franc } from "https://esm.sh/franc-min@6";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -92,12 +93,56 @@ async function fetchDirective(characterId: string, role: string, level: number):
 }
 
 // Modelin foto göndermek istediğini bildirme yöntemi.
-const LANGUAGE_RULE =
-  "\n\nDİL KURALI: Her zaman Türkçe konuş. " +
-  "Kullanıcı sana başka bir dilde yazarsa veya başka bir dilde konuşmanı açıkça isterse, o dile geç. " +
-  "Aksi takdirde SADECE Türkçe kullan. Hangi dilde konuşuyorsan konuş, asla bir müşteri " +
-  "hizmetleri asistanı ya da resmi bir kurum gibi çıkma — gerçek bir insanın sevgilisine/" +
-  "arkadaşına o dilde mesajlaşırken kullanacağı doğal, samimi ifadeleri seç.";
+// franc's ISO 639-3 codes for the 7 languages we actually support (matches
+// VoiceLanguage.swift's superset). Detection replaces the old approach of
+// asking Grok itself to notice and switch languages — that was unreliable
+// (confirmed via live 7-language test 2026-07-05: en/pt would randomly mix
+// languages or drop the switch entirely, non-deterministic run to run).
+const SUPPORTED_LANGS: Record<string, string> = {
+  eng: "English",
+  tur: "Turkish",
+  deu: "German",
+  fra: "French",
+  spa: "Spanish",
+  por: "Portuguese",
+  ita: "Italian",
+};
+
+// Detects the reply language deterministically from the user's own text
+// instead of leaving it to the model's judgment each turn. Concatenates
+// recent user messages with the current one — franc needs enough text to be
+// reliable, and a single short message ("ok", "😊") isn't enough on its own.
+function detectReplyLanguage(
+  userMessage: string,
+  clientHistory: WireMessage[] | undefined,
+): string | null {
+  const priorUserText = (clientHistory ?? [])
+    .filter((m) => m.role === "user")
+    .slice(-5)
+    .map((m) => m.content)
+    .join(" ");
+  const text = `${priorUserText} ${userMessage}`.trim();
+  if (!text) return null;
+  // `only` restricts franc's candidate set to the 7 languages we actually
+  // support — without it, franc-min lacks Italian entirely (misreads it as
+  // unrelated languages) and the full franc package over-guesses among
+  // similar Latin-script languages on short text (e.g. English → Haitian
+  // Creole). Verified 2026-07-05 against all 7 test phrases.
+  const code = franc(text, { minLength: 3, only: Object.keys(SUPPORTED_LANGS) });
+  return SUPPORTED_LANGS[code] ?? null;
+}
+
+function languageDirective(language: string | null): string {
+  const target = language ?? "English";
+  return (
+    `\n\nLANGUAGE RULE: Reply ONLY in ${target} — this was determined from the ` +
+    "user's own messages, not a guess you need to make. Never mix in another " +
+    "language, never comment on the language itself (no 'I'll reply in X', no " +
+    "'you wrote in Y but...'), just write naturally in it. Sound like a real " +
+    "person texting their partner/friend in that language — warm, colloquial, " +
+    "never like a customer-support agent or an official institution."
+  );
+}
 
 // ESKİ [[photo]] işaretli otomatik-foto sistemi (statik chat_photos havuzundan
 // rastgele seçim) KALDIRILDI — artık gerçek bir "Bana fotoğraf gönder" / "Bana
@@ -338,6 +383,11 @@ Deno.serve(async (req: Request) => {
     const voiceChat: boolean = body.voiceChat === true;
     // Fotoğraf isteği tepki modu mu? (bkz. IMAGE_CAPTION_RULE)
     const imageReactionChat: boolean = body.imageReactionChat === true;
+    // Cevap dili — kullanıcının kendi metninden deterministik tespit edilir
+    // (bkz. detectReplyLanguage), modelin fark edip geçmesine güvenilmiyor.
+    const detectedLanguage = userMessage
+      ? detectReplyLanguage(userMessage, clientHistory)
+      : null;
     // Günlük rutin (bkz. character-schedule fonksiyonu) — istemci "şu an ne
     // yapıyor" bloğunun `detail` metnini gönderir, burada tona yansıtılır.
     const currentActivity: string | undefined =
@@ -444,7 +494,7 @@ Deno.serve(async (req: Request) => {
         behaviorRows.map((b) => `- ${b.content}`).join("\n");
     }
 
-    system += LANGUAGE_RULE;
+    system += languageDirective(detectedLanguage);
     system += VARIATION_RULE;
     system += CONTINUITY_RULE;
     system += humorDirective(currentLevel);
