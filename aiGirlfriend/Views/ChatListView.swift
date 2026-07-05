@@ -376,10 +376,10 @@ private func relativeTime(_ iso: String?) -> String {
     guard let date else { return "" }
     let s = Date().timeIntervalSince(date)
     if s < 60 { return String(localized: "now") }
-    if s < 3600 { return "\(Int(s/60))m" }
-    if s < 86400 { return "\(Int(s/3600))h" }
+    if s < 3600 { return String(localized: "\(Int(s/60))m") }
+    if s < 86400 { return String(localized: "\(Int(s/3600))h") }
     if s < 172800 { return String(localized: "Yesterday") }
-    return "\(Int(s/86400))d"
+    return String(localized: "\(Int(s/86400))d")
 }
 
 #Preview {
