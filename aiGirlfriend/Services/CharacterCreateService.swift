@@ -21,7 +21,8 @@ struct CharacterCreateService {
         vibe: String,
         profession: String,
         personalityRole: String,
-        ageRange: String
+        ageRange: String,
+        ethnicity: String = ""
     ) async -> String? {
         let body: [String: Any] = [
             "generateImageOnly": true,
@@ -36,6 +37,7 @@ struct CharacterCreateService {
             "profession": profession,
             "personality_role": personalityRole,
             "age_range": ageRange,
+            "ethnicity": ethnicity,
         ]
 
         guard let url = URL(string: "\(Config.supabaseURL)/functions/v1/create-character"),
@@ -75,11 +77,14 @@ struct CharacterCreateService {
         eyeColor: String,
         noseShape: String,
         skinTone: String,
-        exHistory: String?
+        exHistory: String?,
+        interests: [String] = [],
+        ethnicity: String = ""
     ) async -> Character? {
         var body: [String: Any] = [
             "name": name,
             "photoUrl": photoUrl,
+            "ethnicity": ethnicity,
             "personality_role": personalityRole,
             "category": category,
             "vibe": vibe,
@@ -95,6 +100,9 @@ struct CharacterCreateService {
         ]
         if let history = exHistory, !history.trimmingCharacters(in: .whitespaces).isEmpty {
             body["ex_history"] = history
+        }
+        if !interests.isEmpty {
+            body["interests"] = interests
         }
 
         guard let url = URL(string: "\(Config.supabaseURL)/functions/v1/create-character"),

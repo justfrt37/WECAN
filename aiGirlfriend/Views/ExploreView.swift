@@ -39,7 +39,6 @@ struct ExploreView: View {
                 VStack(spacing: 16) {
                     searchBar
                     pills
-                    proBanner
                     grid
                 }
                 .padding(.horizontal, 20)
@@ -133,44 +132,6 @@ struct ExploreView: View {
                 )
         }
         .buttonStyle(.plain)
-    }
-
-    // MARK: PRO banner
-
-    private var proBanner: some View {
-        HStack(spacing: 10) {
-            ZStack {
-                Circle().fill(.white.opacity(0.2))
-                Image(systemName: "crown.fill")
-                    .font(.system(size: 18))
-                    .foregroundStyle(.white)
-            }
-            .frame(width: 42, height: 42)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Upgrade to PRO")
-                    .font(.system(size: 15, weight: .bold))
-                    .foregroundStyle(.white)
-                Text("See all characters")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.85))
-            }
-            Spacer()
-            Text("Upgrade to PRO")
-                .font(.system(size: 12, weight: .bold))
-                .foregroundStyle(Color(hex: 0xFF6F61))
-                .padding(.horizontal, 14)
-                .padding(.vertical, 8)
-                .background(.white, in: RoundedRectangle(cornerRadius: 14))
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 14)
-        .background(
-            LinearGradient(colors: [Color(hex: 0xFFA726), Color(hex: 0xFF6F61)],
-                           startPoint: .top, endPoint: .bottom),
-            in: RoundedRectangle(cornerRadius: 18)
-        )
-        .shadow(color: Color(hex: 0xFF6F61).opacity(0.3), radius: 12, y: 6)
     }
 
     // MARK: Grid

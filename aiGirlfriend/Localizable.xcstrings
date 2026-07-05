@@ -15,6 +15,16 @@
         }
       }
     },
+    "%@ %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@ %2$@"
+          }
+        }
+      }
+    },
     "%@ → %@" : {
       "localizations" : {
         "de" : {
@@ -55,6 +65,12 @@
         }
       }
     },
+    "%@ hazırlanıyor" : {
+
+    },
+    "%@ hazırlanıyor..." : {
+
+    },
     "%@ is warming up to you..." : {
       "localizations" : {
         "de" : {
@@ -94,6 +110,9 @@
           }
         }
       }
+    },
+    "%@ seni bekliyor" : {
+
     },
     "%@ sent you a message." : {
       "localizations" : {
@@ -432,6 +451,7 @@
       }
     },
     "✨ Your Character Is Ready!" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -3817,6 +3837,9 @@
         }
       }
     },
+    "Ethnicity" : {
+
+    },
     "Excuse me?? You opened the app and skipped me?!" : {
 
     },
@@ -3861,6 +3884,7 @@
       }
     },
     "Eye shape" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -4578,6 +4602,7 @@
 
     },
     "Give a name" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -5084,6 +5109,7 @@
       }
     },
     "Here's your character 👀" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -5845,6 +5871,7 @@
       }
     },
     "How do they wear their hair?" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -5885,6 +5912,7 @@
       }
     },
     "How old should they be?" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -6452,6 +6480,9 @@
     "Interesting choice, ignoring me like that." : {
 
     },
+    "Interests" : {
+
+    },
     "INTERESTS" : {
       "localizations" : {
         "de" : {
@@ -6717,6 +6748,12 @@
         }
       }
     },
+    "Karakter" : {
+
+    },
+    "Karakterine bir isim seç" : {
+
+    },
     "Keep talking to get your intimacy to the next level." : {
       "localizations" : {
         "de" : {
@@ -6798,6 +6835,7 @@
       }
     },
     "Leave blank, skip" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -8077,6 +8115,7 @@
       }
     },
     "Nose shape" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -8608,6 +8647,7 @@
       }
     },
     "Optional — tell your story" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -8648,6 +8688,7 @@
       }
     },
     "Optional." : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -8850,6 +8891,7 @@
       }
     },
     "Pick a personality" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -10026,6 +10068,7 @@
       }
     },
     "See all characters" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -10064,6 +10107,9 @@
           }
         }
       }
+    },
+    "See character" : {
+
     },
     "Send us an email" : {
       "localizations" : {
@@ -10283,6 +10329,9 @@
           }
         }
       }
+    },
+    "Skip" : {
+
     },
     "Sneaking around without saying hi to me, huh?" : {
 
@@ -10922,6 +10971,9 @@
         }
       }
     },
+    "Tap to see" : {
+
+    },
     "Teasing" : {
       "localizations" : {
         "de" : {
@@ -10963,6 +11015,7 @@
       }
     },
     "Tell your story — how you met, memories you share, anything you want them to know…" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -11001,6 +11054,9 @@
           }
         }
       }
+    },
+    "Tell your story how you met, memories you share, anything you want them to know…" : {
+
     },
     "The Ex" : {
       "localizations" : {
@@ -11122,6 +11178,7 @@
 
     },
     "This defines their core personality" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -11226,6 +11283,7 @@
 
     },
     "This name will always be used" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -11776,6 +11834,7 @@
       }
     },
     "Upgrade to PRO" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -12339,6 +12398,7 @@
       }
     },
     "What color are their eyes?" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -12379,6 +12439,7 @@
       }
     },
     "What color is their hair?" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -12459,6 +12520,7 @@
       }
     },
     "What do they do for work?" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -12499,6 +12561,7 @@
       }
     },
     "What shape are their eyes?" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -12539,6 +12602,7 @@
       }
     },
     "What shape is their nose?" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -12579,6 +12643,7 @@
       }
     },
     "What should your character be named?" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -12619,6 +12684,7 @@
       }
     },
     "What's their overall vibe?" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -12659,6 +12725,7 @@
       }
     },
     "What's their skin tone?" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -12785,6 +12852,7 @@
       }
     },
     "Which world are they from?" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -13387,6 +13455,9 @@
 
     },
     "Your absence is felt more than I anticipated." : {
+
+    },
+    "Your Character Is Ready!" : {
 
     },
     "Your messages are stored on your device, not on the server." : {

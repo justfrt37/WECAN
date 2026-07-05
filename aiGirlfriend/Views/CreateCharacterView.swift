@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import UIKit
 
 // MARK: - Role definitions
 
@@ -68,18 +69,35 @@ struct CreateCharacterView: View {
 
     // ── Selections ──
     @State private var characterName = ""
+    // Tüm adımlar varsayılan olarak ilk seçenek seçili gelir.
     @State private var selectedRole = "flirty"
-    @State private var selectedCategory = ""
-    @State private var selectedVibe = ""
-    @State private var selectedProfession = ""
-    @State private var selectedAgeRange = ""
+    @State private var selectedCategory = "Realistic"
+    @State private var selectedVibe = "Sweet"
+    @State private var selectedProfession = "Student"
+    @State private var selectedAgeRange = AppearanceOptions.ageRanges[0]
     @State private var selectedHairstyle = AppearanceOptions.hairstyles[0]
     @State private var selectedHairColor = AppearanceOptions.hairColors[0]
     @State private var selectedEyeShape = AppearanceOptions.eyeShapes[0]
     @State private var selectedEyeColor = AppearanceOptions.eyeColors[0]
     @State private var selectedNoseShape = AppearanceOptions.noseShapes[0]
     @State private var selectedSkinTone = AppearanceOptions.skinTones[0]
+    @State private var selectedEthnicity = AppearanceOptions.ethnicities[0]
     @State private var exHistory = ""
+    @State private var selectedInterests: Set<String> = [CreateCharacterView.hobbies[0]]
+
+    /// İlgi alanları / hobiler (50 seçenek, çoklu seçim).
+    static let hobbies: [String] = [
+        "🎵 Müzik", "🎬 Sinema", "✈️ Seyahat", "⚽ Spor", "🧘 Yoga",
+        "💃 Dans", "🍳 Yemek", "📷 Fotoğraf", "🎨 Resim", "📚 Kitap",
+        "🎮 Oyun", "✨ Anime", "🥾 Doğa yürüyüşü", "🏕️ Kamp", "🏊 Yüzme",
+        "🏃 Koşu", "🏋️ Fitness", "🚴 Bisiklet", "⛷️ Kayak", "🏄 Sörf",
+        "☕ Kahve", "🍷 Şarap", "🍸 Kokteyl", "👗 Moda", "💄 Makyaj",
+        "🛍️ Alışveriş", "🖋️ Dövme", "🔮 Astroloji", "🧘‍♀️ Meditasyon", "🌱 Bahçıvanlık",
+        "🐱 Kediler", "🐶 Köpekler", "🚗 Arabalar", "🏍️ Motosiklet", "💻 Teknoloji",
+        "👩‍💻 Kodlama", "🎙️ Podcast", "😂 Stand-up", "🎭 Tiyatro", "🎤 Konser",
+        "🎪 Festival", "🎶 Karaoke", "♟️ Satranç", "🧶 Örgü", "🏺 Seramik",
+        "🎣 Balık tutma", "🧗 Dağcılık", "🤿 Dalış", "🧺 Piknik", "🌃 Gece hayatı",
+    ]
 
     // ── Üretilen fotoğraf (görünüm adımlarından sonra, geçmiş adımından önce) ──
     @State private var generatedPhotoURL: String?
@@ -88,19 +106,22 @@ struct CreateCharacterView: View {
     // ── Result ──
     @State private var created: Character?
 
+    // Önce bulanık dummy resim gelir; "See character"a basınca gerçek fotoğraf
+    // üretilir (istek atılır) ve netleşir.
+    @State private var photoRevealed = false
+    @State private var generating = false
+    @State private var revealedImage: Image?  // gerçek fotoğraf (önceden indirilir)
+
     private enum Phase { case steps, generatingPhoto, photoPreview, creating, ready }
 
     private let columns2 = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
     private let columns3 = [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)]
 
-    // Steps: 0=name 1=role 2=category 3=vibe 4=profession 5=ageRange
-    //        6=hairstyle 7=hairColor 8=eyeShape 9=eyeColor 10=noseShape 11=skinTone
-    //        12=history
-    private var totalSteps: Int { 13 }
+    // Sıra: 0=kategori 1=isim 2=etnik köken 3=yaş 4=tarz(vibe) 5=meslek
+    //       6=ilgi alanları 7=saç stili 8=saç rengi 9=göz rengi 10=ten tonu 11=anı(geçmiş)
+    // Fotoğraf ("kız kısmı") TÜM adımlar bittikten SONRA üretilir.
+    private var totalSteps: Int { 12 }
     private var isLastStep: Bool { stepIndex == totalSteps - 1 }
-    /// Son görünüm adımı (ten tonu) — buradan çıkınca fotoğraf üretimi tetiklenir,
-    /// normal adım artışı değil.
-    private let appearanceEndIndex = 11
 
     var body: some View {
         NavigationStack {
@@ -122,61 +143,156 @@ struct CreateCharacterView: View {
         .tint(AppColor.pink)
     }
 
+    /// Ortak duvar-saati nabzı (0..1). İki TimelineView(.animation) aynı display-link
+    /// saatini okur → buton ve kenar birebir senkron yanıp söner.
+    private func pulseOpacity(_ date: Date, base: Double, amp: Double) -> Double {
+        let t = date.timeIntervalSinceReferenceDate
+        let s = (sin(t * 2 * .pi / 1.2) + 1) / 2   // periyot 1.2 sn
+        return base - amp * s
+    }
+
     // MARK: - Steps
 
     @ViewBuilder
     private var stepsContent: some View {
         VStack(spacing: 0) {
             topBar
-            ScrollView {
-                VStack(spacing: 4) {
-                    stepHeader
-                    stepBody
-                        .padding(.top, 8)
+            if stepIndex == 1 || isLastStep {
+                // İsim + geçmiş: başlık (ortalı) ve içerik birlikte dikeyde ortalanır.
+                VStack {
+                    Spacer(minLength: 0)
+                    VStack(spacing: 16) {
+                        Text(stepTitle)
+                            .font(.system(size: 26, weight: .bold))
+                            .foregroundStyle(.white)
+                            .multilineTextAlignment(.center)
+                            .frame(maxWidth: .infinity)
+                        stepBody
+                    }
+                    .padding(.horizontal, 20)
+                    Spacer(minLength: 0)
                 }
-                .padding(.horizontal, 20)
-                .padding(.bottom, 24)
+            } else if stepIndex == 0 {
+                // Kategori: başlık üstte, kartlar ekranı doldurur (altta 8px).
+                stepHeader
+                    .padding(.horizontal, 20)
+                    .padding(.top, 20)
+                    .padding(.bottom, 8)
+                stepBody
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 8)
+            } else {
+                stepHeader
+                    .padding(.horizontal, 20)
+                    .padding(.top, 20)
+                    .padding(.bottom, 4)
+                ScrollView {
+                    stepBody
+                        .padding(.horizontal, 20)
+                        .padding(.top, 22)
+                        .padding(.bottom, 24)
+                }
+                .scrollIndicators(.hidden)
+                .defaultScrollAnchor(.top)
+                .mask(scrollFadeMask)
             }
             continueButton
         }
     }
 
+    /// Kaydırma kenarlarında yumuşak geçiş (üst + alt gradient). Üst fade dar
+    /// tutuldu ki ilk satır (ör. hobiler) gradientin altında kalmasın.
+    private var scrollFadeMask: some View {
+        LinearGradient(stops: [
+            .init(color: .clear, location: 0),
+            .init(color: .black, location: 0.03),
+            .init(color: .black, location: 0.95),
+            .init(color: .clear, location: 1),
+        ], startPoint: .top, endPoint: .bottom)
+    }
+
+    @ViewBuilder
     private var stepHeader: some View {
-        Group {
-            Text(stepTitle)
-                .font(.system(size: 26, weight: .bold))
-                .foregroundStyle(.white)
-                .padding(.top, 8)
-            Text(stepSubtitle)
-                .font(.system(size: 15))
-                .foregroundStyle(.white.opacity(0.6))
-                .padding(.bottom, 8)
-        }
+        Text(stepTitle)
+            .font(.system(size: 26, weight: .bold))
+            .foregroundStyle(.white)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     @ViewBuilder
     private var stepBody: some View {
         switch stepIndex {
-        case 0: nameStep
-        case 1: roleStep
-        case 2: optionGrid(options: ["Realistic", "Fantasy", "Anime", "Sci-Fi"],
-                           binding: $selectedCategory)
-        case 3: optionGrid(options: ["Sweet", "Mysterious", "Energetic", "Elegant"],
-                           binding: $selectedVibe)
-        case 4: professionStep
-        case 5: optionGrid(options: ["18-21", "22-25", "26-30"],
-                           binding: $selectedAgeRange)
-        case 6: appearanceOptionGrid(options: AppearanceOptions.hairstyles, feature: .hairstyle, binding: $selectedHairstyle)
-        case 7: appearanceOptionGrid(options: AppearanceOptions.hairColors, feature: .hairColor, binding: $selectedHairColor)
-        case 8: appearanceOptionGrid(options: AppearanceOptions.eyeShapes, feature: .eyeShape, binding: $selectedEyeShape)
-        case 9: appearanceOptionGrid(options: AppearanceOptions.eyeColors, feature: .eyeColor, binding: $selectedEyeColor)
-        case 10: appearanceOptionGrid(options: AppearanceOptions.noseShapes, feature: .noseShape, binding: $selectedNoseShape)
-        case 11: appearanceOptionGrid(options: AppearanceOptions.skinTones, feature: .skinTone, binding: $selectedSkinTone)
-        default: exHistoryStep
+        case 0: categoryStep                                                                      // Kategori
+        case 1: nameStep                                                                          // İsim
+        case 2: optionGrid(options: AppearanceOptions.ethnicities, binding: $selectedEthnicity, imageKey: "eth")   // Etnik köken
+        case 3: optionGrid(options: AppearanceOptions.ageRanges, binding: $selectedAgeRange, imageKey: "age")      // Yaş
+        case 4: optionGrid(options: ["Sweet", "Mysterious", "Energetic", "Elegant"],
+                           binding: $selectedVibe, imageKey: "vibe")                              // Tarz
+        case 5: professionStep                                                                    // Meslek
+        case 6: interestsStep                                                                     // İlgi alanları
+        case 7: appearanceOptionGrid(options: AppearanceOptions.hairstyles, feature: .hairstyle, binding: $selectedHairstyle, imageKey: "hair")
+        case 8: appearanceOptionGrid(options: AppearanceOptions.hairColors, feature: .hairColor, binding: $selectedHairColor, imageKey: "haircolor")
+        case 9: eyeColorStep
+        case 10: appearanceOptionGrid(options: AppearanceOptions.skinTones, feature: .skinTone, binding: $selectedSkinTone, imageKey: "skin")
+        default: exHistoryStep                                                                    // Anı ekle (11)
         }
     }
 
-    // MARK: Step 0 — Name
+    // MARK: Step 0 — Category (büyük, tek sütun, kaydırılabilir)
+
+    private var categoryStep: some View {
+        VStack(spacing: 14) {
+            ForEach(["Realistic", "Fictional"], id: \.self) { opt in
+                let selected = selectedCategory == opt
+                Button { selectedCategory = opt } label: {
+                    categoryCard(opt: opt, selected: selected)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .frame(maxHeight: .infinity)
+    }
+
+    /// Ekranı dolduran esnek yükseklikli kategori kartı (yüz daha iyi sığar).
+    private func categoryCard(opt: String, selected: Bool) -> some View {
+        RoundedRectangle(cornerRadius: 18, style: .continuous)
+            .fill(AppColor.card)
+            .overlay {
+                // 9:16 görselden yüz bandını göster: üstteki fazla boşluğu at, pencereyi
+                // aşağı kaydır → saç + gözler + dudaklar görünür (kafadan aşağı).
+                if let asset = BuilderImages.asset("cat", opt) {
+                    // Gerçekçi görselde üstte fazla boşluk var → biraz daha aşağı kaydır.
+                    let bias: CGFloat = opt == "Realistic" ? 0.30 : 0.22
+                    GeometryReader { geo in
+                        Image(asset).resizable().scaledToFill()
+                            .frame(width: geo.size.width, height: geo.size.height, alignment: .top)
+                            .offset(y: -geo.size.height * bias)
+                    }
+                    .clipped()
+                }
+            }
+            .overlay {
+                LinearGradient(colors: [.clear, .black.opacity(0.75)], startPoint: .center, endPoint: .bottom)
+            }
+            .overlay(alignment: .bottomLeading) {
+                Text(AppearanceOptions.tr(opt))
+                    .font(.system(size: 16, weight: .bold)).foregroundStyle(.white).padding(12)
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 18)
+                .strokeBorder(selected ? AppColor.pink : .white.opacity(0.12), lineWidth: selected ? 3 : 1))
+            .overlay(alignment: .topTrailing) {
+                if selected {
+                    Image(systemName: "checkmark.circle.fill").font(.system(size: 20))
+                        .foregroundStyle(AppColor.pink).padding(8)
+                        .background(Circle().fill(.white).padding(10))
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
+    // MARK: Step 1 — Name
 
     private var nameStep: some View {
         VStack(spacing: 16) {
@@ -194,10 +310,6 @@ struct CreateCharacterView: View {
                                       lineWidth: 1.5)
                 )
                 .autocorrectionDisabled()
-
-            Text("This name will always be used")
-                .font(.system(size: 13))
-                .foregroundStyle(.white.opacity(0.4))
         }
         .padding(.top, 12)
     }
@@ -255,42 +367,14 @@ struct CreateCharacterView: View {
     // MARK: Step 4 — Profession
 
     private var professionStep: some View {
-        LazyVGrid(columns: columns3, spacing: 10) {
+        LazyVGrid(columns: columns2, spacing: 12) {
             ForEach(professionOptions) { prof in
                 let selected = selectedProfession == prof.id
                 Button { selectedProfession = prof.id } label: {
-                    VStack(spacing: 6) {
-                        Text(prof.emoji)
-                            .font(.system(size: 26))
-                        Text(prof.label)
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(.white)
-                            .multilineTextAlignment(.center)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.8)
-                    }
-                    .padding(.vertical, 12)
-                    .frame(maxWidth: .infinity)
-                    .background(
-                        LinearGradient(
-                            colors: selected
-                                ? [AppColor.pink.opacity(0.45), AppColor.amber.opacity(0.45)]
-                                : [Color.white.opacity(0.06), Color.white.opacity(0.06)],
-                            startPoint: .topLeading, endPoint: .bottomTrailing),
-                        in: RoundedRectangle(cornerRadius: 16)
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 16)
-                            .strokeBorder(selected ? AppColor.pink : .white.opacity(0.1),
-                                          lineWidth: selected ? 2 : 1)
-                    )
-                    .overlay(alignment: .topTrailing) {
-                        if selected {
-                            Image(systemName: "checkmark.circle.fill")
-                                .font(.system(size: 14))
-                                .foregroundStyle(AppColor.pink)
-                                .padding(6)
-                        }
+                    if let asset = BuilderImages.asset("prof", prof.id) {
+                        imageOptionCard(asset: asset, label: prof.label, selected: selected, height: cardHeight(for: "prof"))
+                    } else {
+                        textOptionCard(label: "\(prof.emoji) \(prof.label)", selected: selected)
                     }
                 }
                 .buttonStyle(.plain)
@@ -300,40 +384,69 @@ struct CreateCharacterView: View {
 
     // MARK: Steps 2-5 — Generic option grid
 
-    private func optionGrid(options: [String], binding: Binding<String>) -> some View {
+    private func optionGrid(options: [String], binding: Binding<String>, imageKey: String? = nil) -> some View {
         LazyVGrid(columns: columns2, spacing: 12) {
             ForEach(options, id: \.self) { opt in
                 let selected = binding.wrappedValue == opt
                 Button { binding.wrappedValue = opt } label: {
-                    VStack {
-                        Spacer()
-                        Text(LocalizedStringKey(opt))
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundStyle(.white)
-                            .multilineTextAlignment(.center)
-                        Spacer()
+                    if let key = imageKey, let asset = BuilderImages.asset(key, opt) {
+                        imageOptionCard(asset: asset, label: AppearanceOptions.tr(opt), selected: selected, height: cardHeight(for: key))
+                    } else {
+                        textOptionCard(label: AppearanceOptions.tr(opt), selected: selected)
                     }
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 90)
-                    .background(
-                        LinearGradient(
-                            colors: selected
-                                ? [AppColor.pink.opacity(0.45), AppColor.amber.opacity(0.45)]
-                                : [Color.white.opacity(0.06), Color.white.opacity(0.06)],
-                            startPoint: .topLeading, endPoint: .bottomTrailing),
-                        in: RoundedRectangle(cornerRadius: 18)
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 18)
-                            .strokeBorder(selected ? AppColor.pink : .white.opacity(0.1),
-                                          lineWidth: selected ? 2 : 1)
-                    )
-                    .overlay(alignment: .topTrailing) {
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    // MARK: Görünüm adımları (görsel kart varsa görsel, yoksa FacePreview)
+
+    private func appearanceOptionGrid(options: [String], feature: FacePreview.Feature, binding: Binding<String>, imageKey: String? = nil) -> some View {
+        LazyVGrid(columns: columns2, spacing: 12) {
+            ForEach(options, id: \.self) { opt in
+                let selected = binding.wrappedValue == opt
+                Button { binding.wrappedValue = opt } label: {
+                    if let key = imageKey, let asset = BuilderImages.asset(key, opt) {
+                        imageOptionCard(asset: asset, label: AppearanceOptions.tr(opt), selected: selected, height: cardHeight(for: key))
+                    } else {
+                        facePreviewOptionCard(feature: feature, value: opt, selected: selected)
+                    }
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    // MARK: Göz rengi — geniş (yatay) kartlar, alt alta tek sütun
+
+    private var eyeColorStep: some View {
+        VStack(spacing: 12) {
+            ForEach(AppearanceOptions.eyeColors, id: \.self) { c in
+                let selected = selectedEyeColor == c
+                Button { selectedEyeColor = c } label: {
+                    ZStack(alignment: .leading) {
+                        if let asset = BuilderImages.asset("eyecolor", c) {
+                            Image(asset).resizable().scaledToFill()
+                                .frame(maxWidth: .infinity).frame(height: 96).clipped()
+                        } else {
+                            Color.white.opacity(0.06).frame(height: 96)
+                        }
+                        LinearGradient(colors: [.black.opacity(0.55), .clear],
+                                       startPoint: .leading, endPoint: .center)
+                        Text(AppearanceOptions.tr(c))
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundStyle(.white).padding(.leading, 16)
+                    }
+                    .frame(height: 96)
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 16)
+                        .strokeBorder(selected ? AppColor.pink : .white.opacity(0.12), lineWidth: selected ? 3 : 1))
+                    .overlay(alignment: .trailing) {
                         if selected {
                             Image(systemName: "checkmark.circle.fill")
-                                .font(.system(size: 18))
-                                .foregroundStyle(AppColor.pink)
-                                .padding(8)
+                                .font(.system(size: 22)).foregroundStyle(AppColor.pink)
+                                .padding(.trailing, 12)
                         }
                     }
                 }
@@ -342,47 +455,68 @@ struct CreateCharacterView: View {
         }
     }
 
-    // MARK: Steps 6-11 — Appearance option grid (with FacePreview)
+    // MARK: Ortak kart görünümleri
 
-    private func appearanceOptionGrid(options: [String], feature: FacePreview.Feature, binding: Binding<String>) -> some View {
-        LazyVGrid(columns: columns2, spacing: 12) {
-            ForEach(options, id: \.self) { opt in
-                let selected = binding.wrappedValue == opt
-                Button { binding.wrappedValue = opt } label: {
-                    VStack(spacing: 8) {
-                        facePreviewCard(feature: feature, value: opt)
-                            .frame(width: 56, height: 56)
-                        Text(LocalizedStringKey(opt))
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(.white)
-                    }
-                    .padding(.vertical, 14)
-                    .frame(maxWidth: .infinity)
-                    .background(
-                        LinearGradient(
-                            colors: selected
-                                ? [AppColor.pink.opacity(0.45), AppColor.amber.opacity(0.45)]
-                                : [Color.white.opacity(0.06), Color.white.opacity(0.06)],
-                            startPoint: .topLeading, endPoint: .bottomTrailing),
-                        in: RoundedRectangle(cornerRadius: 18)
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 18)
-                            .strokeBorder(selected ? AppColor.pink : .white.opacity(0.1),
-                                          lineWidth: selected ? 2 : 1)
-                    )
-                    .overlay(alignment: .topTrailing) {
-                        if selected {
-                            Image(systemName: "checkmark.circle.fill")
-                                .font(.system(size: 18))
-                                .foregroundStyle(AppColor.pink)
-                                .padding(8)
-                        }
-                    }
-                }
-                .buttonStyle(.plain)
+    /// Kart yüksekliği — saç/saç rengi/ten/yaş görselleri daha "uzaktan" görünsün
+    /// diye daha uzun kart kullanılır (dikey 9:16 görselden daha fazlası görünür).
+    private func cardHeight(for imageKey: String?) -> CGFloat {
+        switch imageKey {
+        case "hair", "haircolor", "skin", "age", "vibe", "prof": return 240
+        default: return 180
+        }
+    }
+
+    /// 9:16 görselli seçenek kartı (alt köşede etiket).
+    private func imageOptionCard(asset: String, label: String, selected: Bool, height: CGFloat = 180) -> some View {
+        ZStack(alignment: .bottomLeading) {
+            Image(asset).resizable().scaledToFill()
+                .frame(maxWidth: .infinity).frame(height: height).clipped()
+            LinearGradient(colors: [.clear, .black.opacity(0.75)], startPoint: .center, endPoint: .bottom)
+            Text(label)
+                .font(.system(size: 14, weight: .bold)).foregroundStyle(.white)
+                .padding(10)
+        }
+        .frame(height: height)
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 18)
+            .strokeBorder(selected ? AppColor.pink : .white.opacity(0.12), lineWidth: selected ? 3 : 1))
+        .overlay(alignment: .topTrailing) {
+            if selected {
+                Image(systemName: "checkmark.circle.fill").font(.system(size: 20))
+                    .foregroundStyle(AppColor.pink).padding(8)
+                    .background(Circle().fill(.white).padding(10))
             }
         }
+    }
+
+    private func textOptionCard(label: String, selected: Bool) -> some View {
+        VStack { Spacer()
+            Text(label).font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(.white).multilineTextAlignment(.center)
+            Spacer() }
+        .frame(maxWidth: .infinity).frame(height: 90)
+        .background(LinearGradient(colors: selected
+            ? [AppColor.pink.opacity(0.45), AppColor.amber.opacity(0.45)]
+            : [Color.white.opacity(0.06), Color.white.opacity(0.06)],
+            startPoint: .topLeading, endPoint: .bottomTrailing),
+            in: RoundedRectangle(cornerRadius: 18))
+        .overlay(RoundedRectangle(cornerRadius: 18)
+            .strokeBorder(selected ? AppColor.pink : .white.opacity(0.1), lineWidth: selected ? 2 : 1))
+    }
+
+    private func facePreviewOptionCard(feature: FacePreview.Feature, value: String, selected: Bool) -> some View {
+        VStack(spacing: 8) {
+            facePreviewCard(feature: feature, value: value).frame(width: 56, height: 56)
+            Text(AppearanceOptions.tr(value)).font(.system(size: 14, weight: .semibold)).foregroundStyle(.white)
+        }
+        .padding(.vertical, 14).frame(maxWidth: .infinity)
+        .background(LinearGradient(colors: selected
+            ? [AppColor.pink.opacity(0.45), AppColor.amber.opacity(0.45)]
+            : [Color.white.opacity(0.06), Color.white.opacity(0.06)],
+            startPoint: .topLeading, endPoint: .bottomTrailing),
+            in: RoundedRectangle(cornerRadius: 18))
+        .overlay(RoundedRectangle(cornerRadius: 18)
+            .strokeBorder(selected ? AppColor.pink : .white.opacity(0.1), lineWidth: selected ? 2 : 1))
     }
 
     /// Her kart SADECE o an karar verilen özelliği canlandırır — diğer tüm
@@ -412,7 +546,7 @@ struct CreateCharacterView: View {
             }
 
             TextField("", text: $exHistory,
-                      prompt: Text("Tell your story — how you met, memories you share, anything you want them to know…")
+                      prompt: Text("Tell your story how you met, memories you share, anything you want them to know…")
                           .foregroundColor(.white.opacity(0.35)),
                       axis: .vertical)
                 .lineLimit(5...12)
@@ -427,20 +561,48 @@ struct CreateCharacterView: View {
                 )
 
             HStack {
-                Text("Optional.")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.white.opacity(0.4))
                 Spacer()
                 Button {
                     exHistory = ""
                     advance()
                 } label: {
-                    Text("Leave blank, skip")
+                    Text("Skip")
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(AppColor.pinkSoft)
-                        .underline()
                 }
                 .buttonStyle(.plain)
+            }
+        }
+        .padding(.top, 4)
+    }
+
+    // MARK: Step 13 — İlgi Alanları (hobiler, çoklu seçim)
+
+    /// En fazla seçilebilecek ilgi alanı sayısı.
+    private let maxInterests = 10
+
+    private var interestsStep: some View {
+        LazyVGrid(columns: columns3, spacing: 10) {
+            ForEach(Self.hobbies, id: \.self) { hobby in
+                let on = selectedInterests.contains(hobby)
+                let atMax = selectedInterests.count >= maxInterests
+                Button {
+                    if on { selectedInterests.remove(hobby) }
+                    else if !atMax { selectedInterests.insert(hobby) }
+                } label: {
+                    Text(hobby)
+                        .font(.system(size: 12, weight: on ? .semibold : .medium))
+                        .foregroundStyle(on ? AppColor.pinkSoft : Color.white.opacity(0.85))
+                        .lineLimit(1).minimumScaleFactor(0.8)
+                        .frame(maxWidth: .infinity).frame(height: 40)
+                        .background(on ? AppColor.pink.opacity(0.15) : Color.white.opacity(0.06),
+                                    in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 12)
+                            .strokeBorder(on ? AppColor.pink.opacity(0.4) : .white.opacity(0.12), lineWidth: 1))
+                        .opacity(!on && atMax ? 0.4 : 1)
+                }
+                .buttonStyle(.plain)
+                .disabled(!on && atMax)
             }
         }
         .padding(.top, 4)
@@ -531,7 +693,10 @@ struct CreateCharacterView: View {
     private var photoPreviewContent: some View {
         VStack(spacing: 20) {
             Spacer()
-            if let error = photoGenError {
+            // Hata ekranı SADECE karakter hiç oluşturulamadıysa gösterilir; görsel
+            // üretimi başarısız olsa bile fallback ile karakter oluştuğundan normal
+            // akış (dummy resim + devam) sürer.
+            if let error = photoGenError, created == nil, !generating {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .font(.system(size: 40))
                     .foregroundStyle(AppColor.pink)
@@ -540,7 +705,7 @@ struct CreateCharacterView: View {
                     .foregroundStyle(.white.opacity(0.8))
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 30)
-                Button { phase = .generatingPhoto } label: {
+                Button { reveal() } label: {
                     Text("Try Again")
                         .font(.system(size: 16, weight: .bold))
                         .foregroundStyle(.white)
@@ -551,37 +716,128 @@ struct CreateCharacterView: View {
                             in: Capsule())
                 }
                 .padding(.horizontal, 40)
-            } else if let urlString = generatedPhotoURL, let url = URL(string: urlString) {
-                Text("Here's your character 👀")
-                    .font(.system(size: 22, weight: .bold))
-                    .foregroundStyle(.white)
+            } else {
+                // Üst başlık: açılınca yeşil çevrimiçi + ad/yaş, altında meslek emojili.
+                // Öncesinde "{ad} hazırlanıyor/seni bekliyor ❤️".
+                VStack(spacing: 4) {
+                    if photoRevealed, let c = created {
+                        HStack(spacing: 8) {
+                            Circle().fill(Color.green)
+                                .frame(width: 10, height: 10)
+                                .shadow(color: .green.opacity(0.6), radius: 3)
+                            Text(c.nameWithAge)
+                                .font(.system(size: 26, weight: .bold))
+                                .foregroundStyle(.white)
+                        }
+                        if let prof = c.profession, !prof.isEmpty {
+                            Text("\(professionEmoji) \(prof)")
+                                .font(.system(size: 15))
+                                .foregroundStyle(.white.opacity(0.7))
+                        }
+                    } else {
+                        HStack(spacing: 8) {
+                            Text(generating ? "\(builderName) hazırlanıyor" : "\(builderName) seni bekliyor")
+                                .font(.system(size: 24, weight: .bold))
+                                .foregroundStyle(.white)
+                            Image(systemName: "heart.fill")
+                                .font(.system(size: 20))
+                                .foregroundStyle(.red)
+                        }
+                    }
+                }
 
-                CachedImage(url: url) { img in
-                    img.resizable().scaledToFill()
-                } placeholder: { AppColor.card }
-                .frame(height: 380).frame(maxWidth: .infinity)
-                .clipShape(RoundedRectangle(cornerRadius: 24))
-                .overlay(RoundedRectangle(cornerRadius: 24)
-                    .strokeBorder(AppColor.pink.opacity(0.5), lineWidth: 1.5))
-                .padding(.horizontal, 20)
+                // Önce bulanık dummy resim (hızlı). "See character"a / resme basınca
+                // gerçek fotoğraf üretilir; hazır olunca yumuşakça netleşir.
+                ZStack {
+                    Group {
+                        // Gerçek fotoğraf SADECE reveal olunca (blur 0 iken) gösterilir →
+                        // gerçek resim asla bulanık görünmez. Öncesinde dummy (bulanık).
+                        if photoRevealed, let img = revealedImage {
+                            img.resizable().scaledToFill()
+                        } else {
+                            dummyPhoto
+                        }
+                    }
+                    .frame(height: 380).frame(maxWidth: .infinity)
+                    .clipShape(RoundedRectangle(cornerRadius: 24))
+                    .blur(radius: photoRevealed ? 0 : 28)
+                    .clipShape(RoundedRectangle(cornerRadius: 24))
 
-                Button {
-                    stepIndex = totalSteps - 1 // geçmiş adımı
-                    phase = .steps
-                } label: {
-                    Text("Continue")
-                        .font(.system(size: 17, weight: .bold))
+                    // Sadece dokunma göstergesi (üretim sürerken spinner yok).
+                    if !photoRevealed && !generating {
+                        VStack(spacing: 8) {
+                            Image(systemName: "hand.tap.fill")
+                                .font(.system(size: 30, weight: .semibold))
+                            Text("Tap to see")
+                                .font(.system(size: 15, weight: .bold))
+                        }
                         .foregroundStyle(.white)
-                        .frame(maxWidth: .infinity).frame(height: 54)
-                        .background(
-                            LinearGradient(colors: [AppColor.pink, AppColor.amber],
-                                           startPoint: .leading, endPoint: .trailing),
-                            in: Capsule())
+                        .shadow(color: .black.opacity(0.5), radius: 6, y: 2)
+                    }
+                }
+                .frame(height: 380).frame(maxWidth: .infinity)
+                // Hazırlanırken kenarlar yanıp söner (nabız gibi parlayan çerçeve).
+                .overlay {
+                    TimelineView(.animation) { tl in
+                        RoundedRectangle(cornerRadius: 24)
+                            .strokeBorder(AppColor.pink, lineWidth: generating ? 3 : 1.5)
+                            .shadow(color: AppColor.pink.opacity(generating ? 0.8 : 0), radius: 8)
+                            // Buton ile aynı saatten → eş zamanlı yanıp söner.
+                            .opacity(generating ? pulseOpacity(tl.date, base: 1.0, amp: 0.8) : 0.5)
+                    }
                 }
                 .padding(.horizontal, 20)
-                .padding(.top, 4)
+                .contentShape(RoundedRectangle(cornerRadius: 24))
+                .onTapGesture { reveal() }
+
+                if let c = created {
+                    // Karakter oluşturuldu → doğrudan sohbete git.
+                    NavigationLink(value: c) {
+                        Text("Continue")
+                            .font(.system(size: 17, weight: .bold))
+                            .foregroundStyle(.white)
+                            .frame(maxWidth: .infinity).frame(height: 54)
+                            .background(
+                                LinearGradient(colors: [AppColor.pink, AppColor.amber],
+                                               startPoint: .leading, endPoint: .trailing),
+                                in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.horizontal, 20)
+                    .padding(.top, 4)
+                } else {
+                    Button { reveal() } label: {
+                        TimelineView(.animation) { tl in
+                            Text(generating ? "\(builderName) hazırlanıyor..." : "See character")
+                                .font(.system(size: 17, weight: .bold))
+                                .foregroundStyle(.white)
+                                .frame(maxWidth: .infinity).frame(height: 54)
+                                .background(
+                                    LinearGradient(colors: [AppColor.pink, AppColor.amber],
+                                                   startPoint: .leading, endPoint: .trailing),
+                                    in: Capsule())
+                                // Kenarlarla aynı saatten → eş zamanlı yanıp söner.
+                                .opacity(generating ? pulseOpacity(tl.date, base: 1.0, amp: 0.8) : 1.0)
+                        }
+                    }
+                    .buttonStyle(.plain)   // disabled sistem karartması nabzı gizlemesin
+                    .allowsHitTesting(!generating)
+                    .padding(.horizontal, 20)
+                    .padding(.top, 4)
+                }
             }
             Spacer()
+        }
+    }
+
+    /// Gerçek fotoğraf gelene kadar gösterilecek bulanık dummy — seçilen tarz/
+    /// etnik köken görselini kullanır (bulanık olduğu için yüz benzemesi yeter).
+    @ViewBuilder
+    private var dummyPhoto: some View {
+        if let asset = BuilderImages.asset("vibe", selectedVibe) ?? BuilderImages.asset("eth", selectedEthnicity) {
+            Image(asset).resizable().scaledToFill()
+        } else {
+            AppColor.card
         }
     }
 
@@ -624,7 +880,7 @@ struct CreateCharacterView: View {
 
                 ScrollView {
                     VStack(spacing: 16) {
-                        Text("✨ Your Character Is Ready!")
+                        Text("Your Character Is Ready!")
                             .font(.system(size: 26, weight: .bold))
                             .foregroundStyle(.white)
 
@@ -672,6 +928,7 @@ struct CreateCharacterView: View {
                     }
                     .padding(.horizontal, 20).padding(.bottom, 30)
                 }
+                .scrollIndicators(.hidden)
             }
         }
     }
@@ -680,54 +937,37 @@ struct CreateCharacterView: View {
 
     private var stepTitle: String {
         switch stepIndex {
-        case 0: return String(localized: "Give a name")
-        case 1: return String(localized: "Pick a personality")
-        case 2: return String(localized: "Category")
-        case 3: return String(localized: "Vibe")
-        case 4: return String(localized: "Profession")
-        case 5: return String(localized: "Age range")
-        case 6: return String(localized: "Hairstyle")
-        case 7: return String(localized: "Hair color")
-        case 8: return String(localized: "Eye shape")
+        case 0: return String(localized: "Category")
+        case 1: return String(localized: "Karakterine bir isim seç")
+        case 2: return String(localized: "Ethnicity")
+        case 3: return String(localized: "Age range")
+        case 4: return String(localized: "Vibe")
+        case 5: return String(localized: "Profession")
+        case 6: return String(localized: "Interests")
+        case 7: return String(localized: "Hairstyle")
+        case 8: return String(localized: "Hair color")
         case 9: return String(localized: "Eye color")
-        case 10: return String(localized: "Nose shape")
-        case 11: return String(localized: "Skin tone")
+        case 10: return String(localized: "Skin tone")
         default: return String(localized: "History & Memories")
         }
     }
 
-    private var stepSubtitle: String {
-        switch stepIndex {
-        case 0: return String(localized: "What should your character be named?")
-        case 1: return String(localized: "This defines their core personality")
-        case 2: return String(localized: "Which world are they from?")
-        case 3: return String(localized: "What's their overall vibe?")
-        case 4: return String(localized: "What do they do for work?")
-        case 5: return String(localized: "How old should they be?")
-        case 6: return String(localized: "How do they wear their hair?")
-        case 7: return String(localized: "What color is their hair?")
-        case 8: return String(localized: "What shape are their eyes?")
-        case 9: return String(localized: "What color are their eyes?")
-        case 10: return String(localized: "What shape is their nose?")
-        case 11: return String(localized: "What's their skin tone?")
-        default: return String(localized: "Optional — tell your story")
-        }
-    }
+    // Tüm altyazılar kaldırıldı — sade başlık.
+    private var stepSubtitle: String { "" }
 
     private var stepIsValid: Bool {
         switch stepIndex {
-        case 0: return !characterName.trimmingCharacters(in: .whitespaces).isEmpty
-        case 1: return true  // role always has a default
-        case 2: return !selectedCategory.isEmpty
-        case 3: return !selectedVibe.isEmpty
-        case 4: return !selectedProfession.isEmpty
-        case 5: return !selectedAgeRange.isEmpty
-        case 6: return !selectedHairstyle.isEmpty
-        case 7: return !selectedHairColor.isEmpty
-        case 8: return !selectedEyeShape.isEmpty
+        case 0: return !selectedCategory.isEmpty
+        case 1: return !characterName.trimmingCharacters(in: .whitespaces).isEmpty
+        case 2: return !selectedEthnicity.isEmpty
+        case 3: return !selectedAgeRange.isEmpty
+        case 4: return !selectedVibe.isEmpty
+        case 5: return !selectedProfession.isEmpty
+        case 6: return !selectedInterests.isEmpty // en az bir ilgi alanı
+        case 7: return !selectedHairstyle.isEmpty
+        case 8: return !selectedHairColor.isEmpty
         case 9: return !selectedEyeColor.isEmpty
-        case 10: return !selectedNoseShape.isEmpty
-        case 11: return !selectedSkinTone.isEmpty
+        case 10: return !selectedSkinTone.isEmpty
         default: return true // ex history is optional
         }
     }
@@ -737,16 +977,60 @@ struct CreateCharacterView: View {
     }
 
     private func advance() {
-        if stepIndex == appearanceEndIndex {
-            // Ten tonundan sonra: fotoğraf üretimine geç, normal adım artışı değil.
-            phase = .generatingPhoto
-        } else if isLastStep {
-            phase = .creating
+        if isLastStep {
+            // Tüm adımlar bitti → bulanık dummy resimli önizleme ekranı (henüz
+            // istek atılmaz; kullanıcı "See character"a basınca üretilir).
+            phase = .photoPreview
         } else {
             stepIndex += 1
         }
     }
 
+    /// "See character": gerçek fotoğrafı üretir + karakteri oluşturur, sonra
+    /// bulanıklığı yumuşak animasyonla açar (createCharacter'ın fallback'i
+    /// olduğu için görsel başarısız olsa bile karakter mutlaka oluşturulur).
+    private func reveal() {
+        guard !generating && created == nil else { return }
+        generating = true
+        photoGenError = nil
+        // @MainActor: tüm @State güncellemeleri ana thread'de olsun (arka planda
+        // state değişimi UI'ı bozuyordu — "buga giriyor" sebebi buydu).
+        Task { @MainActor in
+            await generatePhoto()               // en iyi çaba (istek atılır)
+            // Gerçek fotoğrafı ÖNCEDEN indir ki reveal anında dummy flaşlamasın.
+            if let urlStr = generatedPhotoURL, let url = URL(string: urlStr) {
+                var req = URLRequest(url: url)
+                req.timeoutInterval = 20
+                if let (data, _) = try? await URLSession.shared.data(for: req),
+                   let ui = UIImage(data: data) {
+                    revealedImage = Image(uiImage: ui)
+                }
+            }
+            await createCharacter()             // her durumda karakteri oluştur
+            generating = false
+            photoRevealed = true                // blur animasyonsuz, anında kalkar
+        }
+    }
+
+    /// İlk harf büyük, gerisi küçük ("MERVE" / "mErVe" → "Merve").
+    private func capitalizedName(_ raw: String) -> String {
+        let n = raw.trimmingCharacters(in: .whitespaces)
+        guard let first = n.first else { return n }
+        return first.uppercased() + n.dropFirst().lowercased()
+    }
+
+    /// Butonda / başlıkta gösterilecek isim (girilmemişse nötr).
+    private var builderName: String {
+        let n = capitalizedName(characterName)
+        return n.isEmpty ? String(localized: "Karakter") : n
+    }
+
+    /// Seçilen mesleğe uygun emoji (profession seçenek listesinden).
+    private var professionEmoji: String {
+        professionOptions.first(where: { $0.id == selectedProfession })?.emoji ?? "💼"
+    }
+
+    @MainActor
     private func generatePhoto() async {
         photoGenError = nil
         let service = CharacterCreateService()
@@ -761,22 +1045,23 @@ struct CreateCharacterView: View {
             vibe: selectedVibe,
             profession: selectedProfession,
             personalityRole: selectedRole,
-            ageRange: selectedAgeRange
+            ageRange: selectedAgeRange,
+            ethnicity: selectedEthnicity
         ) {
             generatedPhotoURL = url
         } else {
             photoGenError = String(localized: "Couldn't generate your character's photo. Please try again.")
         }
-        phase = .photoPreview
     }
 
+    @MainActor
     private func createCharacter() async {
         let service = CharacterCreateService()
         let photo = generatedPhotoURL ?? ""
         let history = exHistory.trimmingCharacters(in: .whitespaces)
 
         if let c = await service.create(
-            name: characterName.trimmingCharacters(in: .whitespaces),
+            name: capitalizedName(characterName),
             photoUrl: photo,
             personalityRole: selectedRole,
             category: selectedCategory,
@@ -789,11 +1074,12 @@ struct CreateCharacterView: View {
             eyeColor: selectedEyeColor,
             noseShape: selectedNoseShape,
             skinTone: selectedSkinTone,
-            exHistory: history.isEmpty ? nil : history
+            exHistory: history.isEmpty ? nil : history,
+            interests: Array(selectedInterests),
+            ethnicity: selectedEthnicity
         ) {
-            created = c
+            withAnimation { created = c }
             store.characters.append(c)
-            phase = .ready
             return
         }
 
@@ -802,7 +1088,7 @@ struct CreateCharacterView: View {
         // oldu) onu kullan, yoksa fotoğrafsız devam et.
         let fallback = Character(
             id: UUID(),
-            name: characterName.isEmpty ? "Lumi" : characterName,
+            name: characterName.isEmpty ? "Lumi" : capitalizedName(characterName),
             tagline: "\(selectedRole) · \(selectedProfession)",
             systemPrompt: "You are \(characterName). Personality: \(selectedRole). Vibe: \(selectedVibe). Reply warmly and naturally.",
             avatarSymbol: "sparkles",
@@ -811,12 +1097,12 @@ struct CreateCharacterView: View {
             category: selectedCategory,
             photoURL: URL(string: photo),
             avatarURL: URL(string: photo),
+            interests: Array(selectedInterests),
             galleryURLs: [URL(string: photo)].compactMap { $0 },
             personalityRole: selectedRole
         )
-        created = fallback
+        withAnimation { created = fallback }
         store.characters.append(fallback)
-        phase = .ready
     }
 }
 

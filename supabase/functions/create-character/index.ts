@@ -79,7 +79,7 @@ function pickAgeFromRange(range: string): number {
 function buildImagePrompt(opts: {
   gender: string; age: number; category: string; vibe: string; profession: string;
   hairstyle: string; hairColor: string; eyeShape: string; eyeColor: string;
-  noseShape: string; skinTone: string;
+  noseShape: string; skinTone: string; ethnicity?: string;
 }): string {
   const styleCue: Record<string, string> = {
     Realistic: "photorealistic portrait photo, natural lighting, high detail, DSLR quality",
@@ -89,7 +89,8 @@ function buildImagePrompt(opts: {
   };
   const style = styleCue[opts.category] ?? styleCue.Realistic;
 
-  return `${style} of a ${opts.age}-year-old ${opts.gender.toLowerCase()}, ` +
+  const ethnicity = opts.ethnicity ? `${opts.ethnicity.toLowerCase()} ` : "";
+  return `${style} of a ${opts.age}-year-old ${ethnicity}${opts.gender.toLowerCase()}, ` +
     `${opts.hairstyle.toLowerCase()} ${opts.hairColor.toLowerCase()} hair, ` +
     `${opts.eyeShape.toLowerCase()} ${opts.eyeColor.toLowerCase()} eyes, ` +
     `${opts.noseShape.toLowerCase()} nose, ${opts.skinTone.toLowerCase()} skin tone, ` +
@@ -162,6 +163,7 @@ Deno.serve(async (req: Request) => {
           eyeColor: b.eye_color ?? "Brown",
           noseShape: b.nose_shape ?? "Straight",
           skinTone: b.skin_tone ?? "Medium",
+          ethnicity: b.ethnicity ?? "",
         });
         const bytes = await fetchGeneratedImageBytes(prompt);
         const photoUrl = await uploadGeneratedImage(bytes);

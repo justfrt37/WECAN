@@ -11,16 +11,50 @@ enum AppearanceOptions {
     static let hairstyles = ["Straight", "Wavy", "Curly", "Ponytail", "Bun", "Pixie",
                               "Braided", "Bob", "Long Layers", "Undercut"]
     static let hairColors = ["Black", "Brown", "Blonde", "Red", "Auburn", "Pink",
-                              "Silver", "Blue", "Chestnut", "Platinum", "Copper", "Purple"]
+                              "Silver", "Blue", "Copper", "Purple"]
     static let eyeShapes = ["Almond", "Round", "Hooded", "Monolid",
                              "Upturned", "Downturned", "Deep-set", "Wide-set"]
     static let eyeColors = ["Brown", "Blue", "Green", "Hazel", "Gray", "Amber",
-                             "Turquoise", "Violet", "Olive", "Steel Blue"]
+                             "Turquoise", "Violet", "Emerald", "Steel Blue"]
     static let noseShapes = ["Straight", "Button", "Aquiline", "Wide",
                               "Roman", "Snub", "Nubian", "Greek"]
-    // Nötr bir ton skalası — etnisite değil, sadece açık-koyu spektrumu.
-    static let skinTones = ["Porcelain", "Fair", "Light", "Medium", "Tan", "Deep",
-                             "Ivory", "Golden", "Caramel", "Ebony"]
+    // Ten tonu — app içindeki görsellerle eşleşen set.
+    static let skinTones = ["Porcelain", "Fair", "Tan", "Deep", "Golden", "Caramel"]
+    // Etnik köken (değer=İngilizce prompt için, gösterim=Türkçe). Görseller: "Etnik Köken" klasörü.
+    static let ethnicities = ["African", "Mediterranean", "European", "East Asian",
+                               "South Asian", "Southeast Asian", "Scandinavian",
+                               "North African", "Latina", "Middle Eastern", "Slavic", "Mixed"]
+    static let ageRanges = ["18-21", "22-27", "28-35", "36-42", "43-52", "53-65", "65+"]
+
+    /// Değer (İngilizce) → Türkçe gösterim adı. Bilinmeyen değeri aynen döndürür.
+    static func tr(_ v: String) -> String { trMap[v] ?? v }
+
+    private static let trMap: [String: String] = [
+        // Kategori
+        "Realistic": "Gerçekçi", "Anime": "Anime", "Fictional": "Kurgusal", "Fantasy": "Fantezi", "Sci-Fi": "Bilim Kurgu",
+        // Tarz
+        "Sweet": "Tatlı", "Mysterious": "Gizemli", "Energetic": "Enerjik", "Elegant": "Zarif",
+        // Saç stili
+        "Straight": "Düz", "Wavy": "Dalgalı", "Curly": "Kıvırcık", "Ponytail": "At Kuyruğu",
+        "Bun": "Topuz", "Pixie": "Pixie Kesim", "Braided": "Örgülü", "Bob": "Bob Kesim",
+        "Long Layers": "Uzun Katlı", "Undercut": "Undercut",
+        // Saç rengi
+        "Black": "Siyah", "Brown": "Kahverengi", "Blonde": "Sarışın", "Red": "Kızıl",
+        "Auburn": "Kestane Kızılı", "Pink": "Pembe", "Silver": "Gümüş", "Blue": "Mavi",
+        "Copper": "Bakır", "Purple": "Mor",
+        // Göz rengi (Brown/Blue/Pink çakışmaları saç ile aynı Türkçe — sorun değil)
+        "Green": "Yeşil", "Hazel": "Ela", "Gray": "Gri", "Amber": "Amber",
+        "Turquoise": "Turkuaz", "Violet": "Menekşe", "Emerald": "Zümrüt", "Steel Blue": "Çelik Mavisi",
+        // Ten tonu
+        "Porcelain": "Porselen", "Fair": "Açık", "Light": "Açık Ton", "Medium": "Orta",
+        "Tan": "Bronz", "Deep": "Koyu", "Ivory": "Fildişi", "Golden": "Altın Ton",
+        "Caramel": "Karamel", "Ebony": "Abanoz",
+        // Etnik köken
+        "African": "Afrikalı", "Mediterranean": "Akdeniz", "European": "Avrupalı",
+        "East Asian": "Doğu Asya", "South Asian": "Güney Asya", "Southeast Asian": "Güneydoğu Asya",
+        "Scandinavian": "İskandinav", "Mixed": "Karışık", "North African": "Kuzey Afrikalı",
+        "Latina": "Latin", "Middle Eastern": "Orta Doğu", "Slavic": "Slav",
+    ]
 
     static func hairColorValue(_ name: String) -> Color {
         switch name {
@@ -50,7 +84,7 @@ enum AppearanceOptions {
         case "Amber":      return Color(hex: 0xC98A2C)
         case "Turquoise":  return Color(hex: 0x3FB6A8)
         case "Violet":     return Color(hex: 0x8B5FBF)
-        case "Olive":      return Color(hex: 0x76812F)
+        case "Emerald":    return Color(hex: 0x2E8B6F)
         case "Steel Blue": return Color(hex: 0x4A6D8C)
         default:           return .gray
         }
