@@ -43,6 +43,9 @@ private struct ChatRequest: Codable {
     /// verilmemişse Grok'a bir kere tepki yazdırır (bkz. chat/index.ts).
     let photoDownloadReaction: Bool?
     let photoURL: String?
+    /// İstemci ScheduleLookup ile hesaplar — gerçek yatma saatine 1 saatten
+    /// yakın mı (bkz. ChatViewModel.send, chat/index.ts sleepRule).
+    let nearSleepTime: Bool?
 }
 
 private struct WireMessage: Codable {
@@ -60,6 +63,7 @@ private struct ChatResponse: Codable {
     let photoUrl: String?
     let summary: String?   // özetleme modunda döner
     let schedule: CharacterSchedule?   // özetleme modunda döner (rafine edilmiş rutin)
+    let wentToSleep: Bool?
 }
 
 struct ChatHistory {
@@ -72,6 +76,9 @@ struct ChatReply {
     let reply: String
     let level: Int      // sunucunun sakladığı (istemcinin bir önceki turda gönderdiği) seviye
     let photoURL: URL?
+    /// true ise karakter bu turda gerçekten uyumayı kabul etti (bkz.
+    /// ChatViewModel.send, chat/index.ts classifySleepAgreement).
+    let wentToSleep: Bool
 }
 
 enum ChatServiceError: Error, LocalizedError {
@@ -140,7 +147,8 @@ struct ChatService {
         return ChatReply(
             reply: resp.reply ?? "",
             level: resp.level ?? level,
-            photoURL: resp.photoUrl.flatMap(URL.init(string:))
+            photoURL: resp.photoUrl.flatMap(URL.init(string:)),
+            wentToSleep: resp.wentToSleep ?? false
         )
     }
 
@@ -159,7 +167,8 @@ struct ChatService {
         lastMessageAt: Date? = nil,
         voiceChat: Bool = false,
         imageReactionChat: Bool = false,
-        currentActivity: String? = nil
+        currentActivity: String? = nil,
+        nearSleepTime: Bool = false
     ) async throws -> ChatReply {
         let wireHistory = localMessages
             .filter { $0.imageURL == nil }
@@ -173,12 +182,14 @@ struct ChatService {
             lastMessageAt: lastMessageAt,
             voiceChat: voiceChat,
             imageReactionChat: imageReactionChat,
-            currentActivity: currentActivity
+            currentActivity: currentActivity,
+            nearSleepTime: nearSleepTime
         )
         return ChatReply(
             reply: resp.reply ?? "",
             level: resp.level ?? level,
-            photoURL: resp.photoUrl.flatMap(URL.init(string:))
+            photoURL: resp.photoUrl.flatMap(URL.init(string:)),
+            wentToSleep: resp.wentToSleep ?? false
         )
     }
 
@@ -343,7 +354,8 @@ struct ChatService {
         voiceChat: Bool = false,
         imageReactionChat: Bool = false,
         currentActivity: String? = nil,
-        previousSchedule: CharacterSchedule? = nil
+        previousSchedule: CharacterSchedule? = nil,
+        nearSleepTime: Bool = false
     ) async throws -> ChatResponse {
         var request = URLRequest(url: Config.chatFunctionURL)
         request.httpMethod = "POST"
@@ -396,7 +408,8 @@ struct ChatService {
             currentActivity: currentActivity,
             previousSchedule: previousSchedule,
             photoDownloadReaction: photoDownloadReaction,
-            photoURL: photoURL
+            photoURL: photoURL,
+            nearSleepTime: nearSleepTime
         )
         request.httpBody = try JSONEncoder().encode(body)
 

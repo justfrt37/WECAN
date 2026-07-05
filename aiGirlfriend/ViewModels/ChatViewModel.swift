@@ -206,7 +206,8 @@ final class ChatViewModel {
                     userMessage: text,
                     level: relationshipLevel,
                     lastMessageAt: lastMessageAt,
-                    currentActivity: currentActivity?.detail
+                    currentActivity: currentActivity?.detail,
+                    nearSleepTime: isNearSleepTime()
                 )
 
                 // Cevap hazır olsa bile, balon en az "bunu yazmak ne kadar sürerdi"
@@ -227,6 +228,14 @@ final class ChatViewModel {
                 messages.append(Message(role: .assistant, content: result.reply))
 
                 applyPostReplyEffects(gotPhoto: nil, stored: stored)
+
+                if result.wentToSleep {
+                    var updated = LocalConversationStore.shared.load(for: character.id) ?? stored
+                    updated?.manualSleepAt = Date()
+                    updated?.wokenUpAt = nil
+                    if let updated { LocalConversationStore.shared.save(updated, for: character.id) }
+                    NotificationScheduler.shared.cancelSleepyGoodnight(for: character.id)
+                }
             } catch {
                 errorMessage = error.localizedDescription
                 showsTypingBubble = false
@@ -234,6 +243,16 @@ final class ChatViewModel {
             }
             isSending = false
         }
+    }
+
+    /// Gerçek yatma saatine 1 saatten yakın mı (ya da içinde miyiz) — bkz.
+    /// chat/index.ts sleepRule/turnContext. Yerel hesaplanır, ağ çağrısı yok.
+    private func isNearSleepTime() -> Bool {
+        guard let schedule = LocalConversationStore.shared.load(for: character.id)?.schedule else { return false }
+        let now = Date()
+        if ScheduleLookup.currentBlock(schedule: schedule, date: now)?.isSleep == true { return true }
+        guard let nextStart = ScheduleLookup.nextSleepBlockStart(schedule: schedule, from: now) else { return false }
+        return nextStart.timeIntervalSince(now) <= 3600
     }
 
     /// Sesli mesaj isteği bayrağı — `quickReplyRow`'daki dalga formu düğmesiyle
