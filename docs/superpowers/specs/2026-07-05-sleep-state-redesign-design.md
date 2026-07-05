@@ -103,12 +103,33 @@ Two new `NotificationKind` cases: `.sleepyQuestion`, `.sleepyGoodbye`.
 
 Content (new static file `Services/Notifications/SleepyContent.swift`, single line per
 stage, no per-role/vibe variation — matches the exact literal phrasing requested, kept
-simple per YAGNI):
-- `.sleepyQuestion`: *"I want to sleep, if that's ok can we sleep?"*
-- `.sleepyGoodbye`: *"I am sleeping, goodnight"*
+simple per YAGNI). **Correction after checking the actual precedent**: bot-dialogue
+content (`GhostedContent`/`JealousyContent`/`LikedYouContent`) does NOT use the app's
+`Localizable.xcstrings` UI catalog — it uses a separate mechanism, `ConversationLanguage`
+(on-device `NLLanguageRecognizer`, `tr`/`en` only, hand-written dialogue tables), because
+these are injected as the character's own chat messages and must match whatever language
+the conversation is actually happening in, not the device's UI language. `SleepyContent`
+follows this exact same pattern — a simple `en`/`tr` dictionary, no vibe/role axis:
 
-Both wrapped in `String(localized:)` per the `IcebreakerPool`/`LikedYouContent` convention —
-full 6-language (`de/es/fr/it/pt/tr`) catalog entries required (`[[feedback_localization]]`).
+```swift
+enum SleepyContent {
+    private static let byLanguage: [String: (question: String, goodbye: String)] = [
+        "en": (
+            question: String(localized: "I want to sleep, if that's ok can we sleep?"),
+            goodbye: String(localized: "I am sleeping, goodnight")
+        ),
+        "tr": (
+            question: "Uyumak istiyorum, uygunsa uyuyabilir miyiz?",
+            goodbye: "Uyuyorum, iyi geceler"
+        ),
+    ]
+    static func question(language: String) -> String { (byLanguage[language] ?? byLanguage["en"]!).question }
+    static func goodbye(language: String) -> String { (byLanguage[language] ?? byLanguage["en"]!).goodbye }
+}
+```
+
+Called via `ConversationLanguage.current(for: characterID)`, same as `NotificationDelegate`
+already does for the other three types.
 
 `NotificationDelegate.handleTap`: add both new kinds.
 - `.sleepyQuestion`: inject the line, `store.pendingTab = .chat` (same as Ghosted/Jealousy).
