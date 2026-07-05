@@ -228,6 +228,15 @@ final class ChatViewModel {
     /// AYNI görünmesin diye (bkz. ChatView.messagesList).
     var isSendingVoiceReply: Bool = false
 
+    /// Fotoğraf isteği bayrağı — `quickReplyRow`'daki kamera düğmesiyle açılır/
+    /// kapanır (bkz. ChatView). `isVoiceArmed` ile karşılıklı dışlayıcı: biri
+    /// açılınca diğeri kapanır, gönder butonu ikisinden en fazla birine yönelir.
+    var isImageArmed: Bool = false
+
+    /// `showsTypingBubble`/pending state ayrımı — fotoğraf üretimi beklenirken
+    /// normal "yazıyor" balonuyla AYNI görünmesin diye (bkz. ChatView.messagesList).
+    var isSendingImageReply: Bool = false
+
     /// `send()`'in sesli-mesaj karşılığı: aynı metni gönderir, ama cevap
     /// metin balonu yerine sesli mesaj balonu olarak eklenir. `canSend` ile
     /// aynı boş-metin koruması — "boş dürtme" senaryosu yok, chat edge
@@ -301,6 +310,76 @@ final class ChatViewModel {
                 errorMessage = error.localizedDescription
                 showsTypingBubble = false
                 isSendingVoiceReply = false
+                store?.setTyping(character.id, false)
+            }
+            isSending = false
+        }
+    }
+
+    /// `send()`'in fotoğraf-isteği karşılığı: kullanıcının yazdığı tarif metninden
+    /// xAI ile gerçek bir fotoğraf üretir, sonra isteğe bağlı bir metin tepkisi
+    /// ister (bkz. chat/index.ts IMAGE_CAPTION_RULE — model tepki vermek istemezse
+    /// [[no_caption]] döner, o zaman ikinci balon hiç eklenmez).
+    func sendImageRequest() {
+        let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, !isSending, !isLoadingHistory else { return }
+
+        let lastMessageAt = messages.last?.createdAt
+        messages.append(Message(role: .user, content: text))
+        updateCache()
+        NotificationScheduler.shared.noteUserSent(character: character)
+        inputText = ""
+        isImageArmed = false
+        isSending = true
+        errorMessage = nil
+
+        Task {
+            try? await Task.sleep(nanoseconds: UInt64(TypingTiming.randomStartDelay() * 1_000_000_000))
+            showsTypingBubble = true
+            isSendingImageReply = true
+            store?.setTyping(character.id, true)
+
+            do {
+                let stored = LocalConversationStore.shared.load(for: character.id)
+                let photoURL = try await service.generateChatImage(character: character, prompt: text)
+
+                showsTypingBubble = false
+                isSendingImageReply = false
+                messages.append(Message(role: .assistant, content: "", imageURL: photoURL))
+
+                // İsteğe bağlı metin tepkisi — sırayla, fotoğraftan SONRA gelir.
+                showsTypingBubble = true
+                let bubbleStartedAt = Date()
+                let realMsgs = realMessages()
+                let result = try await service.sendWithLocalHistory(
+                    character: character,
+                    localMessages: realMsgs,
+                    summary: stored?.summary ?? "",
+                    userMessage: text,
+                    level: relationshipLevel,
+                    lastMessageAt: lastMessageAt,
+                    imageReactionChat: true
+                )
+
+                let elapsed = Date().timeIntervalSince(bubbleStartedAt)
+                let wanted = TypingTiming.duration(forReplyLength: result.reply.count)
+                let remaining = wanted - elapsed
+                if remaining > 0 {
+                    try? await Task.sleep(nanoseconds: UInt64(remaining * 1_000_000_000))
+                }
+                showsTypingBubble = false
+                store?.setTyping(character.id, false)
+
+                let caption = result.reply.trimmingCharacters(in: .whitespacesAndNewlines)
+                if caption != "[[no_caption]]" && !caption.isEmpty {
+                    messages.append(Message(role: .assistant, content: caption))
+                }
+
+                applyPostReplyEffects(gotPhoto: photoURL, stored: stored)
+            } catch {
+                errorMessage = error.localizedDescription
+                showsTypingBubble = false
+                isSendingImageReply = false
                 store?.setTyping(character.id, false)
             }
             isSending = false
