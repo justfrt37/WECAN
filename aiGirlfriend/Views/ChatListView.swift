@@ -58,6 +58,7 @@ struct ChatListView: View {
         }
         .task { await load() }
         .onChange(of: store.typingCharacterIDs) { Task { await load() } }
+        .onChange(of: store.conversationsVersion) { Task { await load() } }
     }
 
     private func load() async {
@@ -109,6 +110,11 @@ struct ChatListView: View {
             }
             return ChatItem(character: ch, conversationID: conv.id,
                             last: last, unread: unread, updatedAt: conv.updatedAt)
+        }
+        items.sort { lhs, rhs in
+            let lhsDate = parseISO8601(lhs.last?.createdAt) ?? parseISO8601(lhs.updatedAt) ?? .distantPast
+            let rhsDate = parseISO8601(rhs.last?.createdAt) ?? parseISO8601(rhs.updatedAt) ?? .distantPast
+            return lhsDate > rhsDate
         }
         isLoading = false
         saveCachedItems(items)
@@ -351,6 +357,14 @@ private struct ChatHistoryRow: View {
                 .foregroundStyle(.white.opacity(0.4))
         }
     }
+}
+
+/// ISO8601 zaman damgasını `Date`'e çevirir — sıralama için (bkz. ChatListView.load()).
+private func parseISO8601(_ iso: String?) -> Date? {
+    guard let iso else { return nil }
+    let fmt = ISO8601DateFormatter()
+    fmt.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    return fmt.date(from: iso) ?? ISO8601DateFormatter().date(from: iso)
 }
 
 /// ISO8601 zaman damgasını kısa göreli metne çevirir (şimdi, 5dk, 2sa, Dün…).
