@@ -529,24 +529,34 @@ final class ChatViewModel {
         currentActivity = (label: block.label, detail: block.detail)
     }
 
-    /// Karakter şu an "uyuyor" bloğundaysa, mesaj göndermeden hemen ÖNCE
-    /// gerçekliği taklit eden özel bir gecikme akışı çalıştırır: 5sn hiçbir
-    /// şey değişmez (hâlâ uyuyor), sonra durum "Az önce uyandı"ya güncellenir,
-    /// 5sn daha beklenir, SONRA çağıran normal yazma-balonu akışına devam
-    /// eder. `currentActivity` bu süre boyunca mutasyona uğradığı için,
-    /// sunucuya gönderilen `currentActivity` bağlamı da otomatik olarak
-    /// "az önce uyandı" olur (send*() fonksiyonları bunu bu adımdan SONRA okur).
+    /// Karakter şu an efektif olarak uyuyorsa (bkz. CharacterSleepState) VE
+    /// henüz uyandırılmadıysa, mesaj göndermeden hemen ÖNCE gerçekliği taklit
+    /// eden özel bir gecikme akışı çalıştırır: 5sn hiçbir şey değişmez (hâlâ
+    /// uyuyor), sonra durum "Az önce uyandı"ya güncellenir, 5sn daha beklenir,
+    /// SONRA `wokenUpAt` KALICI olarak kaydedilir (bkz. LocalConversationStore
+    /// .Stored) — bir daha bu sohbet açık kaldığı sürece bu gecikme TEKRAR
+    /// ÇALIŞMAZ ("konuşma devam ettiği sürece uyanık kal"). Zaten uyandırılmışsa
+    /// (wokenUpAt != nil) gecikme tamamen atlanır. Her iki durumda da, uyanıkken
+    /// gönderilen her mesaj uyku-öncesi zamanlayıcıyı sıfırlar (bkz.
+    /// NotificationScheduler.scheduleSleepyGoodnight).
     private func handleWakeUpIfAsleep() async {
-        guard let schedule = LocalConversationStore.shared.load(for: character.id)?.schedule,
-              let block = ScheduleLookup.currentBlock(schedule: schedule),
-              block.isSleep else { return }
+        let stored = LocalConversationStore.shared.load(for: character.id)
+        guard CharacterSleepState.isEffectivelyAsleep(stored: stored) else { return }
 
-        try? await Task.sleep(nanoseconds: 5_000_000_000)
-        currentActivity = (
-            label: String(localized: "Just woke up"),
-            detail: "just woke up from being asleep, still a little groggy, texting from bed"
-        )
-        try? await Task.sleep(nanoseconds: 5_000_000_000)
+        if stored?.wokenUpAt == nil {
+            try? await Task.sleep(nanoseconds: 5_000_000_000)
+            currentActivity = (
+                label: String(localized: "Just woke up"),
+                detail: "just woke up from being asleep, still a little groggy, texting from bed"
+            )
+            try? await Task.sleep(nanoseconds: 5_000_000_000)
+
+            guard var updated = LocalConversationStore.shared.load(for: character.id) else { return }
+            updated.wokenUpAt = Date()
+            LocalConversationStore.shared.save(updated, for: character.id)
+        }
+
+        NotificationScheduler.shared.scheduleSleepyGoodnight(for: character, from: Date())
     }
 
     /// Cihazda hiç rutin yoksa (yeni sohbet) arka planda ilk rutini üretir —
