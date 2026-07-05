@@ -4,6 +4,7 @@
 //
 
 import SwiftUI
+import Photos
 
 struct ChatView: View {
     @State private var viewModel: ChatViewModel
@@ -94,7 +95,9 @@ struct ChatView: View {
             set: { if !$0 { fullscreenImageURL = nil } }
         )) {
             if let url = fullscreenImageURL {
-                FullscreenImageView(url: url) { fullscreenImageURL = nil }
+                FullscreenImageView(url: url, onDismiss: { fullscreenImageURL = nil }) {
+                    viewModel.reactToPrivateDownload(imageURL: url)
+                }
             }
         }
         .sheet(item: $addSheetKind) { kind in
@@ -621,6 +624,9 @@ private struct ImagePendingIndicator: View {
 private struct FullscreenImageView: View {
     let url: URL
     let onDismiss: () -> Void
+    let onDownloaded: () -> Void
+
+    @State private var saveMessage: String?
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
@@ -634,14 +640,66 @@ private struct FullscreenImageView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .onTapGesture { onDismiss() }
 
-            Button(action: onDismiss) {
-                Image(systemName: "xmark")
-                    .font(.system(size: 16, weight: .bold))
-                    .foregroundStyle(.white)
-                    .frame(width: 36, height: 36)
-                    .background(.black.opacity(0.5), in: Circle())
+            HStack(spacing: 10) {
+                Button(action: downloadImage) {
+                    Image(systemName: "square.and.arrow.down")
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 36, height: 36)
+                        .background(.black.opacity(0.5), in: Circle())
+                }
+                Button(action: onDismiss) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 36, height: 36)
+                        .background(.black.opacity(0.5), in: Circle())
+                }
             }
             .padding(16)
+
+            if let saveMessage {
+                Text(saveMessage)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 14).padding(.vertical, 8)
+                    .background(.black.opacity(0.7), in: Capsule())
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                    .padding(.bottom, 40)
+                    .allowsHitTesting(false)
+            }
+        }
+    }
+
+    private func downloadImage() {
+        guard let image = ImageCache.shared.image(for: url) else { return }
+        PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
+            DispatchQueue.main.async {
+                guard status == .authorized || status == .limited else {
+                    showSaveMessage("Photo access needed to save")
+                    return
+                }
+                PHPhotoLibrary.shared().performChanges {
+                    PHAssetChangeRequest.creationRequestForAsset(from: image)
+                } completionHandler: { success, _ in
+                    DispatchQueue.main.async {
+                        if success {
+                            showSaveMessage("Saved to Photos")
+                            onDownloaded()
+                        } else {
+                            showSaveMessage("Couldn't save photo")
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func showSaveMessage(_ text: String) {
+        saveMessage = text
+        Task {
+            try? await Task.sleep(nanoseconds: 1_800_000_000)
+            saveMessage = nil
         }
     }
 }
