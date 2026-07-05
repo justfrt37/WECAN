@@ -38,6 +38,11 @@ private struct ChatRequest: Codable {
     /// Özetleme modunda: istemcinin şu an bildiği rutin, sunucu bunu
     /// gözden geçirip günceller (bkz. generateLocalSummary).
     let previousSchedule: CharacterSchedule?
+    /// true ise bu bir fotoğraf-indirme tepkisi çağrısıdır — userMessage yok,
+    /// sunucu generated_photos'ta bu url'i arayıp özel/mahrem VE henüz tepki
+    /// verilmemişse Grok'a bir kere tepki yazdırır (bkz. chat/index.ts).
+    let photoDownloadReaction: Bool?
+    let photoURL: String?
 }
 
 private struct WireMessage: Codable {
@@ -226,6 +231,30 @@ struct ChatService {
         return url
     }
 
+    /// Fotoğraf indirme tepkisi — sadece indirilen fotoğraf özel/mahrem
+    /// işaretliyse VE daha önce hiç tepki verilmemişse sunucu bir cevap döner
+    /// (bkz. chat/index.ts photoDownloadReaction). `nil` dönerse (foto özel
+    /// değil, ya da zaten bir kere tepki verilmiş) çağıran hiçbir şey yapmaz.
+    func sendPhotoDownloadReaction(
+        character: Character,
+        localMessages: [Message],
+        summary: String,
+        level: Int,
+        photoURL: URL
+    ) async throws -> String? {
+        let wireHistory = localMessages
+            .filter { $0.imageURL == nil }
+            .suffix(20)
+            .map { WireHistoryMessage(role: $0.role.rawValue, content: $0.content) }
+        let resp = try await perform(
+            character: character,
+            userMessage: nil,
+            extra: .photoDownloadReaction(wireHistory, summary: summary.isEmpty ? nil : summary, photoURL: photoURL.absoluteString),
+            level: level
+        )
+        return resp.reply
+    }
+
     private struct CharacterScheduleRequest: Codable {
         let characterId: String
         let systemPrompt: String
@@ -293,6 +322,7 @@ struct ChatService {
         case clear
         case localHistory([WireHistoryMessage], summary: String?)
         case summarize([WireHistoryMessage], existing: String)
+        case photoDownloadReaction([WireHistoryMessage], summary: String?, photoURL: String)
     }
 
     private func call(character: Character, userMessage: String?, level: Int? = nil, lastMessageAt: Date? = nil) async throws -> ChatResponse {
@@ -327,6 +357,8 @@ struct ChatService {
         var localSummary: String? = nil
         var summarizeMessages: [WireHistoryMessage]? = nil
         var existingSummary: String? = nil
+        var photoDownloadReaction: Bool? = nil
+        var photoURL: String? = nil
 
         switch extra {
         case .none:
@@ -339,6 +371,11 @@ struct ChatService {
         case .summarize(let msgs, let existing):
             summarizeMessages = msgs
             existingSummary = existing
+        case .photoDownloadReaction(let h, let s, let url):
+            clientHistory = h
+            localSummary = s
+            photoDownloadReaction = true
+            photoURL = url
         }
 
         let body = ChatRequest(
@@ -357,7 +394,9 @@ struct ChatService {
             voiceChat: voiceChat,
             imageReactionChat: imageReactionChat,
             currentActivity: currentActivity,
-            previousSchedule: previousSchedule
+            previousSchedule: previousSchedule,
+            photoDownloadReaction: photoDownloadReaction,
+            photoURL: photoURL
         )
         request.httpBody = try JSONEncoder().encode(body)
 
