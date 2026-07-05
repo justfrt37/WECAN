@@ -22,6 +22,8 @@ struct ChatView: View {
     @State private var avatarPulse = false
     /// Bir mesaja dokununca saatini göster — tekrar dokununca gizlenir.
     @State private var expandedMessageID: Message.ID?
+    /// Bir foto balonuna dokununca tam ekran açılır.
+    @State private var fullscreenImageURL: URL?
 
     /// Tab içinde gösterilince alttaki tab bar'ın üstünde kalması için boşluk.
     var bottomInset: CGFloat = 0
@@ -83,6 +85,14 @@ struct ChatView: View {
         }
         .fullScreenCover(isPresented: $showProfile) {
             CharacterProfileView(character: viewModel.character)
+        }
+        .fullScreenCover(isPresented: Binding(
+            get: { fullscreenImageURL != nil },
+            set: { if !$0 { fullscreenImageURL = nil } }
+        )) {
+            if let url = fullscreenImageURL {
+                FullscreenImageView(url: url) { fullscreenImageURL = nil }
+            }
         }
         .sheet(item: $addSheetKind) { kind in
             AddCharacterNoteSheet(character: viewModel.character, kind: kind)
@@ -282,6 +292,8 @@ struct ChatView: View {
                             } else if let path = message.voiceLocalPath {
                                 voice.playFile(at: path, id: message.id)
                             }
+                        }, onTapImage: { url in
+                            fullscreenImageURL = url
                         })
                         .id(message.id)
                     }
@@ -452,6 +464,7 @@ private struct ChatBubble: View {
     var onSpeak: (() -> Void)? = nil
     var isVoicePlaying: Bool = false
     var onPlayVoice: (() -> Void)? = nil
+    var onTapImage: ((URL) -> Void)? = nil
 
     var body: some View {
         HStack(alignment: .bottom, spacing: 6) {
@@ -465,13 +478,15 @@ private struct ChatBubble: View {
                 VoiceMessageBubble(message: message, isUser: message.isUser, isPlaying: isVoicePlaying, onTap: { onPlayVoice?() })
             } else if let imageURL = message.imageURL {
                 // Foto mesajı (kızın gönderdiği fotoğraf)
+                // 9:16 üretilen fotoğrafla EŞLEŞEN kutu oranı — farklı bir oranda
+                // kutu kullanmak scaledToFill ile görüntünün kırpılmasına yol açar.
                 CachedImage(url: imageURL) { img in
                     img.resizable().scaledToFill()
                 } placeholder: { AppColor.card }
-                .frame(width: 200, height: 280)
+                .frame(width: 180, height: 320)
                 .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                 .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(.white.opacity(0.1), lineWidth: 1))
-                .onTapGesture { onTap?() }
+                .onTapGesture { onTapImage?(imageURL) }
             } else {
                 Text(message.content)
                     .font(.system(size: 15))
@@ -594,6 +609,36 @@ private struct ImagePendingIndicator: View {
             withAnimation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true)) {
                 pulse = true
             }
+        }
+    }
+}
+
+// MARK: - Foto tam ekran görüntüleyici
+
+private struct FullscreenImageView: View {
+    let url: URL
+    let onDismiss: () -> Void
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            Color.black.ignoresSafeArea()
+
+            CachedImage(url: url) { img in
+                img.resizable().scaledToFit()
+            } placeholder: {
+                ProgressView().tint(.white)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .onTapGesture { onDismiss() }
+
+            Button(action: onDismiss) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 36, height: 36)
+                    .background(.black.opacity(0.5), in: Circle())
+            }
+            .padding(16)
         }
     }
 }
