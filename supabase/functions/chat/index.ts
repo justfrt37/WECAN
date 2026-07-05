@@ -144,6 +144,15 @@ const VOICE_TAGS_RULE =
   "dilde kalsın; sadece etiketlerin kendisi İngilizce ve köşeli parantez " +
   "biçiminde olmalı.";
 
+// Foto isteği görsel olarak zaten gönderildi (istemci chat-image fonksiyonundan
+// aldığı URL'i ayrıca ekledi) — bu çağrı SADECE isteğe bağlı bir metin tepkisi
+// üretir. Model bazen tepki vermek istemeyebilir; bunu [[no_caption]] işaretiyle
+// bildirir (bkz. PHOTO_INSTRUCTION'daki [[photo]] işareti ile aynı yöntem).
+const IMAGE_CAPTION_RULE =
+  "\n\n[FOTOĞRAF TEPKİSİ] Kullanıcının istediği fotoğrafı az önce gönderdin. " +
+  "İstersen kısa, doğal, karakterine uygun bir tepki cümlesi yaz. Tepki vermek " +
+  "istemiyorsan cevap olarak SADECE ve TAM OLARAK şunu yaz: [[no_caption]]";
+
 // İlişki seviyesine göre mizah/şaka/kelime oyunu dozu — samimiyet arttıkça artar.
 function humorDirective(level: number): string {
   if (level <= 3) {
@@ -292,6 +301,8 @@ Deno.serve(async (req: Request) => {
     const tzOffsetMinutes: number | undefined = typeof body.tzOffsetMinutes === "number" ? body.tzOffsetMinutes : undefined;
     // Sesli mesaj isteği mi? (bkz. VOICE_TAGS_RULE — ElevenLabs v3 ses etiketleri)
     const voiceChat: boolean = body.voiceChat === true;
+    // Fotoğraf isteği tepki modu mu? (bkz. IMAGE_CAPTION_RULE)
+    const imageReactionChat: boolean = body.imageReactionChat === true;
 
     // === İSTEMCİ TARAFLI ÖZETLEME MODU ===
     // Kullanıcı karakterleri her 20 mesajda bir bunu tetikler.
@@ -371,6 +382,9 @@ Deno.serve(async (req: Request) => {
     system += timeContext(lastMessageAt, clientNow, tzOffsetMinutes);
     if (voiceChat) {
       system += VOICE_TAGS_RULE;
+    }
+    if (imageReactionChat) {
+      system += IMAGE_CAPTION_RULE;
     }
     if (useClientHistory && localSummary && localSummary.trim() !== "") {
       system += `\n\n[Önceki konuşmalarınızın özeti]\n${localSummary}`;
