@@ -132,5 +132,6 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
         stored.messages.append(Message(role: .assistant, content: text))
         LocalConversationStore.shared.save(stored, for: characterID)
         store.chatCache.removeValue(forKey: characterID) // force ChatViewModel to reload fresh, not the stale cache
+        store.conversationsVersion += 1
     }
 }

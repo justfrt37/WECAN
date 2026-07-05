@@ -23,6 +23,12 @@ final class CharacterStore {
     /// ChatView anında açılsın diye — her seferinde yeniden yüklenmez).
     var chatCache: [UUID: [Message]] = [:]
 
+    /// Bumped any time a message is injected into LocalConversationStore
+    /// OUTSIDE the normal ChatViewModel send/receive flow (bot notifications,
+    /// photo-download reactions) — ChatListView observes this to reload/
+    /// reorder even when nothing touched `typingCharacterIDs`.
+    var conversationsVersion: Int = 0
+
     /// Keşfet'te "tanışmak ister misin?" onayından sonra MainTabView bunu
     /// görüp sohbete programatik olarak geçiş yapar (bkz. MeetRequest).
     var pendingMeetRequest: MeetRequest?
