@@ -187,15 +187,17 @@ function realisticFieldGuidance(): string {
   );
 }
 
-function styledFieldGuidance(category: string): string {
-  const styleCue: Record<string, string> = {
-    Anime: "clean anime illustration line art, vibrant cel-shaded coloring, detailed shading",
-    Fantasy: "fantasy digital painting, magical atmosphere, painterly brushwork detail",
-    "Sci-Fi": "sci-fi digital art, futuristic aesthetic, cinematic rim lighting",
-  };
-  const style = styleCue[category] ?? styleCue.Anime;
+// "Fictional" folds anime/fantasy/sci-fi into one non-realistic bucket (see
+// ExploreCategory.swift/CreateCharacterView) — no single fixed style cue fits
+// all of those, so Grok picks whichever illustrated style actually suits the
+// character and the user's request instead of being locked to one look.
+function styledFieldGuidance(): string {
   return (
-    `CAMERA DETAILS: ${style} — name this style and rendering technique ` +
+    "CAMERA DETAILS: this is a STYLIZED/ILLUSTRATED (non-photorealistic) " +
+    "character — choose whichever illustrated art style best fits the " +
+    "character and the user's request (e.g. anime/cel-shaded illustration, " +
+    "fantasy digital painting, sci-fi digital art, or another fitting " +
+    "illustrated style), and name that exact style and rendering technique " +
     "explicitly instead of a camera/phone.\n" +
     "LIGHTING: the specific light source, quality, and overall color palette " +
     "matching the scene and art style.\n" +
@@ -256,9 +258,9 @@ async function composeImagePrompt(opts: {
   // görmeyen metin modeline "resme bak, stilini anla" diye bırakılmaz (bkz.
   // baselineConsistencyNote üstteki not). Baseline sadece ek bir tutarlılık
   // notu olarak eklenir.
-  const isRealistic = opts.category !== "Anime" && opts.category !== "Fantasy" && opts.category !== "Sci-Fi";
+  const isRealistic = opts.category !== "Fictional";
   const fieldGuidance =
-    (isRealistic ? realisticFieldGuidance() : styledFieldGuidance(opts.category)) +
+    (isRealistic ? realisticFieldGuidance() : styledFieldGuidance()) +
     (opts.hasBaseline ? baselineConsistencyNote() : "");
 
   const systemPrompt =

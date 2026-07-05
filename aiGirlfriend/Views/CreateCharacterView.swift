@@ -159,7 +159,7 @@ struct CreateCharacterView: View {
         switch stepIndex {
         case 0: nameStep
         case 1: roleStep
-        case 2: optionGrid(options: ["Realistic", "Fantasy", "Anime", "Sci-Fi"],
+        case 2: optionGrid(options: ["Realistic", "Fictional"],
                            binding: $selectedCategory)
         case 3: optionGrid(options: ["Sweet", "Mysterious", "Energetic", "Elegant"],
                            binding: $selectedVibe)
