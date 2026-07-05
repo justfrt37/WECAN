@@ -79,7 +79,21 @@ final class NotificationScheduler {
                 continue
             }
 
-            let fireAt = lastMessage.createdAt.addingTimeInterval(Self.roleInterval(character.personalityRole))
+            var fireAt = lastMessage.createdAt.addingTimeInterval(Self.roleInterval(character.personalityRole))
+            // Fire time could land mid-sleep hours (this offset can be up to 48h for
+            // "distant") — push it to their real wake moment instead. Schedule-only
+            // check (not CharacterSleepState) since this is a FUTURE timestamp, not
+            // "right now" — wake/manual-sleep overrides can't be predicted that far out.
+            if let schedule = stored.schedule,
+               let block = ScheduleLookup.currentBlock(schedule: schedule, date: fireAt),
+               block.isSleep {
+                let endParts = block.end.split(separator: ":").compactMap { Int($0) }
+                if endParts.count == 2,
+                   let midnight = Calendar.current.date(bySettingHour: 0, minute: 0, second: 0, of: fireAt),
+                   let wakeTimeToday = Calendar.current.date(bySettingHour: endParts[0], minute: endParts[1], second: 0, of: midnight) {
+                    fireAt = wakeTimeToday > fireAt ? wakeTimeToday : wakeTimeToday.addingTimeInterval(86400)
+                }
+            }
             let interval = fireAt.timeIntervalSinceNow
             guard interval > 0 else {
                 center.removePendingNotificationRequests(withIdentifiers: [Self.ghostedID(for: character.id)])
@@ -114,9 +128,11 @@ final class NotificationScheduler {
     func armJealousyTimer(characters: [Character]) {
         center.removePendingNotificationRequests(withIdentifiers: [Self.jealousyID])
         let eligible = characters.filter { character in
-            !BlockedCharactersStore.isBlocked(character.id) &&
-            LocalConversationStore.shared.load(for: character.id) != nil &&
-            NotificationPreferencesStore.canSendMore(for: character.id)
+            let stored = LocalConversationStore.shared.load(for: character.id)
+            return !BlockedCharactersStore.isBlocked(character.id) &&
+                stored != nil &&
+                NotificationPreferencesStore.canSendMore(for: character.id) &&
+                !CharacterSleepState.isEffectivelyAsleep(stored: stored)
         }
         guard let bot = eligible.randomElement() else { return }
         jealousyTargetCharacterID = bot.id
@@ -154,9 +170,11 @@ final class NotificationScheduler {
         guard canFireLevelUpToday else { return }
 
         let eligible = characters.filter { character in
-            !BlockedCharactersStore.isBlocked(character.id) &&
-            (LocalConversationStore.shared.load(for: character.id)?.levelProgress ?? 0) >= 0.8 &&
-            NotificationPreferencesStore.canSendMore(for: character.id)
+            let stored = LocalConversationStore.shared.load(for: character.id)
+            return !BlockedCharactersStore.isBlocked(character.id) &&
+                (stored?.levelProgress ?? 0) >= 0.8 &&
+                NotificationPreferencesStore.canSendMore(for: character.id) &&
+                !CharacterSleepState.isEffectivelyAsleep(stored: stored)
         }
         guard let character = eligible.randomElement() else { return }
 
