@@ -9,7 +9,7 @@ import Foundation
 import UserNotifications
 
 enum NotificationKind: String {
-    case liked, ghosted, jealousy, levelUp
+    case liked, ghosted, jealousy, levelUp, sleepyQuestion, sleepyGoodbye, bedtime
 }
 
 final class NotificationScheduler {
@@ -177,6 +177,51 @@ final class NotificationScheduler {
             let ids = requests.map(\.identifier).filter { $0.hasPrefix("notif.levelup.") }
             self?.center.removePendingNotificationRequests(withIdentifiers: ids)
         }
+    }
+
+    // MARK: - Shared one-shot helper (sleepy goodnight + bedtime)
+
+    /// Generic title (matches Ghosted/Jealousy's pattern) — the actual dialogue
+    /// line only appears once injected into the chat, never in the OS banner.
+    private func scheduleOneShot(id: String, kind: NotificationKind, characterID: UUID, characterName: String, fireAt: Date) {
+        let content = UNMutableNotificationContent()
+        content.title = String(localized: "\(characterName) sent you a message.")
+        content.userInfo = ["type": kind.rawValue, "characterId": characterID.uuidString]
+        let delay = max(1, fireAt.timeIntervalSinceNow)
+        let trigger = UNTimeIntervalNotificationTrigger(timeInterval: delay, repeats: false)
+        center.add(UNNotificationRequest(identifier: id, content: content, trigger: trigger))
+    }
+
+    // MARK: - Sleepy Goodnight (two-stage idle-timeout after being woken up)
+
+    private static func sleepyQuestionID(for id: UUID) -> String { "notif.sleepyq.\(id.uuidString)" }
+    private static func sleepyGoodbyeID(for id: UUID) -> String { "notif.sleepygb.\(id.uuidString)" }
+
+    /// Called whenever `wokenUpAt` gets set or refreshed (first wake, or any
+    /// later message while still woken) — cancels any pending pair for this
+    /// character first, then reschedules both from `from` (the triggering
+    /// message's timestamp). +10min: "can we sleep?" question. +15min (5min
+    /// after the question, if no reply): goodnight, reverts to asleep.
+    func scheduleSleepyGoodnight(for character: Character, from: Date) {
+        cancelSleepyGoodnight(for: character.id)
+        scheduleOneShot(
+            id: Self.sleepyQuestionID(for: character.id), kind: .sleepyQuestion,
+            characterID: character.id, characterName: character.name,
+            fireAt: from.addingTimeInterval(600)
+        )
+        scheduleOneShot(
+            id: Self.sleepyGoodbyeID(for: character.id), kind: .sleepyGoodbye,
+            characterID: character.id, characterName: character.name,
+            fireAt: from.addingTimeInterval(900)
+        )
+    }
+
+    /// Called on every message while `wokenUpAt != nil` (mirrors `noteUserSent`
+    /// resetting Ghosted) — any reply before the pair fires cancels both.
+    func cancelSleepyGoodnight(for characterID: UUID) {
+        center.removePendingNotificationRequests(withIdentifiers: [
+            Self.sleepyQuestionID(for: characterID), Self.sleepyGoodbyeID(for: characterID)
+        ])
     }
 
     // MARK: - Tap-handling glue
