@@ -42,6 +42,14 @@ const db = createClient(SUPABASE_URL, SERVICE_ROLE, {
 
 interface WireMessage { role: string; content: string }
 
+// Grok bazen JSON'un etrafına markdown kod bloğu veya açıklama ekliyor —
+// create-character/index.ts'deki aynı savunma amaçlı ayıklama deseni.
+function extractJson(raw: string): any | null {
+  const match = raw.match(/\{[\s\S]*\}/);
+  if (!match) return null;
+  try { return JSON.parse(match[0]); } catch { return null; }
+}
+
 // İstemci tarafındaki temizleme (bkz. ChatViewModel.stripVoiceTags) sadece
 // BUNDAN SONRA yazılan yeni mesajları korur — halihazırda cihazda/summary'de
 // duran eski [laughs]/[whispers] etiketli içerik (fix'ten ÖNCE kaydedilmiş,
@@ -322,36 +330,57 @@ Deno.serve(async (req: Request) => {
     const voiceChat: boolean = body.voiceChat === true;
     // Fotoğraf isteği tepki modu mu? (bkz. IMAGE_CAPTION_RULE)
     const imageReactionChat: boolean = body.imageReactionChat === true;
+    // Günlük rutin (bkz. character-schedule fonksiyonu) — istemci "şu an ne
+    // yapıyor" bloğunun `detail` metnini gönderir, burada tona yansıtılır.
+    const currentActivity: string | undefined =
+      typeof body.currentActivity === "string" && body.currentActivity.trim()
+        ? body.currentActivity.trim()
+        : undefined;
 
     // === İSTEMCİ TARAFLI ÖZETLEME MODU ===
-    // Kullanıcı karakterleri her 20 mesajda bir bunu tetikler.
+    // Kullanıcı karakterleri her 20 mesajda bir bunu tetikler. Aynı çağrıda
+    // günlük rutini de gözden geçirir (bkz. character-schedule — bu SADECE
+    // rafine eder, ilk üretim orada olur).
     if (Array.isArray(body.summarizeMessages) && body.summarizeMessages.length > 0) {
       const convoText = (body.summarizeMessages as WireMessage[])
         .map((m) => `${m.role === "user" ? "Kullanıcı" : "Sen"}: ${stripVoiceTags(m.content)}`)
         .join("\n");
+      const previousSchedule = body.previousSchedule ?? null;
       const summaryPrompt: WireMessage[] = [
         {
           role: "system",
           content:
-            "Bir sohbet özeti güncelliyorsun. Karakterin İLERİDE hatırlaması " +
-            "gereken kalıcı bilgileri çıkar — hem KULLANICI hakkında (adı, " +
-            "tercihleri, ilişki durumu/önemli anlar, söz verilen şeyler) HEM DE " +
-            "KARAKTERİN KENDİSİ hakkında kendi söylediği kalıcı gerçekler (mesleği, " +
-            "iş yeri/çalıştığı yer, ailesi, geçmişi, hobileri, ilişkileri — " +
-            "sohbette kendi ağzından bahsettiği her şey). Karakter kendi hakkında " +
-            "bir şey söylediyse (ör. \"laboratuvarda çalışıyorum\") bunu MUTLAKA " +
-            "özete ekle ki ileride aynı soruya tutarlı cevap verebilsin. Kısa " +
-            "madde madde yaz. Önceki özeti koru, yenileri ekle.",
+            "Bir sohbet özetini ve karakterin günlük rutinini güncelliyorsun. " +
+            "Karakterin İLERİDE hatırlaması gereken kalıcı bilgileri özete " +
+            "çıkar — hem KULLANICI hakkında (adı, tercihleri, ilişki durumu/ " +
+            "önemli anlar, söz verilen şeyler) HEM DE KARAKTERİN KENDİSİ " +
+            "hakkında kendi söylediği kalıcı gerçekler (mesleği, iş yeri, " +
+            "ailesi, geçmişi, hobileri). Karakter kendi hakkında bir şey " +
+            "söylediyse (ör. \"laboratuvarda çalışıyorum\") bunu MUTLAKA " +
+            "özete ekle. Ayrıca mevcut günlük rutini gözden geçir: yeni " +
+            "konuşmada rutinini değiştiren bir gerçek varsa (ör. işten " +
+            "ayrıldı, gece vardiyasına geçti) rutini buna göre güncelle; " +
+            "yoksa MEVCUT rutini olduğu gibi koru (uydurma, değiştirme). " +
+            "SADECE şu JSON şemasında cevap ver, başka hiçbir şey yazma: " +
+            '{"summary":"kısa madde madde, önceki özeti koruyup yenileri ' +
+            'ekleyerek","schedule":{"weekday":[{"start":"HH:mm","end":"HH:mm",' +
+            '"label":"...","detail":"..."}],"weekend":[...]}}',
         },
         {
           role: "user",
           content:
             `Önceki özet:\n${body.existingSummary ? stripVoiceTags(body.existingSummary) : "(yok)"}\n\n` +
-            `Yeni konuşma:\n${convoText}\n\nGüncellenmiş özet:`,
+            `Mevcut günlük rutin:\n${previousSchedule ? JSON.stringify(previousSchedule) : "(henüz yok)"}\n\n` +
+            `Yeni konuşma:\n${convoText}\n\nGüncellenmiş JSON:`,
         },
       ];
-      const newSummary = await callGrok(summaryPrompt, 400);
-      return json({ summary: newSummary });
+      const raw = await callGrok(summaryPrompt, 900);
+      const parsed = extractJson(raw);
+      const summary: string = typeof parsed?.summary === "string" ? parsed.summary : raw.trim();
+      const schedule = (parsed && Array.isArray(parsed.schedule?.weekday) && Array.isArray(parsed.schedule?.weekend))
+        ? parsed.schedule
+        : null;
+      return json({ summary, schedule });
     }
 
     // === GEÇMİŞ MODU — clientHistory yoksa ===
@@ -418,6 +447,12 @@ Deno.serve(async (req: Request) => {
     // akışının kendisi, o turlarda bu uyarı anlamsız/çelişkili olurdu.
     if (!voiceChat && !imageReactionChat) {
       system += MEDIA_REQUEST_RULE;
+    }
+    if (currentActivity) {
+      system += `\n\n[GÜNLÜK RUTİN] Şu anda: ${currentActivity}. Ton ve ` +
+        `müsaitliğini buna doğal şekilde yansıt (ör. işteyken kısa/dikkati ` +
+        `dağınık, evde rahatken daha uzun sohbet edebilirsin) ama bunu her ` +
+        `mesajda birebir tekrarlama.`;
     }
     if (!useClientHistory && convo.summary && convo.summary.trim() !== "") {
       system += `\n\n[Önceki konuşmalarınızın özeti]\n${stripVoiceTags(convo.summary)}`;
@@ -495,7 +530,7 @@ Deno.serve(async (req: Request) => {
 
       if (toFold && toFold.length > 0) {
         const convoText = toFold
-          .map((m) => `${m.role === "user" ? "Kullanıcı" : "Sen"}: ${m.content}`)
+          .map((m) => `${m.role === "user" ? "Kullanıcı" : "Sen"}: ${stripVoiceTags(m.content)}`)
           .join("\n");
         const summaryPrompt: WireMessage[] = [
           {
