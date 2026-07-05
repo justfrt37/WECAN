@@ -39,14 +39,28 @@ final class NotificationScheduler {
         guard !LikedByStore.hasPickedToday() else { return }
         center.removePendingNotificationRequests(withIdentifiers: [Self.likedYouIDPrefix + "0"])
         let alreadyLiked = LikedByStore.likedCharacterIDs()
+        let hour = Int.random(in: 9...22)
         let eligible = characters.filter { character in
-            character.createdBy == nil &&
-            LocalConversationStore.shared.load(for: character.id) == nil &&
-            !alreadyLiked.contains(character.id)
+            guard character.createdBy == nil,
+                  LocalConversationStore.shared.load(for: character.id) == nil,
+                  !alreadyLiked.contains(character.id)
+            else { return false }
+            // Untalked bots have no LocalConversationStore entry, so no schedule
+            // either — nothing to check here in practice today, but if a future
+            // change ever attaches a schedule to untalked catalog bots, this stays
+            // correct rather than silently ignoring it.
+            if let schedule = LocalConversationStore.shared.load(for: character.id)?.schedule,
+               let block = ScheduleLookup.currentBlock(schedule: schedule, date: Calendar.current.date(
+                   bySettingHour: hour, minute: 0, second: 0, of: Date()
+               ) ?? Date()),
+               block.isSleep {
+                return false
+            }
+            return true
         }
         guard let bot = eligible.randomElement() else { return }
         LikedByStore.recordLike(bot.id)
-        scheduleLikedYou(bot: bot, slotIndex: 0, hour: 13)
+        scheduleLikedYou(bot: bot, slotIndex: 0, hour: hour)
     }
 
     private func scheduleLikedYou(bot: Character, slotIndex: Int, hour: Int) {
