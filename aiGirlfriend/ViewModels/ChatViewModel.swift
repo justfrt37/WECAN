@@ -281,7 +281,14 @@ final class ChatViewModel {
                     try? await Task.sleep(nanoseconds: UInt64(remaining * 1_000_000_000))
                 }
 
-                let lang = VoiceLanguage.detect(from: result.reply)
+                // ElevenLabs [tag] işaretleri SADECE seslendirme için — mesajın
+                // kalıcı `content`'ine (yerel geçmiş + özetlemeye giden) asla
+                // ham haliyle sızmamalı, yoksa Grok sonraki DÜZ metin turlarında
+                // kendi geçmişindeki bu işaretleri taklit etmeye başlıyor (bkz.
+                // gotchas_and_fixes — "Elif normal mesaja ses etiketiyle cevap
+                // veriyor" hatası). Dil tespiti de temiz metinle daha güvenilir.
+                let cleanedReply = Self.stripVoiceTags(result.reply)
+                let lang = VoiceLanguage.detect(from: cleanedReply)
                 let messageID = UUID()
                 guard let audioData = await TTSService().synthesizeVoiceMessage(
                     text: result.reply, role: character.personalityRole, vibe: character.vibe, lang: lang,
@@ -301,7 +308,7 @@ final class ChatViewModel {
                 store?.setTyping(character.id, false)
 
                 messages.append(Message(
-                    id: messageID, role: .assistant, content: result.reply,
+                    id: messageID, role: .assistant, content: cleanedReply,
                     voiceLocalPath: savedPath, voiceDuration: duration
                 ))
 
@@ -462,6 +469,16 @@ final class ChatViewModel {
         let keys = ["foto", "fotoğraf", "fotograf", "resim", "selfie", "selfi",
                     "görsel", "gorsel", "pic", "fotonu", "resmini"]
         return keys.contains { t.contains($0) }
+    }
+
+    /// ElevenLabs v3 ses etiketlerini ([laughs], [whispers] vb.) metinden
+    /// temizler — TTS'e giden ham metinde kalmalı, ama kalıcı `content`'e asla
+    /// sızmamalı (bkz. sendVoiceRequest).
+    private static func stripVoiceTags(_ text: String) -> String {
+        let stripped = text.replacingOccurrences(of: #"\[[^\]]*\]"#, with: "", options: .regularExpression)
+        return stripped
+            .replacingOccurrences(of: #"[ \t]{2,}"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func updateCache(msgCounter: Int? = nil) {
