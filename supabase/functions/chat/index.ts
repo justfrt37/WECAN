@@ -173,6 +173,28 @@ const PHOTO_DOWNLOAD_REACTION_RULE =
   "fixed template line, and never sound robotic or like a canned response. " +
   "Output ONLY the reaction line itself, nothing else.";
 
+// Level/role are stable per-character (safe in the static system prompt, same
+// treatment as humorDirective) — the actual near-bedtime BOOLEAN goes in
+// turnContext instead (it changes constantly as bedtime approaches, and
+// anything that changes every turn must stay OUT of the system prompt or it
+// breaks xAI's prompt-caching prefix-match — see turnContext below).
+function sleepRule(role: string, level: number): string {
+  return (
+    "\n\n[SLEEP REQUEST] Each of your turns includes a [BEDTIME PROXIMITY] " +
+    "note telling you whether it's currently close to (or within) your real " +
+    "scheduled sleep time. If the user asks you to go to sleep or says " +
+    "goodnight and wants you to sleep: agree naturally and say goodnight " +
+    "ONLY if that note says it's close to your bedtime. If it is NOT close " +
+    `to your bedtime, decline — but decline in whatever way actually fits ` +
+    `YOUR personality (role: ${role}, relationship level ${level}/10) and ` +
+    "the vibe already established in your character description above. " +
+    "There is no fixed tone for this — reason it out per your own character " +
+    "(a shy/low-level character declines very differently than a confident/ " +
+    "high-level one). Never mention the words 'schedule' or 'bedtime note' " +
+    "explicitly, just act on it naturally."
+  );
+}
+
 // Belirli kalıp cümleleri yasaklamak (blocklist) işe yaramıyor — model yine de
 // onları üretebiliyor (negatif talimatlar LLM'lerde güvenilir değil). Bunun yerine
 // modele NİYET/DUYGU seviyesinde düşünmesini ve o niyeti her seferinde doğal,
@@ -323,6 +345,29 @@ async function callGrok(messages: WireMessage[], maxTokens: number, convId?: str
   return data?.choices?.[0]?.message?.content ?? "";
 }
 
+// Confirms whether a reply ACTUALLY agreed to go to sleep (not just discussed
+// the topic) — only called when nearSleepTime was true, same pattern as
+// chat-image/index.ts's classifyPrivacy.
+async function classifySleepAgreement(userMessage: string, reply: string): Promise<boolean> {
+  const raw = await callGrok(
+    [
+      {
+        role: "system",
+        content:
+          "You are a classifier. Given a short exchange between a user and " +
+          "an AI character, answer with exactly one word: YES if the " +
+          "character's reply agreed to go to sleep / said goodnight for the " +
+          "night, NO if it did not (e.g. declined, changed the subject, or " +
+          "the exchange wasn't about sleeping at all). Answer with only YES " +
+          "or NO, nothing else.",
+      },
+      { role: "user", content: `User: ${userMessage}\nCharacter: ${reply}` },
+    ],
+    5
+  );
+  return raw.trim().toUpperCase().startsWith("Y");
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -402,6 +447,9 @@ Deno.serve(async (req: Request) => {
     const voiceChat: boolean = body.voiceChat === true;
     // Fotoğraf isteği tepki modu mu? (bkz. IMAGE_CAPTION_RULE)
     const imageReactionChat: boolean = body.imageReactionChat === true;
+    // İstemci ScheduleLookup ile hesaplar — gerçek yatma saatine 1 saatten
+    // yakın mı (ya da içindeyse) (bkz. sleepRule, chat-index turnContext).
+    const nearSleepTime: boolean = body.nearSleepTime === true;
     // Cevap dili — kullanıcının kendi metninden deterministik tespit edilir
     // (bkz. detectReplyLanguage), modelin fark edip geçmesine güvenilmiyor.
     const detectedLanguage = (userMessage || body.photoDownloadReaction === true)
@@ -593,6 +641,7 @@ Deno.serve(async (req: Request) => {
     // akışının kendisi, o turlarda bu uyarı anlamsız/çelişkili olurdu.
     if (!voiceChat && !imageReactionChat) {
       system += MEDIA_REQUEST_RULE;
+      system += sleepRule(personalityRole, currentLevel);
     }
     if (!useClientHistory && convo.summary && convo.summary.trim() !== "") {
       system += `\n\n[Önceki konuşmalarınızın özeti]\n${stripVoiceTags(convo.summary)}`;
@@ -609,6 +658,11 @@ Deno.serve(async (req: Request) => {
         `müsaitliğini buna doğal şekilde yansıt (ör. işteyken kısa/dikkati ` +
         `dağınık, evde rahatken daha uzun sohbet edebilirsin) ama bunu her ` +
         `mesajda birebir tekrarlama.`;
+    }
+    if (!voiceChat && !imageReactionChat) {
+      turnContext += nearSleepTime
+        ? "\n\n[BEDTIME PROXIMITY] It is currently close to or within your real scheduled sleep time."
+        : "\n\n[BEDTIME PROXIMITY] It is NOT close to your real scheduled sleep time right now.";
     }
 
     // === CEVAP MODU ===
@@ -637,6 +691,9 @@ Deno.serve(async (req: Request) => {
     ];
 
     const reply = await callGrok(grokMessages, 600, conversationId);
+    const wentToSleep = (!voiceChat && !imageReactionChat && nearSleepTime)
+      ? await classifySleepAgreement(userMessage!, reply)
+      : false;
 
     // 4) Mesajları kaydet — clientHistory modunda istemci kendi saklıyor, DB'ye yazma
     if (!useClientHistory) {
@@ -662,7 +719,7 @@ Deno.serve(async (req: Request) => {
 
     // 5) Özetleme — sadece DB modunda (clientHistory modunda istemci geçmişi yönetiyor)
     if (useClientHistory) {
-      return json({ conversationId, reply, level: newLevel });
+      return json({ conversationId, reply, level: newLevel, wentToSleep });
     }
 
     const { count: total } = await db
