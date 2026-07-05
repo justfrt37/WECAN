@@ -17,6 +17,11 @@ struct ScheduleBlock: Codable, Equatable {
     /// Daha ayrıntılı, sistem promptuna eklenecek — "at work in the lab
     /// running experiments".
     let detail: String
+    /// Bu blok "uyuyor" mu — mesaj gelirse özel "az önce uyandı" akışını
+    /// tetikler (bkz. ChatViewModel.handleWakeUpIfAsleep). Eski (bu alan
+    /// olmadan üretilmiş) kayıtlar decode edilemez ve `nil` olur — sonraki
+    /// açılışta sessizce yeniden üretilir (bkz. LocalConversationStore.Stored).
+    let isSleep: Bool
 }
 
 struct CharacterSchedule: Codable, Equatable {

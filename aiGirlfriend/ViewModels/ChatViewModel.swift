@@ -177,6 +177,7 @@ final class ChatViewModel {
         errorMessage = nil
 
         Task {
+            await handleWakeUpIfAsleep()
             // Balon anında değil, insan gibi kısa bir tereddütten sonra belirir.
             try? await Task.sleep(nanoseconds: UInt64(TypingTiming.randomStartDelay() * 1_000_000_000))
             showsTypingBubble = true
@@ -264,6 +265,7 @@ final class ChatViewModel {
         errorMessage = nil
 
         Task {
+            await handleWakeUpIfAsleep()
             try? await Task.sleep(nanoseconds: UInt64(TypingTiming.randomStartDelay() * 1_000_000_000))
             showsTypingBubble = true
             isSendingVoiceReply = true
@@ -334,9 +336,11 @@ final class ChatViewModel {
     }
 
     /// `send()`'in fotoğraf-isteği karşılığı: kullanıcının yazdığı tarif metninden
-    /// xAI ile gerçek bir fotoğraf üretir, sonra isteğe bağlı bir metin tepkisi
-    /// ister (bkz. chat/index.ts IMAGE_CAPTION_RULE — model tepki vermek istemezse
-    /// [[no_caption]] döner, o zaman ikinci balon hiç eklenmez).
+    /// xAI ile gerçek bir fotoğraf üretir, sonra fotoğraftan SONRA gelen kısa bir
+    /// metin tepkisi ister (bkz. chat/index.ts IMAGE_CAPTION_RULE). GEÇMİŞ: model
+    /// isteğe bağlı bir [[no_caption]] işareti sunulunca neredeyse HER SEFERİNDE
+    /// onu seçiyordu (canlı testte 8/8) — işaret tamamen kaldırıldı, artık her
+    /// zaman gerçek bir tepki üretiliyor.
     func sendImageRequest() {
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !isSending, !isLoadingHistory else { return }
@@ -351,6 +355,7 @@ final class ChatViewModel {
         errorMessage = nil
 
         Task {
+            await handleWakeUpIfAsleep()
             try? await Task.sleep(nanoseconds: UInt64(TypingTiming.randomStartDelay() * 1_000_000_000))
             showsTypingBubble = true
             isSendingImageReply = true
@@ -391,16 +396,8 @@ final class ChatViewModel {
                 showsTypingBubble = false
                 store?.setTyping(character.id, false)
 
-                // Tam eşleşme kontrolü riskli — Grok talimatı harfiyen izlemeyip
-                // işaretin etrafına ekstra metin koyarsa (ör. noktalama), ham
-                // "[[no_caption]]" balonun içine sızabilirdi (bkz. ses etiketi
-                // sızıntısı hatasıyla aynı kök neden). `contains` + ayıklama.
-                let rawCaption = result.reply.trimmingCharacters(in: .whitespacesAndNewlines)
-                let noCaption = rawCaption.contains("[[no_caption]]")
-                let caption = rawCaption
-                    .replacingOccurrences(of: "[[no_caption]]", with: "")
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                if !noCaption && !caption.isEmpty {
+                let caption = result.reply.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !caption.isEmpty {
                     messages.append(Message(role: .assistant, content: caption))
                 }
 
@@ -492,6 +489,26 @@ final class ChatViewModel {
             return
         }
         currentActivity = (label: block.label, detail: block.detail)
+    }
+
+    /// Karakter şu an "uyuyor" bloğundaysa, mesaj göndermeden hemen ÖNCE
+    /// gerçekliği taklit eden özel bir gecikme akışı çalıştırır: 5sn hiçbir
+    /// şey değişmez (hâlâ uyuyor), sonra durum "Az önce uyandı"ya güncellenir,
+    /// 5sn daha beklenir, SONRA çağıran normal yazma-balonu akışına devam
+    /// eder. `currentActivity` bu süre boyunca mutasyona uğradığı için,
+    /// sunucuya gönderilen `currentActivity` bağlamı da otomatik olarak
+    /// "az önce uyandı" olur (send*() fonksiyonları bunu bu adımdan SONRA okur).
+    private func handleWakeUpIfAsleep() async {
+        guard let schedule = LocalConversationStore.shared.load(for: character.id)?.schedule,
+              let block = ScheduleLookup.currentBlock(schedule: schedule),
+              block.isSleep else { return }
+
+        try? await Task.sleep(nanoseconds: 5_000_000_000)
+        currentActivity = (
+            label: String(localized: "Just woke up"),
+            detail: "just woke up from being asleep, still a little groggy, texting from bed"
+        )
+        try? await Task.sleep(nanoseconds: 5_000_000_000)
     }
 
     /// Cihazda hiç rutin yoksa (yeni sohbet) arka planda ilk rutini üretir —

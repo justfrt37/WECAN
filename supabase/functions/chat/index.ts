@@ -172,13 +172,21 @@ const VOICE_TAGS_RULE =
   "biçiminde olmalı.";
 
 // Foto isteği görsel olarak zaten gönderildi (istemci chat-image fonksiyonundan
-// aldığı URL'i ayrıca ekledi) — bu çağrı SADECE isteğe bağlı bir metin tepkisi
-// üretir. Model bazen tepki vermek istemeyebilir; bunu [[no_caption]] işaretiyle
-// bildirir (aynı [[marker]] yöntemi).
+// aldığı URL'i ayrıca ekledi) — bu çağrı bir metin tepkisi üretir.
+// GEÇMİŞ: [[no_caption]] bir "kaçış kapısı" gibi sunulunca model neredeyse
+// HER SEFERİNDE onu seçiyordu (canlı testte 8/8, hem ayrıntılı hem minimal
+// izole promptlarla) — daha zayıf/güçlü oran talimatları da fark etmedi.
+// İzole test: AYNI istek ama kaçış kapısı OLMADAN sorulunca (sadece "kısa,
+// doğal bir tepki yaz") her seferinde gerçek, doğal bir tepki üretti. Marker
+// tamamen kaldırıldı — artık her zaman bir tepki yazılır, asla sessiz kalmaz.
 const IMAGE_CAPTION_RULE =
-  "\n\n[FOTOĞRAF TEPKİSİ] Kullanıcının istediği fotoğrafı az önce gönderdin. " +
-  "İstersen kısa, doğal, karakterine uygun bir tepki cümlesi yaz. Tepki vermek " +
-  "istemiyorsan cevap olarak SADECE ve TAM OLARAK şunu yaz: [[no_caption]]";
+  "\n\n[FOTOĞRAF TEPKİSİ] DİKKAT — ZAMAN ÇİZELGESİ: Aşağıdaki 'kullanıcının " +
+  "son mesajı', kullanıcının SANA VERDİĞİ FOTOĞRAF TARİFİYDİ. O fotoğraf " +
+  "ZATEN üretilip ayrı bir görsel mesaj olarak gönderildi — bu senin şu an " +
+  "cevaplaman gereken YENİ bir istek DEĞİL. Fotoğrafı gönderdikten SONRA " +
+  "söyleyeceğin kısa, doğal, karakterine uygun bir tepki cümlesi yaz — " +
+  "gerçek biri fotoğraf gönderdikten sonra ne derse onu de (ör. \"işte, " +
+  "beğendin mi\", flörtöz bir laf, kısa bir soru).";
 
 // İlişki seviyesine göre mizah/şaka/kelime oyunu dozu — samimiyet arttıkça artar.
 function humorDirective(level: number): string {
@@ -365,12 +373,14 @@ Deno.serve(async (req: Request) => {
             "ne yapıyor\" sorusuna doğal bir cevap gibi oku (ör. \"Work\" " +
             "değil \"At work\", \"Dinner\" değil \"Having dinner\", " +
             "\"Sleep\" değil \"Asleep\") ve konuşmanın geçtiği dille AYNI " +
-            "dilde yaz — asla otomatik İngilizceye geçme. " +
+            "dilde yaz — asla otomatik İngilizceye geçme. Uyku bloğunda " +
+            "`isSleep: true`, diğer TÜM bloklarda `isSleep: false` yaz (mevcut " +
+            "rutinde zaten işaretliyse aynen koru). " +
             "SADECE şu JSON şemasında cevap ver, başka hiçbir şey yazma: " +
             '{"summary":"kısa madde madde, önceki özeti koruyup yenileri ' +
             'ekleyerek","schedule":{"weekday":[{"start":"HH:mm","end":"HH:mm",' +
             '"label":"kısa durum ifadesi","detail":"daha ayrıntılı ' +
-            'açıklama"}],"weekend":[...]}}',
+            'açıklama","isSleep":false}],"weekend":[...]}}',
         },
         {
           role: "user",

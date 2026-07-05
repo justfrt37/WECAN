@@ -68,10 +68,13 @@ function buildScheduleInstructions(): string {
     "Her zaman karakterin kendi konuştuğu dilde yaz (bkz. sistem promptundaki " +
     "dil kuralı) — karakter Türkçe konuşuyorsa label/detail de Türkçe olsun, " +
     "asla otomatik İngilizceye geçme. " +
+    "Karakterin UYUDUĞU blok(lar)da `isSleep` alanını `true` yap, diğer TÜM " +
+    "bloklarda `false` yap — her gün için genelde tek bir uyku bloğu olur. " +
     "SADECE şu JSON şemasında cevap ver, başka hiçbir şey yazma (markdown " +
     "kod bloğu da yok):\n" +
     '{"weekday":[{"start":"HH:mm","end":"HH:mm","label":"kısa durum ' +
-    'ifadesi","detail":"daha ayrıntılı açıklama"}],"weekend":[...]}'
+    'ifadesi","detail":"daha ayrıntılı açıklama","isSleep":false}],' +
+    '"weekend":[...]}'
   );
 }
 
