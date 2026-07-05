@@ -84,6 +84,8 @@ final class ChatViewModel {
             hasSyntheticOpening = false
             isLoadingHistory = false
             markReadNow()
+            refreshCurrentActivity()
+            ensureScheduleGenerated()
             return
         }
 
@@ -104,6 +106,8 @@ final class ChatViewModel {
 
         isLoadingHistory = false
         markReadNow()
+        refreshCurrentActivity()
+        ensureScheduleGenerated()
     }
 
     /// Sunucudan tek seferlik geçmiş çekme — cihazda yerel JSON yoksa çalışır.
@@ -188,7 +192,8 @@ final class ChatViewModel {
                     summary: stored?.summary ?? "",
                     userMessage: text,
                     level: relationshipLevel,
-                    lastMessageAt: lastMessageAt
+                    lastMessageAt: lastMessageAt,
+                    currentActivity: currentActivity?.detail
                 )
 
                 // Cevap hazır olsa bile, balon en az "bunu yazmak ne kadar sürerdi"
@@ -236,6 +241,11 @@ final class ChatViewModel {
     /// normal "yazıyor" balonuyla AYNI görünmesin diye (bkz. ChatView.messagesList).
     var isSendingImageReply: Bool = false
 
+    /// "Şu an ne yapıyor" — ScheduleLookup ile yerelden hesaplanır, ağ
+    /// çağrısı gerektirmez. `nil` = henüz rutin üretilmedi ya da eşleşen
+    /// blok yok (chat header bu durumda "Online" göstermeye devam eder).
+    var currentActivity: (label: String, detail: String)?
+
     /// `send()`'in sesli-mesaj karşılığı: aynı metni gönderir, ama cevap
     /// metin balonu yerine sesli mesaj balonu olarak eklenir. `canSend` ile
     /// aynı boş-metin koruması — "boş dürtme" senaryosu yok, chat edge
@@ -270,7 +280,8 @@ final class ChatViewModel {
                     userMessage: text,
                     level: relationshipLevel,
                     lastMessageAt: lastMessageAt,
-                    voiceChat: true
+                    voiceChat: true,
+                    currentActivity: currentActivity?.detail
                 )
 
                 let elapsed = Date().timeIntervalSince(bubbleStartedAt)
@@ -367,7 +378,8 @@ final class ChatViewModel {
                     userMessage: text,
                     level: relationshipLevel,
                     lastMessageAt: lastMessageAt,
-                    imageReactionChat: true
+                    imageReactionChat: true,
+                    currentActivity: currentActivity?.detail
                 )
 
                 let elapsed = Date().timeIntervalSince(bubbleStartedAt)
@@ -447,21 +459,72 @@ final class ChatViewModel {
 
         let toFold = Array(real[stored.summarizedCount..<windowStart])
         let existingSummary = stored.summary
+        let previousSchedule = stored.schedule
         let characterId = character.id
 
-        Task.detached(priority: .background) { [service = self.service, character = self.character] in
-            guard let newSummary = try? await service.generateLocalSummary(
+        Task.detached(priority: .background) { [service = self.service, character = self.character, weak self] in
+            guard let result = try? await service.generateLocalSummary(
                 character: character,
                 messagesToFold: toFold,
-                existingSummary: existingSummary
+                existingSummary: existingSummary,
+                previousSchedule: previousSchedule
             ) else { return }
             await MainActor.run {
                 LocalConversationStore.shared.updateSummary(
                     for: characterId,
-                    summary: newSummary,
-                    summarizedCount: windowStart
+                    summary: result.summary,
+                    summarizedCount: windowStart,
+                    schedule: result.schedule
                 )
+                self?.refreshCurrentActivity()
             }
+        }
+    }
+
+    // MARK: - Günlük rutin
+
+    /// Cihazdaki kayıtlı rutine göre "şu an ne yapıyor" bloğunu yerelden
+    /// hesaplar — ağ çağrısı yok, ucuz, her çağrıda güvenle tekrar edilebilir.
+    private func refreshCurrentActivity() {
+        guard let schedule = LocalConversationStore.shared.load(for: character.id)?.schedule,
+              let block = ScheduleLookup.currentBlock(schedule: schedule) else {
+            currentActivity = nil
+            return
+        }
+        currentActivity = (label: block.label, detail: block.detail)
+    }
+
+    /// Cihazda hiç rutin yoksa (yeni sohbet) arka planda ilk rutini üretir.
+    /// Kullanıcının ilk mesajını GECİKTİRMEZ — tamamlanmadan mesaj gönderilirse
+    /// o tur sadece currentActivity bağlamı olmadan devam eder. Diğer
+    /// Task.detached kullanan metotlarla aynı desen: ihtiyaç duyulan değerler
+    /// ÖNCEDEN çıkarılır, `self` background task içine güçlü referansla
+    /// sızmaz — sadece son UI-yenileme adımında `weak self` ile dokunulur.
+    private func ensureScheduleGenerated() {
+        guard LocalConversationStore.shared.load(for: character.id)?.schedule == nil else { return }
+        let characterId = character.id
+        let fallbackLevel = relationshipLevel
+        let fallbackProgress = levelProgress
+        Task.detached(priority: .background) { [service = self.service, character = self.character, weak self] in
+            guard let schedule = try? await service.generateInitialSchedule(character: character) else { return }
+            await MainActor.run {
+                var stored = LocalConversationStore.shared.load(for: characterId) ?? LocalConversationStore.Stored(
+                    messages: [], xp: 0, level: fallbackLevel, summary: "", summarizedCount: 0,
+                    levelProgress: fallbackProgress
+                )
+                stored.schedule = schedule
+                LocalConversationStore.shared.save(stored, for: characterId)
+                self?.refreshCurrentActivity()
+            }
+        }
+    }
+
+    /// `ChatView`'in `.task` içinden çağrılır — view kaybolunca SwiftUI
+    /// otomatik iptal eder, elle Timer yönetimine gerek yok.
+    func startActivityRefreshLoop() async {
+        while !Task.isCancelled {
+            refreshCurrentActivity()
+            try? await Task.sleep(nanoseconds: 60_000_000_000)
         }
     }
 
@@ -497,7 +560,8 @@ final class ChatViewModel {
             detectedLanguage: ConversationLanguage.resolve(
                 latestAssistantText: real.last(where: { $0.role == .assistant })?.content,
                 previouslyDetected: stored?.detectedLanguage
-            )
+            ),
+            schedule: stored?.schedule
         )
         LocalConversationStore.shared.save(updated, for: character.id)
     }
