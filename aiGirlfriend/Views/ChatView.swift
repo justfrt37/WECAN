@@ -366,14 +366,19 @@ struct ChatView: View {
 
     // MARK: Input
 
+    private var inputPlaceholder: String {
+        if viewModel.isImageArmed { return String(localized: "Describe the photo…") }
+        if viewModel.isVoiceArmed { return String(localized: "What do you want to hear?") }
+        return String(localized: "Message…")
+    }
+
     private var inputBar: some View {
         HStack(spacing: 10) {
             HStack(spacing: 10) {
                 Image(systemName: "face.smiling")
                     .font(.system(size: 20)).foregroundStyle(.white.opacity(0.5))
                 TextField("", text: $viewModel.inputText,
-                          prompt: Text(viewModel.isImageArmed ? "Describe the photo…" : "Message…")
-                            .foregroundColor(.white.opacity(0.4)),
+                          prompt: Text(inputPlaceholder).foregroundColor(.white.opacity(0.4)),
                           axis: .vertical)
                     .foregroundStyle(.white)
                     .lineLimit(1...4)
