@@ -171,6 +171,8 @@ struct ChatService {
     private struct ChatImageRequest: Codable {
         let characterId: String
         let prompt: String
+        let history: [WireHistoryMessage]
+        let summary: String?
     }
 
     private struct ChatImageResponse: Codable {
@@ -179,16 +181,28 @@ struct ChatService {
     }
 
     /// "Send me a photo" modu — kullanıcının tarifinden xAI ile gerçek bir
-    /// fotoğraf üretir (bkz. ChatViewModel.sendImageRequest).
-    func generateChatImage(character: Character, prompt: String) async throws -> URL {
+    /// fotoğraf üretir (bkz. ChatViewModel.sendImageRequest). `localMessages`/
+    /// `summary` — sohbette daha önce kurulmuş gerçekleri (ör. "laboratuvarda
+    /// çalışıyorum") görsel üretim promptuna taşımak için, `sendWithLocalHistory`
+    /// ile aynı amaçla gönderilir.
+    func generateChatImage(character: Character, prompt: String, localMessages: [Message], summary: String) async throws -> URL {
         var request = URLRequest(url: Config.chatImageFunctionURL)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         let bearer = UserDefaultsManager.shared.accessToken ?? Config.supabaseAnonKey
         request.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
         request.setValue(Config.supabaseAnonKey, forHTTPHeaderField: "apikey")
+        let wireHistory = localMessages
+            .filter { $0.imageURL == nil }
+            .suffix(20)
+            .map { WireHistoryMessage(role: $0.role.rawValue, content: $0.content) }
         request.httpBody = try JSONEncoder().encode(
-            ChatImageRequest(characterId: character.id.uuidString.lowercased(), prompt: prompt)
+            ChatImageRequest(
+                characterId: character.id.uuidString.lowercased(),
+                prompt: prompt,
+                history: wireHistory,
+                summary: summary.isEmpty ? nil : summary
+            )
         )
 
         let (data, response) = try await URLSession.shared.data(for: request)

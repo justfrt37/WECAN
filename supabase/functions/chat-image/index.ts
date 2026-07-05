@@ -68,17 +68,40 @@ const NO_TEXT_RULE =
 function appearanceContext(opts: {
   name: string;
   profession: string | null;
+  tagline: string | null;
   builderSelections: BuilderSelections | null;
 }): string {
   const bs = opts.builderSelections;
-  if (bs && (bs.hairstyle || bs.hair_color || bs.eye_shape || bs.eye_color)) {
-    return `${opts.name}, a person with ${(bs.hairstyle ?? "").toLowerCase()} ` +
+  const base = (bs && (bs.hairstyle || bs.hair_color || bs.eye_shape || bs.eye_color))
+    ? `${opts.name}, a person with ${(bs.hairstyle ?? "").toLowerCase()} ` +
       `${(bs.hair_color ?? "").toLowerCase()} hair, ${(bs.eye_shape ?? "").toLowerCase()} ` +
       `${(bs.eye_color ?? "").toLowerCase()} eyes, ${(bs.nose_shape ?? "").toLowerCase()} nose, ` +
-      `${(bs.skin_tone ?? "").toLowerCase()} skin tone`;
+      `${(bs.skin_tone ?? "").toLowerCase()} skin tone`
+    // Katalog karakteri — kayıtlı görünüm alanı yok, en iyi ihtimalle isim/meslek.
+    : `${opts.name}${opts.profession ? `, a ${opts.profession.toLowerCase()}` : ""}`;
+  // Bio/tagline genelde meslek/yaşam detayı taşır (ör. "araştırma laboratuvarında
+  // çalışan bir bilim insanı") — LOCATION alanının somut bir yer üretmesi için
+  // önemli bir sinyal, önceden hiç kullanılmıyordu.
+  return opts.tagline ? `${base}. Bio: ${opts.tagline}` : base;
+}
+
+// Kullanıcının sohbette daha önce kurduğu gerçekler (ör. "laboratuvarda
+// çalışıyorum") sadece cihaz-yerel geçmişte var olabilir — istemci bunu
+// `history`/`summary` olarak gönderirse burada kullanılır. YOKSA composer bu
+// tür detayları TAHMİN ETMEK ZORUNDA kalır (bkz. LOCATION alan talimatı).
+function conversationContext(history: { role: string; content: string }[], summary: string | null): string {
+  const parts: string[] = [];
+  if (summary && summary.trim()) parts.push(summary.trim());
+  if (history.length > 0) {
+    parts.push(history.slice(-12).map((m) => `${m.role === "user" ? "User" : "Character"}: ${m.content}`).join("\n"));
   }
-  // Katalog karakteri — kayıtlı görünüm alanı yok, en iyi ihtimalle isim/meslek.
-  return `${opts.name}${opts.profession ? `, a ${opts.profession.toLowerCase()}` : ""}`;
+  if (parts.length === 0) return "";
+  return (
+    "\n\nCONTEXT FROM THIS CONVERSATION (use this for any established facts " +
+    "about the character's life — job, workplace, ongoing storyline, etc. — " +
+    "but the user's request below still takes priority for what to actually " +
+    "depict):\n" + parts.join("\n\n")
+  );
 }
 
 // Kalibrasyon örneği — kullanıcının verdiği örnekle birebir aynı, sadece
@@ -135,7 +158,13 @@ function realisticFieldGuidance(): string {
     "POSE: exactly how the character is positioned — where their arms and legs " +
     "are, their posture, what they're looking at.\n" +
     "LOCATION: the specific background and setting — be concrete about what's " +
-    "visible around the character.\n"
+    "visible around the character. If the user's request is generic (e.g. " +
+    "\"her workplace\", \"where she works\"), infer the SPECIFIC real-world " +
+    "setting implied by the character's actual profession/bio/conversation " +
+    "context below (a scientist's workplace is a lab, not a generic office; a " +
+    "chef's workplace is a kitchen; a musician's workplace is a studio or " +
+    "stage) — never default to a generic corporate office unless that's " +
+    "genuinely what fits.\n"
   );
 }
 
@@ -180,6 +209,7 @@ async function composeImagePrompt(opts: {
   category: string;
   userPrompt: string;
   hasBaseline: boolean;
+  context: string;
 }): Promise<string> {
   // Stil kararı HER ZAMAN gerçek `category` alanından — bir görseli hiç
   // görmeyen metin modeline "resme bak, stilini anla" diye bırakılmaz (bkz.
@@ -193,7 +223,7 @@ async function composeImagePrompt(opts: {
   const systemPrompt =
     "You are a professional photo director writing the exact prompt that will be " +
     "fed into an AI image generator to produce ONE image of a specific character.\n\n" +
-    `The character: ${opts.appearance}\n\n` +
+    `The character: ${opts.appearance}${opts.context}\n\n` +
     "YOU must make every creative decision yourself — never write a vague, " +
     "generic, or unspecified field, and never leave anything for the image " +
     "generator to infer or guess. Every field below must contain concrete, " +
@@ -305,6 +335,10 @@ Deno.serve(async (req: Request) => {
     const b = await req.json();
     const characterId: string = b.characterId;
     const userPrompt: string = (b.prompt ?? "").toString().trim();
+    // İstemcinin yerel sohbet geçmişi/özeti — chat/index.ts'nin clientHistory
+    // modundakiyle aynı şekle sahip, sadece görsel üretim promptu için kullanılır.
+    const history: { role: string; content: string }[] = Array.isArray(b.history) ? b.history : [];
+    const summary: string | null = typeof b.summary === "string" ? b.summary : null;
     if (!characterId) return json({ error: "characterId required" }, 400);
     if (!userPrompt) return json({ error: "prompt required" }, 400);
 
@@ -328,11 +362,13 @@ Deno.serve(async (req: Request) => {
         appearance: appearanceContext({
           name: character.name,
           profession: character.profession,
+          tagline: character.tagline,
           builderSelections: character.builder_selections ?? null,
         }),
         category,
         userPrompt,
         hasBaseline: baselineImageUrl !== null,
+        context: conversationContext(history, summary),
       });
       const bytes = await fetchGeneratedImageBytes(imagePrompt, baselineImageUrl);
       photoUrl = await uploadGeneratedImage(bytes);

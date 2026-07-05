@@ -341,7 +341,10 @@ final class ChatViewModel {
 
             do {
                 let stored = LocalConversationStore.shared.load(for: character.id)
-                let photoURL = try await service.generateChatImage(character: character, prompt: text)
+                let photoURL = try await service.generateChatImage(
+                    character: character, prompt: text,
+                    localMessages: realMessages(), summary: stored?.summary ?? ""
+                )
 
                 showsTypingBubble = false
                 isSendingImageReply = false
