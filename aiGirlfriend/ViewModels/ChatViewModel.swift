@@ -163,7 +163,6 @@ final class ChatViewModel {
         let text = (preset ?? inputText).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !isSending, !isLoadingHistory else { return }
 
-        let wantsPhoto = photoRequested(text)
         // Zaman farkındalığı için — yeni mesajı eklemeden ÖNCEki son mesajın zamanı.
         let lastMessageAt = messages.last?.createdAt
         messages.append(Message(role: .user, content: text))
@@ -203,13 +202,13 @@ final class ChatViewModel {
                 showsTypingBubble = false
                 store?.setTyping(character.id, false)
 
-                let gotPhoto = wantsPhoto ? character.chatPhotos.randomElement() : nil
+                // Eski otomatik-foto sistemi (metinde "foto" geçince statik
+                // havuzdan rastgele fotoğraf ekleme) KALDIRILDI — artık foto/ses
+                // sadece ilgili düğmeyle gönderilir (bkz. MEDIA_REQUEST_RULE,
+                // chat/index.ts). Grok bu turda düğmeyi kullanmasını önerir.
                 messages.append(Message(role: .assistant, content: result.reply))
-                if let gotPhoto {
-                    messages.append(Message(role: .assistant, content: "", imageURL: gotPhoto))
-                }
 
-                applyPostReplyEffects(gotPhoto: gotPhoto, stored: stored)
+                applyPostReplyEffects(gotPhoto: nil, stored: stored)
             } catch {
                 errorMessage = error.localizedDescription
                 showsTypingBubble = false
@@ -470,13 +469,6 @@ final class ChatViewModel {
 
     private func realMessages() -> [Message] {
         hasSyntheticOpening ? Array(messages.dropFirst()) : messages
-    }
-
-    private func photoRequested(_ text: String) -> Bool {
-        let t = text.lowercased(with: Locale(identifier: "tr_TR"))
-        let keys = ["foto", "fotoğraf", "fotograf", "resim", "selfie", "selfi",
-                    "görsel", "gorsel", "pic", "fotonu", "resmini"]
-        return keys.contains { t.contains($0) }
     }
 
     /// ElevenLabs v3 ses etiketlerini ([laughs], [whispers] vb.) metinden

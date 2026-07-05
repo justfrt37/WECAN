@@ -79,13 +79,20 @@ const LANGUAGE_RULE =
   "hizmetleri asistanı ya da resmi bir kurum gibi çıkma — gerçek bir insanın sevgilisine/" +
   "arkadaşına o dilde mesajlaşırken kullanacağı doğal, samimi ifadeleri seç.";
 
-const PHOTO_INSTRUCTION =
-  "\n\n[Fotoğraf] Kullanıcı senden fotoğraf/selfie isterse ve uygunsa, " +
-  "cevabının EN SONUNA başka hiçbir şey olmadan [[photo]] etiketini ekle. " +
-  "İstemiyorsa veya uygun değilse ekleme.";
-// Tespit için global-OLMAYAN (durumsuz), temizlik için global regex.
-const PHOTO_MARKER_TEST = /\[\[photo\]\]/i;
-const PHOTO_MARKER_ALL = /\[\[photo\]\]/gi;
+// ESKİ [[photo]] işaretli otomatik-foto sistemi (statik chat_photos havuzundan
+// rastgele seçim) KALDIRILDI — artık gerçek bir "Bana fotoğraf gönder" / "Bana
+// sesli mesaj gönder" düğmesi var (bkz. ChatView.quickReplyRow). Düğmeye
+// basmadan, düz metinde foto/ses istenirse Grok ASLA gönderiyormuş gibi
+// davranmamalı veya [[photo]]/[[voice]] gibi bir işaret üretmemeli — bunun
+// yerine doğal, karaktere uygun bir cümleyle düğmeyi kullanmasını öner.
+const MEDIA_REQUEST_RULE =
+  "\n\n[FOTO/SES İSTEĞİ] Kullanıcı düz bir mesajda (özel düğmeye basmadan) " +
+  "senden bir fotoğraf/selfie ya da sesli mesaj isterse: ASLA gönderiyormuş " +
+  "gibi davranma, göndermiş gibi yazma ve hiçbir özel işaret/etiket üretme. " +
+  "Bunun yerine doğal, karakterine uygun, HER SEFERİNDE FARKLI bir cümleyle " +
+  "ekrandaki 'Bana fotoğraf gönder' / 'Bana sesli mesaj gönder' düğmesine " +
+  "dokunmasını öner (düğmenin adını birebir tekrarlamak zorunda değilsin, " +
+  "doğal bir şekilde ima et — ör. \"o düğmeye bas da göndereyim\" gibi).";
 
 // Belirli kalıp cümleleri yasaklamak (blocklist) işe yaramıyor — model yine de
 // onları üretebiliyor (negatif talimatlar LLM'lerde güvenilir değil). Bunun yerine
@@ -147,7 +154,7 @@ const VOICE_TAGS_RULE =
 // Foto isteği görsel olarak zaten gönderildi (istemci chat-image fonksiyonundan
 // aldığı URL'i ayrıca ekledi) — bu çağrı SADECE isteğe bağlı bir metin tepkisi
 // üretir. Model bazen tepki vermek istemeyebilir; bunu [[no_caption]] işaretiyle
-// bildirir (bkz. PHOTO_INSTRUCTION'daki [[photo]] işareti ile aynı yöntem).
+// bildirir (aynı [[marker]] yöntemi).
 const IMAGE_CAPTION_RULE =
   "\n\n[FOTOĞRAF TEPKİSİ] Kullanıcının istediği fotoğrafı az önce gönderdin. " +
   "İstersen kısa, doğal, karakterine uygun bir tepki cümlesi yaz. Tepki vermek " +
@@ -395,7 +402,11 @@ Deno.serve(async (req: Request) => {
       system += `\n\n[Önceki konuşmalarınızın özeti]\n${localSummary}`;
     }
 
-    system += PHOTO_INSTRUCTION;
+    // Sadece DÜZ metin turlarında — voiceChat/imageReactionChat zaten düğme
+    // akışının kendisi, o turlarda bu uyarı anlamsız/çelişkili olurdu.
+    if (!voiceChat && !imageReactionChat) {
+      system += MEDIA_REQUEST_RULE;
+    }
     if (!useClientHistory && convo.summary && convo.summary.trim() !== "") {
       system += `\n\n[Önceki konuşmalarınızın özeti]\n${convo.summary}`;
     }
@@ -421,33 +432,7 @@ Deno.serve(async (req: Request) => {
       { role: "user", content: userMessage! },
     ];
 
-    const rawReply = await callGrok(grokMessages, 600);
-
-    // 3b) Foto isteği işaretini ayıkla
-    const photoRequested = PHOTO_MARKER_TEST.test(rawReply);
-    const reply = rawReply.replace(PHOTO_MARKER_ALL, "").trim();
-
-    // 3c) Uygun (seviyeye uygun, bu sohbette gönderilmemiş) bir foto seç
-    let photoUrl: string | null = null;
-    if (photoRequested) {
-      const { data: photos } = await db
-        .from("character_photos")
-        .select("url")
-        .eq("character_id", characterId)
-        .eq("is_pro", false)               // PRO kontrolü ileride
-        .lte("min_relationship_level", currentLevel);
-      if (photos && photos.length > 0) {
-        const { data: sentRows } = await db
-          .from("messages")
-          .select("content")
-          .eq("conversation_id", conversationId)
-          .eq("kind", "image");
-        const sent = new Set((sentRows ?? []).map((r) => r.content));
-        const fresh = photos.filter((p) => !sent.has(p.url));
-        const pool = fresh.length > 0 ? fresh : photos;
-        photoUrl = pool[Math.floor(Math.random() * pool.length)].url;
-      }
-    }
+    const reply = await callGrok(grokMessages, 600);
 
     // 4) Mesajları kaydet — clientHistory modunda istemci kendi saklıyor, DB'ye yazma
     if (!useClientHistory) {
@@ -455,11 +440,6 @@ Deno.serve(async (req: Request) => {
         { conversation_id: conversationId, role: "user", content: userMessage!, kind: "text" },
         { conversation_id: conversationId, role: "assistant", content: reply, kind: "text" },
       ]);
-      if (photoUrl) {
-        await db.from("messages").insert({
-          conversation_id: conversationId, role: "assistant", content: photoUrl, kind: "image",
-        });
-      }
     }
 
     // 4b) Seviye güncelle — terfi hesabı istemcide yapıldı, sunucu sadece saklar.
@@ -478,7 +458,7 @@ Deno.serve(async (req: Request) => {
 
     // 5) Özetleme — sadece DB modunda (clientHistory modunda istemci geçmişi yönetiyor)
     if (useClientHistory) {
-      return json({ conversationId, reply, photoUrl, level: newLevel });
+      return json({ conversationId, reply, level: newLevel });
     }
 
     const { count: total } = await db
@@ -529,7 +509,7 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    return json({ conversationId, reply, photoUrl, level: newLevel });
+    return json({ conversationId, reply, level: newLevel });
   } catch (e) {
     console.error(String(e));
     return json({ error: String(e) }, 500);
