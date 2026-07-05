@@ -24,14 +24,28 @@ final class LocalConversationStore {
         /// Sohbetin GERÇEKTE hangi dilde geçtiğine dair son tahmin ("tr"/"en") —
         /// bildirim içeriği (JealousyContent vb.) bunu kullanır. Bkz. ConversationLanguage.
         var detectedLanguage: String?
+        /// Bu (kullanıcı, karakter) sohbetine özel günlük rutin — bkz.
+        /// CharacterSchedule, ChatViewModel.ensureScheduleGenerated. Eski
+        /// kayıtlarda yok, `nil` olarak decode edilir.
+        var schedule: CharacterSchedule?
+        /// Karakter uykudayken mesaj alıp uyandırıldıysa o anın zamanı — bkz.
+        /// CharacterSleepState, ChatViewModel.handleWakeUpIfAsleep. `nil` =
+        /// uyandırma geçersiz (normal programa göre uyanık ya da hâlâ uyuyor).
+        var wokenUpAt: Date?
+        /// Kullanıcı gerçek yatma saatine yakınken uyumasını istedi ve karakter
+        /// kabul etti — bkz. chat/index.ts wentToSleep. `nil` = erken-uyuma
+        /// geçersiz.
+        var manualSleepAt: Date?
 
         enum CodingKeys: String, CodingKey {
-            case messages, xp, level, summary, summarizedCount, msgCounter, levelProgress, detectedLanguage
+            case messages, xp, level, summary, summarizedCount, msgCounter, levelProgress,
+                 detectedLanguage, schedule, wokenUpAt, manualSleepAt
         }
 
         init(
             messages: [Message], xp: Int, level: Int, summary: String, summarizedCount: Int,
-            msgCounter: Int = 0, levelProgress: Double = 0, detectedLanguage: String? = nil
+            msgCounter: Int = 0, levelProgress: Double = 0, detectedLanguage: String? = nil,
+            schedule: CharacterSchedule? = nil, wokenUpAt: Date? = nil, manualSleepAt: Date? = nil
         ) {
             self.messages = messages
             self.xp = xp
@@ -41,6 +55,9 @@ final class LocalConversationStore {
             self.msgCounter = msgCounter
             self.levelProgress = levelProgress
             self.detectedLanguage = detectedLanguage
+            self.schedule = schedule
+            self.wokenUpAt = wokenUpAt
+            self.manualSleepAt = manualSleepAt
         }
 
         init(from decoder: Decoder) throws {
@@ -54,6 +71,9 @@ final class LocalConversationStore {
             msgCounter = (try? c.decode(Int.self, forKey: .msgCounter)) ?? 0
             levelProgress = (try? c.decode(Double.self, forKey: .levelProgress)) ?? 0
             detectedLanguage = try? c.decode(String.self, forKey: .detectedLanguage)
+            schedule = try? c.decodeIfPresent(CharacterSchedule.self, forKey: .schedule)
+            wokenUpAt = try? c.decodeIfPresent(Date.self, forKey: .wokenUpAt)
+            manualSleepAt = try? c.decodeIfPresent(Date.self, forKey: .manualSleepAt)
         }
 
         func encode(to encoder: Encoder) throws {
@@ -66,6 +86,9 @@ final class LocalConversationStore {
             try c.encode(msgCounter, forKey: .msgCounter)
             try c.encode(levelProgress, forKey: .levelProgress)
             try c.encodeIfPresent(detectedLanguage, forKey: .detectedLanguage)
+            try c.encodeIfPresent(schedule, forKey: .schedule)
+            try c.encodeIfPresent(wokenUpAt, forKey: .wokenUpAt)
+            try c.encodeIfPresent(manualSleepAt, forKey: .manualSleepAt)
         }
     }
 
@@ -99,10 +122,11 @@ final class LocalConversationStore {
 
     // MARK: - Özet güncelle (özetleme tamamlandığında çağrılır)
 
-    func updateSummary(for id: UUID, summary: String, summarizedCount: Int) {
+    func updateSummary(for id: UUID, summary: String, summarizedCount: Int, schedule: CharacterSchedule? = nil) {
         guard var stored = load(for: id) else { return }
         stored.summary = summary
         stored.summarizedCount = summarizedCount
+        if let schedule { stored.schedule = schedule }
         save(stored, for: id)
     }
 }

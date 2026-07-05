@@ -20,6 +20,7 @@
 // DB erişimi service_role ile (RLS'yi bypass eder; istemci doğrudan DB'ye giremez).
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { franc } from "https://esm.sh/franc-min@6";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -41,6 +42,26 @@ const db = createClient(SUPABASE_URL, SERVICE_ROLE, {
 });
 
 interface WireMessage { role: string; content: string }
+
+// Grok bazen JSON'un etrafına markdown kod bloğu veya açıklama ekliyor —
+// create-character/index.ts'deki aynı savunma amaçlı ayıklama deseni.
+function extractJson(raw: string): any | null {
+  const match = raw.match(/\{[\s\S]*\}/);
+  if (!match) return null;
+  try { return JSON.parse(match[0]); } catch { return null; }
+}
+
+// İstemci tarafındaki temizleme (bkz. ChatViewModel.stripVoiceTags) sadece
+// BUNDAN SONRA yazılan yeni mesajları korur — halihazırda cihazda/summary'de
+// duran eski [laughs]/[whispers] etiketli içerik (fix'ten ÖNCE kaydedilmiş,
+// ya da istemci henüz rebuild edilmemiş) prompta girmeye devam eder ve Grok
+// düz metin turlarında bu deseni taklit etmeyi sürdürür. Bu yüzden sunucu,
+// prompta giren HER kaynağı (clientHistory, localSummary, DB geçmişi/özeti,
+// özetleme girişi) burada da savunma amaçlı temizler — geriye dönük veriyi
+// göç ettirmeye gerek kalmadan sızıntıyı kökten keser.
+function stripVoiceTags(text: string): string {
+  return text.replace(/\[[^\]]*\]/g, "").replace(/[ \t]{2,}/g, " ").trim();
+}
 
 // ─────────────────────────── İlişki seviyesi ───────────────────────────
 // XP terfi hesabı (eskiden burada) artık istemcide — bkz. RelationshipXP.swift.
@@ -72,20 +93,107 @@ async function fetchDirective(characterId: string, role: string, level: number):
 }
 
 // Modelin foto göndermek istediğini bildirme yöntemi.
-const LANGUAGE_RULE =
-  "\n\nDİL KURALI: Her zaman Türkçe konuş. " +
-  "Kullanıcı sana başka bir dilde yazarsa veya başka bir dilde konuşmanı açıkça isterse, o dile geç. " +
-  "Aksi takdirde SADECE Türkçe kullan. Hangi dilde konuşuyorsan konuş, asla bir müşteri " +
-  "hizmetleri asistanı ya da resmi bir kurum gibi çıkma — gerçek bir insanın sevgilisine/" +
-  "arkadaşına o dilde mesajlaşırken kullanacağı doğal, samimi ifadeleri seç.";
+// franc's ISO 639-3 codes for the 7 languages we actually support (matches
+// VoiceLanguage.swift's superset). Detection replaces the old approach of
+// asking Grok itself to notice and switch languages — that was unreliable
+// (confirmed via live 7-language test 2026-07-05: en/pt would randomly mix
+// languages or drop the switch entirely, non-deterministic run to run).
+const SUPPORTED_LANGS: Record<string, string> = {
+  eng: "English",
+  tur: "Turkish",
+  deu: "German",
+  fra: "French",
+  spa: "Spanish",
+  por: "Portuguese",
+  ita: "Italian",
+};
 
-const PHOTO_INSTRUCTION =
-  "\n\n[Fotoğraf] Kullanıcı senden fotoğraf/selfie isterse ve uygunsa, " +
-  "cevabının EN SONUNA başka hiçbir şey olmadan [[photo]] etiketini ekle. " +
-  "İstemiyorsa veya uygun değilse ekleme.";
-// Tespit için global-OLMAYAN (durumsuz), temizlik için global regex.
-const PHOTO_MARKER_TEST = /\[\[photo\]\]/i;
-const PHOTO_MARKER_ALL = /\[\[photo\]\]/gi;
+// Detects the reply language deterministically from the user's own text
+// instead of leaving it to the model's judgment each turn. Concatenates
+// recent user messages with the current one — franc needs enough text to be
+// reliable, and a single short message ("ok", "😊") isn't enough on its own.
+function detectReplyLanguage(
+  userMessage: string,
+  clientHistory: WireMessage[] | undefined,
+): string | null {
+  const priorUserText = (clientHistory ?? [])
+    .filter((m) => m.role === "user")
+    .slice(-5)
+    .map((m) => m.content)
+    .join(" ");
+  const text = `${priorUserText} ${userMessage}`.trim();
+  if (!text) return null;
+  // `only` restricts franc's candidate set to the 7 languages we actually
+  // support — without it, franc-min lacks Italian entirely (misreads it as
+  // unrelated languages) and the full franc package over-guesses among
+  // similar Latin-script languages on short text (e.g. English → Haitian
+  // Creole). Verified 2026-07-05 against all 7 test phrases.
+  const code = franc(text, { minLength: 3, only: Object.keys(SUPPORTED_LANGS) });
+  return SUPPORTED_LANGS[code] ?? null;
+}
+
+function languageDirective(language: string | null): string {
+  const target = language ?? "English";
+  return (
+    `\n\nLANGUAGE RULE: Reply ONLY in ${target} — this was determined from the ` +
+    "user's own messages, not a guess you need to make. Never mix in another " +
+    "language, never comment on the language itself (no 'I'll reply in X', no " +
+    "'you wrote in Y but...'), just write naturally in it. Sound like a real " +
+    "person texting their partner/friend in that language — warm, colloquial, " +
+    "never like a customer-support agent or an official institution."
+  );
+}
+
+// ESKİ [[photo]] işaretli otomatik-foto sistemi (statik chat_photos havuzundan
+// rastgele seçim) KALDIRILDI — artık gerçek bir "Bana fotoğraf gönder" / "Bana
+// sesli mesaj gönder" düğmesi var (bkz. ChatView.quickReplyRow). Düğmeye
+// basmadan, düz metinde foto/ses istenirse Grok ASLA gönderiyormuş gibi
+// davranmamalı veya [[photo]]/[[voice]] gibi bir işaret üretmemeli — bunun
+// yerine doğal, karaktere uygun bir cümleyle düğmeyi kullanmasını öner.
+const MEDIA_REQUEST_RULE =
+  "\n\n[FOTO/SES İSTEĞİ] Kullanıcı düz bir mesajda (özel düğmeye basmadan) " +
+  "senden bir fotoğraf/selfie ya da sesli mesaj isterse: ASLA gönderiyormuş " +
+  "gibi davranma, göndermiş gibi yazma ve hiçbir özel işaret/etiket üretme. " +
+  "Bunun yerine doğal, karakterine uygun, HER SEFERİNDE FARKLI bir cümleyle " +
+  "ekrandaki 'Bana fotoğraf gönder' / 'Bana sesli mesaj gönder' düğmesine " +
+  "dokunmasını öner (düğmenin adını birebir tekrarlamak zorunda değilsin, " +
+  "doğal bir şekilde ima et — ör. \"o düğmeye bas da göndereyim\" gibi).";
+
+// Fires once per photo, only the first time a private/intimate generated
+// photo is downloaded (server checks generated_photos.reacted — see the
+// photoDownloadReaction branch below). Written in English per project
+// convention for instructional prompts.
+const PHOTO_DOWNLOAD_REACTION_RULE =
+  "\n\n[PHOTO DOWNLOAD REACTION] The user just downloaded a private/intimate " +
+  "photo of you to their own device. Write ONE short, natural, in-character " +
+  "reaction to this — a cute, genuine complaint or tease about it (e.g. " +
+  "concern about it being shared, playful mock-offense, flustered teasing) — " +
+  "whatever actually fits your personality and how close you are with the " +
+  "user right now. Reason this out yourself in the moment; never reuse a " +
+  "fixed template line, and never sound robotic or like a canned response. " +
+  "Output ONLY the reaction line itself, nothing else.";
+
+// Level/role are stable per-character (safe in the static system prompt, same
+// treatment as humorDirective) — the actual near-bedtime BOOLEAN goes in
+// turnContext instead (it changes constantly as bedtime approaches, and
+// anything that changes every turn must stay OUT of the system prompt or it
+// breaks xAI's prompt-caching prefix-match — see turnContext below).
+function sleepRule(role: string, level: number): string {
+  return (
+    "\n\n[SLEEP REQUEST] Each of your turns includes a [BEDTIME PROXIMITY] " +
+    "note telling you whether it's currently close to (or within) your real " +
+    "scheduled sleep time. If the user asks you to go to sleep or says " +
+    "goodnight and wants you to sleep: agree naturally and say goodnight " +
+    "ONLY if that note says it's close to your bedtime. If it is NOT close " +
+    `to your bedtime, decline — but decline in whatever way actually fits ` +
+    `YOUR personality (role: ${role}, relationship level ${level}/10) and ` +
+    "the vibe already established in your character description above. " +
+    "There is no fixed tone for this — reason it out per your own character " +
+    "(a shy/low-level character declines very differently than a confident/ " +
+    "high-level one). Never mention the words 'schedule' or 'bedtime note' " +
+    "explicitly, just act on it naturally."
+  );
+}
 
 // Belirli kalıp cümleleri yasaklamak (blocklist) işe yaramıyor — model yine de
 // onları üretebiliyor (negatif talimatlar LLM'lerde güvenilir değil). Bunun yerine
@@ -144,6 +252,23 @@ const VOICE_TAGS_RULE =
   "dilde kalsın; sadece etiketlerin kendisi İngilizce ve köşeli parantez " +
   "biçiminde olmalı.";
 
+// Foto isteği görsel olarak zaten gönderildi (istemci chat-image fonksiyonundan
+// aldığı URL'i ayrıca ekledi) — bu çağrı bir metin tepkisi üretir.
+// GEÇMİŞ: [[no_caption]] bir "kaçış kapısı" gibi sunulunca model neredeyse
+// HER SEFERİNDE onu seçiyordu (canlı testte 8/8, hem ayrıntılı hem minimal
+// izole promptlarla) — daha zayıf/güçlü oran talimatları da fark etmedi.
+// İzole test: AYNI istek ama kaçış kapısı OLMADAN sorulunca (sadece "kısa,
+// doğal bir tepki yaz") her seferinde gerçek, doğal bir tepki üretti. Marker
+// tamamen kaldırıldı — artık her zaman bir tepki yazılır, asla sessiz kalmaz.
+const IMAGE_CAPTION_RULE =
+  "\n\n[FOTOĞRAF TEPKİSİ] DİKKAT — ZAMAN ÇİZELGESİ: Aşağıdaki 'kullanıcının " +
+  "son mesajı', kullanıcının SANA VERDİĞİ FOTOĞRAF TARİFİYDİ. O fotoğraf " +
+  "ZATEN üretilip ayrı bir görsel mesaj olarak gönderildi — bu senin şu an " +
+  "cevaplaman gereken YENİ bir istek DEĞİL. Fotoğrafı gönderdikten SONRA " +
+  "söyleyeceğin kısa, doğal, karakterine uygun bir tepki cümlesi yaz — " +
+  "gerçek biri fotoğraf gönderdikten sonra ne derse onu de (ör. \"işte, " +
+  "beğendin mi\", flörtöz bir laf, kısa bir soru).";
+
 // İlişki seviyesine göre mizah/şaka/kelime oyunu dozu — samimiyet arttıkça artar.
 function humorDirective(level: number): string {
   if (level <= 3) {
@@ -193,12 +318,17 @@ function userIdFromJWT(authHeader: string | null): string | null {
   }
 }
 
-async function callGrok(messages: WireMessage[], maxTokens: number): Promise<string> {
+// `convId` (pass the conversationId) routes repeat requests to the same xAI
+// server for cache locality — required for prompt caching to actually hit
+// (see docs.x.ai/developers/advanced-api-usage/prompt-caching). Omitted for
+// one-off calls (summarization) where there's no stable prefix to cache anyway.
+async function callGrok(messages: WireMessage[], maxTokens: number, convId?: string): Promise<string> {
   const resp = await fetch(XAI_URL, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${XAI_API_KEY}`,
+      ...(convId ? { "x-grok-conv-id": convId } : {}),
     },
     body: JSON.stringify({
       model: MODEL,
@@ -213,6 +343,29 @@ async function callGrok(messages: WireMessage[], maxTokens: number): Promise<str
   }
   const data = await resp.json();
   return data?.choices?.[0]?.message?.content ?? "";
+}
+
+// Confirms whether a reply ACTUALLY agreed to go to sleep (not just discussed
+// the topic) — only called when nearSleepTime was true, same pattern as
+// chat-image/index.ts's classifyPrivacy.
+async function classifySleepAgreement(userMessage: string, reply: string): Promise<boolean> {
+  const raw = await callGrok(
+    [
+      {
+        role: "system",
+        content:
+          "You are a classifier. Given a short exchange between a user and " +
+          "an AI character, answer with exactly one word: YES if the " +
+          "character's reply agreed to go to sleep / said goodnight for the " +
+          "night, NO if it did not (e.g. declined, changed the subject, or " +
+          "the exchange wasn't about sleeping at all). Answer with only YES " +
+          "or NO, nothing else.",
+      },
+      { role: "user", content: `User: ${userMessage}\nCharacter: ${reply}` },
+    ],
+    5
+  );
+  return raw.trim().toUpperCase().startsWith("Y");
 }
 
 Deno.serve(async (req: Request) => {
@@ -292,31 +445,75 @@ Deno.serve(async (req: Request) => {
     const tzOffsetMinutes: number | undefined = typeof body.tzOffsetMinutes === "number" ? body.tzOffsetMinutes : undefined;
     // Sesli mesaj isteği mi? (bkz. VOICE_TAGS_RULE — ElevenLabs v3 ses etiketleri)
     const voiceChat: boolean = body.voiceChat === true;
+    // Fotoğraf isteği tepki modu mu? (bkz. IMAGE_CAPTION_RULE)
+    const imageReactionChat: boolean = body.imageReactionChat === true;
+    // İstemci ScheduleLookup ile hesaplar — gerçek yatma saatine 1 saatten
+    // yakın mı (ya da içindeyse) (bkz. sleepRule, chat-index turnContext).
+    const nearSleepTime: boolean = body.nearSleepTime === true;
+    // Cevap dili — kullanıcının kendi metninden deterministik tespit edilir
+    // (bkz. detectReplyLanguage), modelin fark edip geçmesine güvenilmiyor.
+    const detectedLanguage = (userMessage || body.photoDownloadReaction === true)
+      ? detectReplyLanguage(userMessage ?? "", clientHistory)
+      : null;
+    // Günlük rutin (bkz. character-schedule fonksiyonu) — istemci "şu an ne
+    // yapıyor" bloğunun `detail` metnini gönderir, burada tona yansıtılır.
+    const currentActivity: string | undefined =
+      typeof body.currentActivity === "string" && body.currentActivity.trim()
+        ? body.currentActivity.trim()
+        : undefined;
 
     // === İSTEMCİ TARAFLI ÖZETLEME MODU ===
-    // Kullanıcı karakterleri her 20 mesajda bir bunu tetikler.
+    // Kullanıcı karakterleri her 20 mesajda bir bunu tetikler. Aynı çağrıda
+    // günlük rutini de gözden geçirir (bkz. character-schedule — bu SADECE
+    // rafine eder, ilk üretim orada olur).
     if (Array.isArray(body.summarizeMessages) && body.summarizeMessages.length > 0) {
       const convoText = (body.summarizeMessages as WireMessage[])
-        .map((m) => `${m.role === "user" ? "Kullanıcı" : "Sen"}: ${m.content}`)
+        .map((m) => `${m.role === "user" ? "Kullanıcı" : "Sen"}: ${stripVoiceTags(m.content)}`)
         .join("\n");
+      const previousSchedule = body.previousSchedule ?? null;
       const summaryPrompt: WireMessage[] = [
         {
           role: "system",
           content:
-            "Bir sohbet özeti güncelliyorsun. Karakterin İLERİDE hatırlaması " +
-            "gereken kalıcı bilgileri çıkar: kullanıcının adı, tercihleri, " +
-            "ilişki durumu/önemli anlar, söz verilen şeyler, devam eden konular. " +
-            "Kısa madde madde yaz. Önceki özeti koru, yenileri ekle.",
+            "Bir sohbet özetini ve karakterin günlük rutinini güncelliyorsun. " +
+            "Karakterin İLERİDE hatırlaması gereken kalıcı bilgileri özete " +
+            "çıkar — hem KULLANICI hakkında (adı, tercihleri, ilişki durumu/ " +
+            "önemli anlar, söz verilen şeyler) HEM DE KARAKTERİN KENDİSİ " +
+            "hakkında kendi söylediği kalıcı gerçekler (mesleği, iş yeri, " +
+            "ailesi, geçmişi, hobileri). Karakter kendi hakkında bir şey " +
+            "söylediyse (ör. \"laboratuvarda çalışıyorum\") bunu MUTLAKA " +
+            "özete ekle. Ayrıca mevcut günlük rutini gözden geçir: yeni " +
+            "konuşmada rutinini değiştiren bir gerçek varsa (ör. işten " +
+            "ayrıldı, gece vardiyasına geçti) rutini buna göre güncelle; " +
+            "yoksa MEVCUT rutini olduğu gibi koru (uydurma, değiştirme). " +
+            "Rutindeki `label` alanı KISA bir DURUM ifadesi olmalı — \"şu an " +
+            "ne yapıyor\" sorusuna doğal bir cevap gibi oku (ör. \"Work\" " +
+            "değil \"At work\", \"Dinner\" değil \"Having dinner\", " +
+            "\"Sleep\" değil \"Asleep\") ve konuşmanın geçtiği dille AYNI " +
+            "dilde yaz — asla otomatik İngilizceye geçme. Uyku bloğunda " +
+            "`isSleep: true`, diğer TÜM bloklarda `isSleep: false` yaz (mevcut " +
+            "rutinde zaten işaretliyse aynen koru). " +
+            "SADECE şu JSON şemasında cevap ver, başka hiçbir şey yazma: " +
+            '{"summary":"kısa madde madde, önceki özeti koruyup yenileri ' +
+            'ekleyerek","schedule":{"weekday":[{"start":"HH:mm","end":"HH:mm",' +
+            '"label":"kısa durum ifadesi","detail":"daha ayrıntılı ' +
+            'açıklama","isSleep":false}],"weekend":[...]}}',
         },
         {
           role: "user",
           content:
-            `Önceki özet:\n${body.existingSummary || "(yok)"}\n\n` +
-            `Yeni konuşma:\n${convoText}\n\nGüncellenmiş özet:`,
+            `Önceki özet:\n${body.existingSummary ? stripVoiceTags(body.existingSummary) : "(yok)"}\n\n` +
+            `Mevcut günlük rutin:\n${previousSchedule ? JSON.stringify(previousSchedule) : "(henüz yok)"}\n\n` +
+            `Yeni konuşma:\n${convoText}\n\nGüncellenmiş JSON:`,
         },
       ];
-      const newSummary = await callGrok(summaryPrompt, 400);
-      return json({ summary: newSummary });
+      const raw = await callGrok(summaryPrompt, 1500);
+      const parsed = extractJson(raw);
+      const summary: string = typeof parsed?.summary === "string" ? parsed.summary : raw.trim();
+      const schedule = (parsed && Array.isArray(parsed.schedule?.weekday) && Array.isArray(parsed.schedule?.weekend))
+        ? parsed.schedule
+        : null;
+      return json({ summary, schedule });
     }
 
     // === GEÇMİŞ MODU — clientHistory yoksa ===
@@ -332,6 +529,68 @@ Deno.serve(async (req: Request) => {
         xp: convo.xp ?? 0,
         level: convo.relationship_level ?? 1,
       });
+    }
+
+    // === FOTOĞRAF İNDİRME TEPKİSİ MODU (photoDownloadReaction: true) ===
+    // Kullanıcı özel/mahrem işaretli bir fotoğrafı cihazına indirdi. userMessage
+    // YOK — bu gerçek bir sohbet turu değil, XP/seviye/mesaj geçmişi etkilenmez.
+    if (body.photoDownloadReaction === true) {
+      const photoURL: string = body.photoURL;
+      if (!photoURL) return json({ reply: null });
+
+      const { data: photoRow } = await db
+        .from("generated_photos")
+        .select("id, is_private, reacted")
+        .eq("url", photoURL)
+        .eq("user_id", uid)
+        .maybeSingle();
+
+      if (!photoRow || !photoRow.is_private || photoRow.reacted) {
+        return json({ reply: null });
+      }
+
+      const reactionLevel: number = convo.relationship_level ?? 1;
+      const reactionDirective = await fetchDirective(characterId, personalityRole, reactionLevel);
+      let reactionSystem = systemPrompt;
+      reactionSystem += `\n\n${reactionDirective}`;
+      if (exHistory) {
+        reactionSystem += `\n\n[SHARED HISTORY — reference these memories naturally in conversation]\n${exHistory}`;
+      }
+
+      const { data: reactionMemoryRows } = await db
+        .from("memories")
+        .select("content")
+        .eq("conversation_id", conversationId)
+        .order("created_at", { ascending: true });
+      const { data: reactionBehaviorRows } = await db
+        .from("conversation_behaviors")
+        .select("content")
+        .eq("conversation_id", conversationId)
+        .order("created_at", { ascending: true });
+      if (reactionMemoryRows && reactionMemoryRows.length > 0) {
+        reactionSystem += `\n\n[MEMORIES — facts to remember about the user/relationship]\n` +
+          reactionMemoryRows.map((m) => `- ${m.content}`).join("\n");
+      }
+      if (reactionBehaviorRows && reactionBehaviorRows.length > 0) {
+        reactionSystem += `\n\n[BEHAVIOR PREFERENCES — how the user wants you to act]\n` +
+          reactionBehaviorRows.map((b) => `- ${b.content}`).join("\n");
+      }
+
+      reactionSystem += languageDirective(detectedLanguage);
+      reactionSystem += PHOTO_DOWNLOAD_REACTION_RULE;
+
+      const reactionReply = await callGrok(
+        [
+          { role: "system", content: reactionSystem },
+          { role: "user", content: "[The user just saved this photo to their device.]" },
+        ],
+        200,
+        conversationId
+      );
+
+      await db.from("generated_photos").update({ reacted: true }).eq("id", photoRow.id);
+
+      return json({ reply: reactionReply });
     }
 
     // === CEVAP MODU: sistem promptunu hazırla ===
@@ -364,21 +623,46 @@ Deno.serve(async (req: Request) => {
         behaviorRows.map((b) => `- ${b.content}`).join("\n");
     }
 
-    system += LANGUAGE_RULE;
+    system += languageDirective(detectedLanguage);
     system += VARIATION_RULE;
     system += CONTINUITY_RULE;
     system += humorDirective(currentLevel);
-    system += timeContext(lastMessageAt, clientNow, tzOffsetMinutes);
     if (voiceChat) {
       system += VOICE_TAGS_RULE;
     }
+    if (imageReactionChat) {
+      system += IMAGE_CAPTION_RULE;
+    }
     if (useClientHistory && localSummary && localSummary.trim() !== "") {
-      system += `\n\n[Önceki konuşmalarınızın özeti]\n${localSummary}`;
+      system += `\n\n[Önceki konuşmalarınızın özeti]\n${stripVoiceTags(localSummary)}`;
     }
 
-    system += PHOTO_INSTRUCTION;
+    // Sadece DÜZ metin turlarında — voiceChat/imageReactionChat zaten düğme
+    // akışının kendisi, o turlarda bu uyarı anlamsız/çelişkili olurdu.
+    if (!voiceChat && !imageReactionChat) {
+      system += MEDIA_REQUEST_RULE;
+      system += sleepRule(personalityRole, currentLevel);
+    }
     if (!useClientHistory && convo.summary && convo.summary.trim() !== "") {
-      system += `\n\n[Önceki konuşmalarınızın özeti]\n${convo.summary}`;
+      system += `\n\n[Önceki konuşmalarınızın özeti]\n${stripVoiceTags(convo.summary)}`;
+    }
+
+    // ÖNEMLİ (prompt caching): timeContext/currentActivity HER turda değişir —
+    // system prompt'un İÇİNDE kalsalardı xAI'nin prefix-cache'i hiç tutmazdı
+    // (system, mesaj dizisinin İLK elemanı — tek bir farklı token bile tüm
+    // prefix eşleşmesini bozar). Bu yüzden system'i SABİT tutup, bunun yerine
+    // SON kullanıcı mesajına ekleniyorlar — o mesaj zaten her turda yeni.
+    let turnContext = timeContext(lastMessageAt, clientNow, tzOffsetMinutes);
+    if (currentActivity) {
+      turnContext += `\n\n[GÜNLÜK RUTİN] Şu anda: ${currentActivity}. Ton ve ` +
+        `müsaitliğini buna doğal şekilde yansıt (ör. işteyken kısa/dikkati ` +
+        `dağınık, evde rahatken daha uzun sohbet edebilirsin) ama bunu her ` +
+        `mesajda birebir tekrarlama.`;
+    }
+    if (!voiceChat && !imageReactionChat) {
+      turnContext += nearSleepTime
+        ? "\n\n[BEDTIME PROXIMITY] It is currently close to or within your real scheduled sleep time."
+        : "\n\n[BEDTIME PROXIMITY] It is NOT close to your real scheduled sleep time right now.";
     }
 
     // === CEVAP MODU ===
@@ -395,40 +679,21 @@ Deno.serve(async (req: Request) => {
         .limit(KEEP_RECENT);
       recent = (recentDesc ?? []).reverse();
     }
+    // Geçmişteki HERHANGİ bir mesaj (fix'ten önce kaydedilmiş sesli mesaj
+    // cevapları dahil) ses etiketi taşıyabilir — Grok bunu görüp taklit
+    // etmesin diye burada da temizleniyor (bkz. stripVoiceTags üstteki not).
+    recent = recent.map((m) => ({ ...m, content: stripVoiceTags(m.content) }));
 
     const grokMessages: WireMessage[] = [
       { role: "system", content: system },
       ...recent,
-      { role: "user", content: userMessage! },
+      { role: "user", content: userMessage! + turnContext },
     ];
 
-    const rawReply = await callGrok(grokMessages, 600);
-
-    // 3b) Foto isteği işaretini ayıkla
-    const photoRequested = PHOTO_MARKER_TEST.test(rawReply);
-    const reply = rawReply.replace(PHOTO_MARKER_ALL, "").trim();
-
-    // 3c) Uygun (seviyeye uygun, bu sohbette gönderilmemiş) bir foto seç
-    let photoUrl: string | null = null;
-    if (photoRequested) {
-      const { data: photos } = await db
-        .from("character_photos")
-        .select("url")
-        .eq("character_id", characterId)
-        .eq("is_pro", false)               // PRO kontrolü ileride
-        .lte("min_relationship_level", currentLevel);
-      if (photos && photos.length > 0) {
-        const { data: sentRows } = await db
-          .from("messages")
-          .select("content")
-          .eq("conversation_id", conversationId)
-          .eq("kind", "image");
-        const sent = new Set((sentRows ?? []).map((r) => r.content));
-        const fresh = photos.filter((p) => !sent.has(p.url));
-        const pool = fresh.length > 0 ? fresh : photos;
-        photoUrl = pool[Math.floor(Math.random() * pool.length)].url;
-      }
-    }
+    const reply = await callGrok(grokMessages, 600, conversationId);
+    const wentToSleep = (!voiceChat && !imageReactionChat && nearSleepTime)
+      ? await classifySleepAgreement(userMessage!, reply)
+      : false;
 
     // 4) Mesajları kaydet — clientHistory modunda istemci kendi saklıyor, DB'ye yazma
     if (!useClientHistory) {
@@ -436,11 +701,6 @@ Deno.serve(async (req: Request) => {
         { conversation_id: conversationId, role: "user", content: userMessage!, kind: "text" },
         { conversation_id: conversationId, role: "assistant", content: reply, kind: "text" },
       ]);
-      if (photoUrl) {
-        await db.from("messages").insert({
-          conversation_id: conversationId, role: "assistant", content: photoUrl, kind: "image",
-        });
-      }
     }
 
     // 4b) Seviye güncelle — terfi hesabı istemcide yapıldı, sunucu sadece saklar.
@@ -459,7 +719,7 @@ Deno.serve(async (req: Request) => {
 
     // 5) Özetleme — sadece DB modunda (clientHistory modunda istemci geçmişi yönetiyor)
     if (useClientHistory) {
-      return json({ conversationId, reply, photoUrl, level: newLevel });
+      return json({ conversationId, reply, level: newLevel, wentToSleep });
     }
 
     const { count: total } = await db
@@ -480,7 +740,7 @@ Deno.serve(async (req: Request) => {
 
       if (toFold && toFold.length > 0) {
         const convoText = toFold
-          .map((m) => `${m.role === "user" ? "Kullanıcı" : "Sen"}: ${m.content}`)
+          .map((m) => `${m.role === "user" ? "Kullanıcı" : "Sen"}: ${stripVoiceTags(m.content)}`)
           .join("\n");
         const summaryPrompt: WireMessage[] = [
           {
@@ -510,7 +770,7 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    return json({ conversationId, reply, photoUrl, level: newLevel });
+    return json({ conversationId, reply, level: newLevel });
   } catch (e) {
     console.error(String(e));
     return json({ error: String(e) }, 500);

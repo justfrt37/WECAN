@@ -23,6 +23,12 @@ final class CharacterStore {
     /// ChatView anında açılsın diye — her seferinde yeniden yüklenmez).
     var chatCache: [UUID: [Message]] = [:]
 
+    /// Bumped any time a message is injected into LocalConversationStore
+    /// OUTSIDE the normal ChatViewModel send/receive flow (bot notifications,
+    /// photo-download reactions) — ChatListView observes this to reload/
+    /// reorder even when nothing touched `typingCharacterIDs`.
+    var conversationsVersion: Int = 0
+
     /// Keşfet'te "tanışmak ister misin?" onayından sonra MainTabView bunu
     /// görüp sohbete programatik olarak geçiş yapar (bkz. MeetRequest).
     var pendingMeetRequest: MeetRequest?
@@ -82,6 +88,14 @@ final class CharacterStore {
         await ImageCache.shared.prefetch(Array(Set(urls)))
 
         isLoaded = true
+
+        // Günlük rutinleri arka planda toplu üret — kullanıcı hiçbir sohbeti
+        // AÇMADAN önce, splash'i bekletmeden (fire-and-forget). Böylece ilk
+        // kez bir sohbete girince zaten "Online" yerine gerçek aktiviteyi görür.
+        let charactersSnapshot = characters
+        Task.detached(priority: .background) {
+            await ScheduleGenerator.prewarmAll(characters: charactersSnapshot)
+        }
     }
 
     private func loadCachedCharacters() -> [Character]? {

@@ -98,19 +98,35 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
             line = JealousyContent.randomLine(language: language, role: character.personalityRole, vibe: character.vibe)
         case .levelUp:
             line = nil
+        case .sleepyQuestion:
+            line = SleepyContent.question(language: language)
+        case .sleepyGoodbye, .bedtime:
+            line = SleepyContent.goodbye(language: language)
         }
 
         if let line {
             injectMessage(line, for: characterID)
         }
 
+        // .sleepyGoodbye reverts the character to genuinely asleep — clear the
+        // wake-override so CharacterSleepState.isEffectivelyAsleep is true again.
+        if kind == .sleepyGoodbye {
+            var stored = LocalConversationStore.shared.load(for: characterID)
+            stored?.wokenUpAt = nil
+            if let stored { LocalConversationStore.shared.save(stored, for: characterID) }
+        }
+
         guard navigate else { return }
 
-        // Level-up dışındaki bot bildirimleri sadece Sohbetler sekmesine
-        // yönlendirir — doğrudan o botun sohbetini açmaz.
-        if kind == .levelUp {
+        // Level-up dışındaki bot bildirimleri sadece ilgili sekmeye yönlendirir —
+        // doğrudan o botun sohbetini açmaz. "Liked You" artık Beğeniler
+        // sekmesine gider (bkz. LikedByStore/LikesView), diğerleri Sohbetler'e.
+        switch kind {
+        case .levelUp:
             store.pendingMeetRequest = MeetRequest(character: character, prefillText: "")
-        } else {
+        case .liked:
+            store.pendingTab = .likes
+        case .ghosted, .jealousy, .sleepyQuestion, .sleepyGoodbye, .bedtime:
             store.pendingTab = .chat
         }
     }
@@ -132,5 +148,6 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
         stored.messages.append(Message(role: .assistant, content: text))
         LocalConversationStore.shared.save(stored, for: characterID)
         store.chatCache.removeValue(forKey: characterID) // force ChatViewModel to reload fresh, not the stale cache
+        store.conversationsVersion += 1
     }
 }

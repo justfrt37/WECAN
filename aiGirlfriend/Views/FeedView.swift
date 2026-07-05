@@ -12,8 +12,14 @@ struct FeedView: View {
     @State private var showTutorial = !UserDefaultsManager.shared.hasSeenSwipeTutorial
     @State private var meetCandidate: Character?
 
+    /// Zaten sohbete başlanmış (yerel bir konuşma kaydı olan) karakterler
+    /// Discover'da tekrar gösterilmez — aynı tanım NotificationScheduler'ın
+    /// Liked You uygunluk kontrolüyle birebir aynı (bkz. LikedByStore).
     private var characters: [Character] {
-        store.characters.filter { !BlockedCharactersStore.isBlocked($0.id) }
+        store.characters.filter {
+            !BlockedCharactersStore.isBlocked($0.id) &&
+            LocalConversationStore.shared.load(for: $0.id) == nil
+        }
     }
 
     var body: some View {
@@ -54,6 +60,8 @@ struct FeedView: View {
                             .onChanged { v in dragOffset = v.translation }
                             .onEnded { v in handleSwipe(v.translation, w: geo.size.width) }
                     )
+                } else {
+                    emptyState
                 }
 
                 if showTutorial {
@@ -86,6 +94,23 @@ struct FeedView: View {
             if currentIndex >= chars.count { currentIndex = 0 }
             store.currentCharacterID = chars.isEmpty ? nil : chars[currentIndex].id
         }
+    }
+
+    private var emptyState: some View {
+        VStack(spacing: 14) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 50))
+                .foregroundStyle(AppColor.pink.opacity(0.85))
+            Text("You're all caught up!")
+                .font(.title3.bold())
+                .foregroundStyle(.white)
+            Text("You've started chatting with everyone in Discover. Check back later for new people.")
+                .font(.subheadline)
+                .multilineTextAlignment(.center)
+                .foregroundStyle(.white.opacity(0.6))
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 32)
     }
 
     // MARK: Hesaplamalar

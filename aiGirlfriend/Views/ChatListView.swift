@@ -58,6 +58,7 @@ struct ChatListView: View {
         }
         .task { await load() }
         .onChange(of: store.typingCharacterIDs) { Task { await load() } }
+        .onChange(of: store.conversationsVersion) { Task { await load() } }
     }
 
     private func load() async {
@@ -104,10 +105,16 @@ struct ChatListView: View {
 
             let last: LastMessage? = displayMessages.last.map {
                 LastMessage(conversationID: conv.id, content: $0.content,
-                            role: $0.role.rawValue, createdAt: Self.iso8601.string(from: $0.createdAt))
+                            role: $0.role.rawValue, createdAt: Self.iso8601.string(from: $0.createdAt),
+                            kind: $0.imageURL != nil ? "image" : "text")
             }
             return ChatItem(character: ch, conversationID: conv.id,
                             last: last, unread: unread, updatedAt: conv.updatedAt)
+        }
+        items.sort { lhs, rhs in
+            let lhsDate = parseISO8601(lhs.last?.createdAt) ?? parseISO8601(lhs.updatedAt) ?? .distantPast
+            let rhsDate = parseISO8601(rhs.last?.createdAt) ?? parseISO8601(rhs.updatedAt) ?? .distantPast
+            return lhsDate > rhsDate
         }
         isLoading = false
         saveCachedItems(items)
@@ -317,7 +324,12 @@ private struct ChatHistoryRow: View {
                 .foregroundStyle(AppColor.pink)
         } else if let last = item.last {
             Group {
-                if last.isUser {
+                if last.isImage {
+                    HStack(spacing: 4) {
+                        Image(systemName: "camera.fill")
+                        Text(last.isUser ? "You: \(String(localized: "Image"))" : String(localized: "Image"))
+                    }
+                } else if last.isUser {
                     Text("You: \(last.content)")
                 } else {
                     Text(last.content)
@@ -347,6 +359,14 @@ private struct ChatHistoryRow: View {
     }
 }
 
+/// ISO8601 zaman damgasını `Date`'e çevirir — sıralama için (bkz. ChatListView.load()).
+private func parseISO8601(_ iso: String?) -> Date? {
+    guard let iso else { return nil }
+    let fmt = ISO8601DateFormatter()
+    fmt.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    return fmt.date(from: iso) ?? ISO8601DateFormatter().date(from: iso)
+}
+
 /// ISO8601 zaman damgasını kısa göreli metne çevirir (şimdi, 5dk, 2sa, Dün…).
 private func relativeTime(_ iso: String?) -> String {
     guard let iso else { return "" }
@@ -356,10 +376,10 @@ private func relativeTime(_ iso: String?) -> String {
     guard let date else { return "" }
     let s = Date().timeIntervalSince(date)
     if s < 60 { return String(localized: "now") }
-    if s < 3600 { return "\(Int(s/60))m" }
-    if s < 86400 { return "\(Int(s/3600))h" }
+    if s < 3600 { return String(localized: "\(Int(s/60))m") }
+    if s < 86400 { return String(localized: "\(Int(s/3600))h") }
     if s < 172800 { return String(localized: "Yesterday") }
-    return "\(Int(s/86400))d"
+    return String(localized: "\(Int(s/86400))d")
 }
 
 #Preview {

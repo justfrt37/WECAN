@@ -13,19 +13,14 @@ struct ExploreView: View {
     @Environment(CharacterStore.self) private var store
 
     @State private var selectedCategory: ExploreCategory = .all
-    @State private var search = ""
     @State private var profileCharacter: Character?
     @State private var showCreate = false
 
-    /// Kategori + arama filtresi uygulanmış liste (engellenenler hariç).
+    /// Kategori filtresi uygulanmış liste (engellenenler hariç).
     private var filtered: [Character] {
         store.characters.filter { c in
             guard !BlockedCharactersStore.isBlocked(c.id) else { return false }
-            let catOK = selectedCategory == .all || c.category == selectedCategory.rawValue
-            let q = search.trimmingCharacters(in: .whitespaces)
-            let searchOK = q.isEmpty || c.name.localizedCaseInsensitiveContains(q)
-                || (c.profession?.localizedCaseInsensitiveContains(q) ?? false)
-            return catOK && searchOK
+            return selectedCategory == .all || c.category == selectedCategory.rawValue
         }
     }
 
@@ -37,7 +32,6 @@ struct ExploreView: View {
             header
             ScrollView {
                 VStack(spacing: 16) {
-                    searchBar
                     pills
                     grid
                 }
@@ -68,31 +62,6 @@ struct ExploreView: View {
             .foregroundStyle(.white)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 14)
-    }
-
-    // MARK: Arama
-
-    private var searchBar: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 16))
-                .foregroundStyle(.white.opacity(0.7))
-            TextField(
-                "",
-                text: $search,
-                prompt: Text("Search by name or profession").foregroundStyle(.white.opacity(0.5))
-            )
-            .foregroundStyle(.white)
-            .font(.system(size: 14))
-            .autocorrectionDisabled()
-        }
-        .padding(.horizontal, 16)
-        .frame(height: 48)
-        .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
-        .overlay(
-            RoundedRectangle(cornerRadius: 16)
-                .strokeBorder(.white.opacity(0.1), lineWidth: 1)
-        )
     }
 
     // MARK: Kategori pill'leri
@@ -257,19 +226,19 @@ private struct CharacterGridCard: View {
 }
 
 /// "Tümünü Gör" kategori filtreleri. rawValue, Supabase `category` ile eşleşir.
+/// "Fantasy"/"Anime"/"Sci-Fi" hepsi tek "Fictional" kategorisinde birleştirildi
+/// (bkz. CreateCharacterView wizard'ı ve chat-image/index.ts'nin styleCue'su).
 enum ExploreCategory: String, CaseIterable, Identifiable {
     case all = "All"
     case realistic = "Realistic"
-    case anime = "Anime"
-    case fantasy = "Fantasy"
+    case fictional = "Fictional"
 
     var id: String { rawValue }
     var title: String {
         switch self {
         case .all: return String(localized: "All")
         case .realistic: return String(localized: "Realistic")
-        case .anime: return String(localized: "Anime")
-        case .fantasy: return String(localized: "Fantasy")
+        case .fictional: return String(localized: "Fictional")
         }
     }
 }

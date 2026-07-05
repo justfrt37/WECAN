@@ -29,6 +29,23 @@ private struct ChatRequest: Codable {
     /// true ise cevap sesli mesaj olarak seslendirilecek — sunucu Grok'a
     /// ElevenLabs v3 ses etiketleri (ör. [laughs], [whispers]) eklemesini söyler.
     let voiceChat: Bool?
+    /// true ise Grok'a "az önce fotoğraf gönderdin, istersen kısa bir tepki yaz,
+    /// istemiyorsan [[no_caption]] yaz" talimatı eklenir (bkz. chat-image akışı).
+    let imageReactionChat: Bool?
+    /// Günlük rutinden "şu an ne yapıyor" bloğunun ayrıntılı açıklaması —
+    /// bkz. ChatViewModel.currentActivity, chat/index.ts GÜNLÜK RUTİN notu.
+    let currentActivity: String?
+    /// Özetleme modunda: istemcinin şu an bildiği rutin, sunucu bunu
+    /// gözden geçirip günceller (bkz. generateLocalSummary).
+    let previousSchedule: CharacterSchedule?
+    /// true ise bu bir fotoğraf-indirme tepkisi çağrısıdır — userMessage yok,
+    /// sunucu generated_photos'ta bu url'i arayıp özel/mahrem VE henüz tepki
+    /// verilmemişse Grok'a bir kere tepki yazdırır (bkz. chat/index.ts).
+    let photoDownloadReaction: Bool?
+    let photoURL: String?
+    /// İstemci ScheduleLookup ile hesaplar — gerçek yatma saatine 1 saatten
+    /// yakın mı (bkz. ChatViewModel.send, chat/index.ts sleepRule).
+    let nearSleepTime: Bool?
 }
 
 private struct WireMessage: Codable {
@@ -45,6 +62,8 @@ private struct ChatResponse: Codable {
     let leveledUp: Bool?
     let photoUrl: String?
     let summary: String?   // özetleme modunda döner
+    let schedule: CharacterSchedule?   // özetleme modunda döner (rafine edilmiş rutin)
+    let wentToSleep: Bool?
 }
 
 struct ChatHistory {
@@ -57,6 +76,9 @@ struct ChatReply {
     let reply: String
     let level: Int      // sunucunun sakladığı (istemcinin bir önceki turda gönderdiği) seviye
     let photoURL: URL?
+    /// true ise karakter bu turda gerçekten uyumayı kabul etti (bkz.
+    /// ChatViewModel.send, chat/index.ts classifySleepAgreement).
+    let wentToSleep: Bool
 }
 
 enum ChatServiceError: Error, LocalizedError {
@@ -125,7 +147,8 @@ struct ChatService {
         return ChatReply(
             reply: resp.reply ?? "",
             level: resp.level ?? level,
-            photoURL: resp.photoUrl.flatMap(URL.init(string:))
+            photoURL: resp.photoUrl.flatMap(URL.init(string:)),
+            wentToSleep: resp.wentToSleep ?? false
         )
     }
 
@@ -142,7 +165,10 @@ struct ChatService {
         userMessage: String,
         level: Int,
         lastMessageAt: Date? = nil,
-        voiceChat: Bool = false
+        voiceChat: Bool = false,
+        imageReactionChat: Bool = false,
+        currentActivity: String? = nil,
+        nearSleepTime: Bool = false
     ) async throws -> ChatReply {
         let wireHistory = localMessages
             .filter { $0.imageURL == nil }
@@ -154,13 +180,125 @@ struct ChatService {
             extra: .localHistory(wireHistory, summary: summary.isEmpty ? nil : summary),
             level: level,
             lastMessageAt: lastMessageAt,
-            voiceChat: voiceChat
+            voiceChat: voiceChat,
+            imageReactionChat: imageReactionChat,
+            currentActivity: currentActivity,
+            nearSleepTime: nearSleepTime
         )
         return ChatReply(
             reply: resp.reply ?? "",
             level: resp.level ?? level,
-            photoURL: resp.photoUrl.flatMap(URL.init(string:))
+            photoURL: resp.photoUrl.flatMap(URL.init(string:)),
+            wentToSleep: resp.wentToSleep ?? false
         )
+    }
+
+    private struct ChatImageRequest: Codable {
+        let characterId: String
+        let prompt: String
+        let history: [WireHistoryMessage]
+        let summary: String?
+    }
+
+    private struct ChatImageResponse: Codable {
+        let url: String?
+        let error: String?
+    }
+
+    /// "Send me a photo" modu — kullanıcının tarifinden xAI ile gerçek bir
+    /// fotoğraf üretir (bkz. ChatViewModel.sendImageRequest). `localMessages`/
+    /// `summary` — sohbette daha önce kurulmuş gerçekleri (ör. "laboratuvarda
+    /// çalışıyorum") görsel üretim promptuna taşımak için, `sendWithLocalHistory`
+    /// ile aynı amaçla gönderilir.
+    func generateChatImage(character: Character, prompt: String, localMessages: [Message], summary: String) async throws -> URL {
+        var request = URLRequest(url: Config.chatImageFunctionURL)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let bearer = UserDefaultsManager.shared.accessToken ?? Config.supabaseAnonKey
+        request.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
+        request.setValue(Config.supabaseAnonKey, forHTTPHeaderField: "apikey")
+        let wireHistory = localMessages
+            .filter { $0.imageURL == nil }
+            .suffix(20)
+            .map { WireHistoryMessage(role: $0.role.rawValue, content: $0.content) }
+        request.httpBody = try JSONEncoder().encode(
+            ChatImageRequest(
+                characterId: character.id.uuidString.lowercased(),
+                prompt: prompt,
+                history: wireHistory,
+                summary: summary.isEmpty ? nil : summary
+            )
+        )
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw ChatServiceError.decoding }
+        guard (200..<300).contains(http.statusCode) else {
+            throw ChatServiceError.badStatus(http.statusCode, String(data: data, encoding: .utf8) ?? "")
+        }
+        guard let decoded = try? JSONDecoder().decode(ChatImageResponse.self, from: data),
+              let urlString = decoded.url, let url = URL(string: urlString) else {
+            throw ChatServiceError.decoding
+        }
+        return url
+    }
+
+    /// Fotoğraf indirme tepkisi — sadece indirilen fotoğraf özel/mahrem
+    /// işaretliyse VE daha önce hiç tepki verilmemişse sunucu bir cevap döner
+    /// (bkz. chat/index.ts photoDownloadReaction). `nil` dönerse (foto özel
+    /// değil, ya da zaten bir kere tepki verilmiş) çağıran hiçbir şey yapmaz.
+    func sendPhotoDownloadReaction(
+        character: Character,
+        localMessages: [Message],
+        summary: String,
+        level: Int,
+        photoURL: URL
+    ) async throws -> String? {
+        let wireHistory = localMessages
+            .filter { $0.imageURL == nil }
+            .suffix(20)
+            .map { WireHistoryMessage(role: $0.role.rawValue, content: $0.content) }
+        let resp = try await perform(
+            character: character,
+            userMessage: nil,
+            extra: .photoDownloadReaction(wireHistory, summary: summary.isEmpty ? nil : summary, photoURL: photoURL.absoluteString),
+            level: level
+        )
+        return resp.reply
+    }
+
+    private struct CharacterScheduleRequest: Codable {
+        let characterId: String
+        let systemPrompt: String
+    }
+
+    private struct CharacterScheduleResponse: Codable {
+        let schedule: CharacterSchedule?
+        let error: String?
+    }
+
+    /// İlk günlük rutin üretimi — bkz. ChatViewModel.ensureScheduleGenerated,
+    /// sadece cihazda hiç kayıtlı rutin yokken çağrılır.
+    func generateInitialSchedule(character: Character) async throws -> CharacterSchedule {
+        var request = URLRequest(url: Config.characterScheduleFunctionURL)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let bearer = UserDefaultsManager.shared.accessToken ?? Config.supabaseAnonKey
+        request.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
+        request.setValue(Config.supabaseAnonKey, forHTTPHeaderField: "apikey")
+        request.httpBody = try JSONEncoder().encode(
+            CharacterScheduleRequest(characterId: character.id.uuidString.lowercased(), systemPrompt: character.systemPrompt)
+        )
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw ChatServiceError.decoding }
+        guard (200..<300).contains(http.statusCode) else {
+            throw ChatServiceError.badStatus(http.statusCode, String(data: data, encoding: .utf8) ?? "")
+        }
+        guard let decoded = try? JSONDecoder().decode(CharacterScheduleResponse.self, from: data),
+              let schedule = decoded.schedule else {
+            throw ChatServiceError.decoding
+        }
+        return schedule
     }
 
     /// "Sohbeti Temizle" — sunucudaki conversation/messages satırlarını siler
@@ -173,17 +311,19 @@ struct ChatService {
     func generateLocalSummary(
         character: Character,
         messagesToFold: [Message],
-        existingSummary: String
-    ) async throws -> String {
+        existingSummary: String,
+        previousSchedule: CharacterSchedule?
+    ) async throws -> (summary: String, schedule: CharacterSchedule?) {
         let wire = messagesToFold
             .filter { $0.imageURL == nil }
             .map { WireHistoryMessage(role: $0.role.rawValue, content: $0.content) }
         let resp = try await perform(
             character: character,
             userMessage: nil,
-            extra: .summarize(wire, existing: existingSummary)
+            extra: .summarize(wire, existing: existingSummary),
+            previousSchedule: previousSchedule
         )
-        return resp.summary ?? existingSummary
+        return (resp.summary ?? existingSummary, resp.schedule)
     }
 
     // MARK: - İç yardımcılar
@@ -193,6 +333,7 @@ struct ChatService {
         case clear
         case localHistory([WireHistoryMessage], summary: String?)
         case summarize([WireHistoryMessage], existing: String)
+        case photoDownloadReaction([WireHistoryMessage], summary: String?, photoURL: String)
     }
 
     private func call(character: Character, userMessage: String?, level: Int? = nil, lastMessageAt: Date? = nil) async throws -> ChatResponse {
@@ -210,7 +351,11 @@ struct ChatService {
         extra: RequestExtra = .none,
         level: Int? = nil,
         lastMessageAt: Date? = nil,
-        voiceChat: Bool = false
+        voiceChat: Bool = false,
+        imageReactionChat: Bool = false,
+        currentActivity: String? = nil,
+        previousSchedule: CharacterSchedule? = nil,
+        nearSleepTime: Bool = false
     ) async throws -> ChatResponse {
         var request = URLRequest(url: Config.chatFunctionURL)
         request.httpMethod = "POST"
@@ -224,6 +369,8 @@ struct ChatService {
         var localSummary: String? = nil
         var summarizeMessages: [WireHistoryMessage]? = nil
         var existingSummary: String? = nil
+        var photoDownloadReaction: Bool? = nil
+        var photoURL: String? = nil
 
         switch extra {
         case .none:
@@ -236,6 +383,11 @@ struct ChatService {
         case .summarize(let msgs, let existing):
             summarizeMessages = msgs
             existingSummary = existing
+        case .photoDownloadReaction(let h, let s, let url):
+            clientHistory = h
+            localSummary = s
+            photoDownloadReaction = true
+            photoURL = url
         }
 
         let body = ChatRequest(
@@ -251,7 +403,13 @@ struct ChatService {
             clientNow: Date().timeIntervalSince1970 * 1000,
             tzOffsetMinutes: TimeZone.current.secondsFromGMT() / 60,
             clearConversation: clearConversation,
-            voiceChat: voiceChat
+            voiceChat: voiceChat,
+            imageReactionChat: imageReactionChat,
+            currentActivity: currentActivity,
+            previousSchedule: previousSchedule,
+            photoDownloadReaction: photoDownloadReaction,
+            photoURL: photoURL,
+            nearSleepTime: nearSleepTime
         )
         request.httpBody = try JSONEncoder().encode(body)
 

@@ -4,6 +4,7 @@
 //
 
 import SwiftUI
+import Photos
 
 struct ChatView: View {
     @State private var viewModel: ChatViewModel
@@ -22,6 +23,8 @@ struct ChatView: View {
     @State private var avatarPulse = false
     /// Bir mesaja dokununca saatini göster — tekrar dokununca gizlenir.
     @State private var expandedMessageID: Message.ID?
+    /// Bir foto balonuna dokununca tam ekran açılır.
+    @State private var fullscreenImageURL: URL?
 
     /// Tab içinde gösterilince alttaki tab bar'ın üstünde kalması için boşluk.
     var bottomInset: CGFloat = 0
@@ -29,13 +32,6 @@ struct ChatView: View {
     /// Keşfet'ten "tanışmak ister misin?" onayından geldiyse — mesaj kutusuna
     /// önceden yazılır, kullanıcı düzenleyip gönderebilir (AI'ın kendi selamını değiştirmez).
     var prefillText: String? = nil
-
-    private let quickReplies = [
-        String(localized: "Hey 👋"),
-        String(localized: "What's up? 💕"),
-        String(localized: "I missed you"),
-        String(localized: "What did you do today?")
-    ]
 
     init(character: Character, bottomInset: CGFloat = 0, showsBackButton: Bool = true, prefillText: String? = nil) {
         _viewModel = State(initialValue: ChatViewModel(character: character))
@@ -85,11 +81,24 @@ struct ChatView: View {
                 didPrefill = true
             }
         }
+        .task {
+            await viewModel.startActivityRefreshLoop()
+        }
         .fullScreenCover(isPresented: $showGallery) {
             GalleryView(character: viewModel.character)
         }
         .fullScreenCover(isPresented: $showProfile) {
             CharacterProfileView(character: viewModel.character)
+        }
+        .fullScreenCover(isPresented: Binding(
+            get: { fullscreenImageURL != nil },
+            set: { if !$0 { fullscreenImageURL = nil } }
+        )) {
+            if let url = fullscreenImageURL {
+                FullscreenImageView(url: url, onDismiss: { fullscreenImageURL = nil }) {
+                    viewModel.reactToPrivateDownload(imageURL: url)
+                }
+            }
         }
         .sheet(item: $addSheetKind) { kind in
             AddCharacterNoteSheet(character: viewModel.character, kind: kind)
@@ -143,7 +152,7 @@ struct ChatView: View {
                                 .foregroundStyle(.white)
                             HStack(spacing: 5) {
                                 Circle().fill(Color(hex: 0x4ADE80)).frame(width: 7, height: 7)
-                                Text("Online")
+                                Text(viewModel.currentActivity?.label ?? String(localized: "Online"))
                                     .font(.system(size: 12, weight: .medium))
                                     .foregroundStyle(.white.opacity(0.6))
                             }
@@ -289,12 +298,16 @@ struct ChatView: View {
                             } else if let path = message.voiceLocalPath {
                                 voice.playFile(at: path, id: message.id)
                             }
+                        }, onTapImage: { url in
+                            fullscreenImageURL = url
                         })
                         .id(message.id)
                     }
                     if viewModel.showsTypingBubble {
                         Group {
-                            if viewModel.isSendingVoiceReply {
+                            if viewModel.isSendingImageReply {
+                                ImagePendingIndicator()
+                            } else if viewModel.isSendingVoiceReply {
                                 VoicePendingIndicator()
                             } else {
                                 TypingIndicator()
@@ -326,46 +339,56 @@ struct ChatView: View {
         }
     }
 
-    // MARK: Hızlı yanıtlar
+    // MARK: Mod düğmeleri
 
     private var quickReplyRow: some View {
-        HStack(spacing: 8) {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    ForEach(quickReplies, id: \.self) { reply in
-                        Button {
-                            viewModel.send(reply)
-                        } label: {
-                            Text(reply)
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundStyle(.white.opacity(0.9))
-                                .padding(.horizontal, 14).frame(height: 34)
-                                .background(.white.opacity(0.08), in: Capsule())
-                                .overlay(Capsule().strokeBorder(.white.opacity(0.12), lineWidth: 1))
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(viewModel.isSending || viewModel.isLoadingHistory)
-                    }
-                }
-                .padding(.leading, 14)
+        HStack(spacing: 10) {
+            modeButton(
+                icon: viewModel.isVoiceArmed ? "waveform.circle.fill" : "waveform.circle",
+                label: String(localized: "Send me a voice"),
+                isArmed: viewModel.isVoiceArmed
+            ) {
+                viewModel.isVoiceArmed.toggle()
+                if viewModel.isVoiceArmed { viewModel.isImageArmed = false }
             }
 
-            Button {
-                viewModel.isVoiceArmed.toggle()
-            } label: {
-                Image(systemName: viewModel.isVoiceArmed ? "waveform.circle.fill" : "waveform.circle")
-                    .font(.system(size: 26))
-                    .foregroundStyle(viewModel.isVoiceArmed ? AppColor.pink : .white.opacity(0.6))
+            modeButton(
+                icon: viewModel.isImageArmed ? "camera.circle.fill" : "camera.circle",
+                label: String(localized: "Send me a photo"),
+                isArmed: viewModel.isImageArmed
+            ) {
+                viewModel.isImageArmed.toggle()
+                if viewModel.isImageArmed { viewModel.isVoiceArmed = false }
             }
-            .buttonStyle(.plain)
-            .disabled(viewModel.isSending || viewModel.isLoadingHistory)
-            .padding(.trailing, 14)
         }
+        .padding(.horizontal, 14)
         .padding(.vertical, 8)
         .background(AppColor.card.opacity(0.6))
     }
 
+    private func modeButton(icon: String, label: String, isArmed: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Image(systemName: icon).font(.system(size: 18))
+                Text(label).font(.system(size: 13, weight: .semibold))
+            }
+            .foregroundStyle(isArmed ? AppColor.pink : .white.opacity(0.85))
+            .padding(.horizontal, 14).frame(height: 34)
+            .frame(maxWidth: .infinity)
+            .background(isArmed ? AppColor.pink.opacity(0.15) : .white.opacity(0.08), in: Capsule())
+            .overlay(Capsule().strokeBorder(isArmed ? AppColor.pink.opacity(0.5) : .white.opacity(0.12), lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+        .disabled(viewModel.isSending || viewModel.isLoadingHistory)
+    }
+
     // MARK: Input
+
+    private var inputPlaceholder: String {
+        if viewModel.isImageArmed { return String(localized: "Describe the photo…") }
+        if viewModel.isVoiceArmed { return String(localized: "What do you want to hear?") }
+        return String(localized: "Message…")
+    }
 
     private var inputBar: some View {
         HStack(spacing: 10) {
@@ -373,7 +396,7 @@ struct ChatView: View {
                 Image(systemName: "face.smiling")
                     .font(.system(size: 20)).foregroundStyle(.white.opacity(0.5))
                 TextField("", text: $viewModel.inputText,
-                          prompt: Text("Message…").foregroundColor(.white.opacity(0.4)),
+                          prompt: Text(inputPlaceholder).foregroundColor(.white.opacity(0.4)),
                           axis: .vertical)
                     .foregroundStyle(.white)
                     .lineLimit(1...4)
@@ -390,12 +413,18 @@ struct ChatView: View {
             .padding(.horizontal, 14).frame(minHeight: 46)
             .background(.white.opacity(0.1), in: Capsule())
             .overlay(Capsule().strokeBorder(
-                (recognizer.isRecording || viewModel.isVoiceArmed) ? AppColor.pink.opacity(0.6) : .white.opacity(0.1),
-                lineWidth: viewModel.isVoiceArmed ? 2 : 1
+                (recognizer.isRecording || viewModel.isVoiceArmed || viewModel.isImageArmed) ? AppColor.pink.opacity(0.6) : .white.opacity(0.1),
+                lineWidth: (viewModel.isVoiceArmed || viewModel.isImageArmed) ? 2 : 1
             ))
 
             Button {
-                if viewModel.isVoiceArmed { viewModel.sendVoiceRequest() } else { viewModel.send() }
+                if viewModel.isImageArmed {
+                    viewModel.sendImageRequest()
+                } else if viewModel.isVoiceArmed {
+                    viewModel.sendVoiceRequest()
+                } else {
+                    viewModel.send()
+                }
             } label: {
                 Image(systemName: "paperplane.fill")
                     .font(.system(size: 18, weight: .semibold))
@@ -441,6 +470,7 @@ private struct ChatBubble: View {
     var onSpeak: (() -> Void)? = nil
     var isVoicePlaying: Bool = false
     var onPlayVoice: (() -> Void)? = nil
+    var onTapImage: ((URL) -> Void)? = nil
 
     var body: some View {
         HStack(alignment: .bottom, spacing: 6) {
@@ -454,13 +484,15 @@ private struct ChatBubble: View {
                 VoiceMessageBubble(message: message, isUser: message.isUser, isPlaying: isVoicePlaying, onTap: { onPlayVoice?() })
             } else if let imageURL = message.imageURL {
                 // Foto mesajı (kızın gönderdiği fotoğraf)
+                // 9:16 üretilen fotoğrafla EŞLEŞEN kutu oranı — farklı bir oranda
+                // kutu kullanmak scaledToFill ile görüntünün kırpılmasına yol açar.
                 CachedImage(url: imageURL) { img in
                     img.resizable().scaledToFill()
                 } placeholder: { AppColor.card }
-                .frame(width: 200, height: 280)
+                .frame(width: 180, height: 320)
                 .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                 .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(.white.opacity(0.1), lineWidth: 1))
-                .onTapGesture { onTap?() }
+                .onTapGesture { onTapImage?(imageURL) }
             } else {
                 Text(message.content)
                     .font(.system(size: 15))
@@ -560,5 +592,114 @@ private struct VoicePendingIndicator: View {
 
     private func barHeight(_ index: Int) -> CGFloat {
         [10, 18, 8, 20, 12][index % 5]
+    }
+}
+
+private struct ImagePendingIndicator: View {
+    @State private var pulse = false
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "camera.fill")
+                .font(.system(size: 14))
+                .foregroundStyle(AppColor.pink)
+                .opacity(pulse ? 1 : 0.4)
+            Text("Generating photo…")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(.white.opacity(0.7))
+        }
+        .padding(.horizontal, 14).frame(height: 34)
+        .background(AppColor.card, in: Capsule())
+        .overlay(Capsule().strokeBorder(.white.opacity(0.1), lineWidth: 1))
+        .onAppear {
+            withAnimation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true)) {
+                pulse = true
+            }
+        }
+    }
+}
+
+// MARK: - Foto tam ekran görüntüleyici
+
+private struct FullscreenImageView: View {
+    let url: URL
+    let onDismiss: () -> Void
+    let onDownloaded: () -> Void
+
+    @State private var saveMessage: String?
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            Color.black.ignoresSafeArea()
+
+            CachedImage(url: url) { img in
+                img.resizable().scaledToFit()
+            } placeholder: {
+                ProgressView().tint(.white)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .onTapGesture { onDismiss() }
+
+            HStack(spacing: 10) {
+                Button(action: downloadImage) {
+                    Image(systemName: "square.and.arrow.down")
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 36, height: 36)
+                        .background(.black.opacity(0.5), in: Circle())
+                }
+                Button(action: onDismiss) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 36, height: 36)
+                        .background(.black.opacity(0.5), in: Circle())
+                }
+            }
+            .padding(16)
+
+            if let saveMessage {
+                Text(saveMessage)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 14).padding(.vertical, 8)
+                    .background(.black.opacity(0.7), in: Capsule())
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                    .padding(.bottom, 40)
+                    .allowsHitTesting(false)
+            }
+        }
+    }
+
+    private func downloadImage() {
+        guard let image = ImageCache.shared.image(for: url) else { return }
+        PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
+            DispatchQueue.main.async {
+                guard status == .authorized || status == .limited else {
+                    showSaveMessage("Photo access needed to save")
+                    return
+                }
+                PHPhotoLibrary.shared().performChanges {
+                    PHAssetChangeRequest.creationRequestForAsset(from: image)
+                } completionHandler: { success, _ in
+                    DispatchQueue.main.async {
+                        if success {
+                            showSaveMessage("Saved to Photos")
+                            onDownloaded()
+                        } else {
+                            showSaveMessage("Couldn't save photo")
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func showSaveMessage(_ text: String) {
+        saveMessage = text
+        Task {
+            try? await Task.sleep(nanoseconds: 1_800_000_000)
+            saveMessage = nil
+        }
     }
 }

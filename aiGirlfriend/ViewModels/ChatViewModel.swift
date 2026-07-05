@@ -83,7 +83,21 @@ final class ChatViewModel {
             messages = cached
             hasSyntheticOpening = false
             isLoadingHistory = false
+            // KÖK NEDEN (bkz. XP/seviye sıfırlanma hatası): bu dal SADECE mesajları
+            // geri yüklüyordu, seviyeyi/ilerlemeyi HİÇ diskten okumuyordu — init()'te
+            // atanan `max(1, character.relationshipLevel)` yerinde kalıyordu (o alan
+            // `characters` tablosunun eski/global sütunu, gerçek kullanıcı seviyesi
+            // DEĞİL). ChatListView.load() HER konuşma için chatCache'i önceden
+            // doldurduğundan, sohbet listesinden açılan HER sohbet bu dalı tetikliyor
+            // — yani level neredeyse HER ZAMAN 1'e sıfırlanıyordu, bir sonraki mesajda
+            // da bu yanlış değer updateCache() ile diske kalıcı olarak yazılıyordu.
+            if let stored = LocalConversationStore.shared.load(for: character.id) {
+                relationshipLevel = stored.level
+                levelProgress = stored.levelProgress
+            }
             markReadNow()
+            refreshCurrentActivity()
+            ensureScheduleGenerated()
             return
         }
 
@@ -104,6 +118,8 @@ final class ChatViewModel {
 
         isLoadingHistory = false
         markReadNow()
+        refreshCurrentActivity()
+        ensureScheduleGenerated()
     }
 
     /// Sunucudan tek seferlik geçmiş çekme — cihazda yerel JSON yoksa çalışır.
@@ -163,7 +179,6 @@ final class ChatViewModel {
         let text = (preset ?? inputText).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !isSending, !isLoadingHistory else { return }
 
-        let wantsPhoto = photoRequested(text)
         // Zaman farkındalığı için — yeni mesajı eklemeden ÖNCEki son mesajın zamanı.
         let lastMessageAt = messages.last?.createdAt
         messages.append(Message(role: .user, content: text))
@@ -174,6 +189,7 @@ final class ChatViewModel {
         errorMessage = nil
 
         Task {
+            await handleWakeUpIfAsleep()
             // Balon anında değil, insan gibi kısa bir tereddütten sonra belirir.
             try? await Task.sleep(nanoseconds: UInt64(TypingTiming.randomStartDelay() * 1_000_000_000))
             showsTypingBubble = true
@@ -189,7 +205,9 @@ final class ChatViewModel {
                     summary: stored?.summary ?? "",
                     userMessage: text,
                     level: relationshipLevel,
-                    lastMessageAt: lastMessageAt
+                    lastMessageAt: lastMessageAt,
+                    currentActivity: currentActivity?.detail,
+                    nearSleepTime: isNearSleepTime()
                 )
 
                 // Cevap hazır olsa bile, balon en az "bunu yazmak ne kadar sürerdi"
@@ -203,13 +221,21 @@ final class ChatViewModel {
                 showsTypingBubble = false
                 store?.setTyping(character.id, false)
 
-                let gotPhoto = wantsPhoto ? character.chatPhotos.randomElement() : nil
+                // Eski otomatik-foto sistemi (metinde "foto" geçince statik
+                // havuzdan rastgele fotoğraf ekleme) KALDIRILDI — artık foto/ses
+                // sadece ilgili düğmeyle gönderilir (bkz. MEDIA_REQUEST_RULE,
+                // chat/index.ts). Grok bu turda düğmeyi kullanmasını önerir.
                 messages.append(Message(role: .assistant, content: result.reply))
-                if let gotPhoto {
-                    messages.append(Message(role: .assistant, content: "", imageURL: gotPhoto))
-                }
 
-                applyPostReplyEffects(gotPhoto: gotPhoto, stored: stored)
+                applyPostReplyEffects(gotPhoto: nil, stored: stored)
+
+                if result.wentToSleep {
+                    var updated = LocalConversationStore.shared.load(for: character.id) ?? stored
+                    updated?.manualSleepAt = Date()
+                    updated?.wokenUpAt = nil
+                    if let updated { LocalConversationStore.shared.save(updated, for: character.id) }
+                    NotificationScheduler.shared.cancelSleepyGoodnight(for: character.id)
+                }
             } catch {
                 errorMessage = error.localizedDescription
                 showsTypingBubble = false
@@ -217,6 +243,16 @@ final class ChatViewModel {
             }
             isSending = false
         }
+    }
+
+    /// Gerçek yatma saatine 1 saatten yakın mı (ya da içinde miyiz) — bkz.
+    /// chat/index.ts sleepRule/turnContext. Yerel hesaplanır, ağ çağrısı yok.
+    private func isNearSleepTime() -> Bool {
+        guard let schedule = LocalConversationStore.shared.load(for: character.id)?.schedule else { return false }
+        let now = Date()
+        if ScheduleLookup.currentBlock(schedule: schedule, date: now)?.isSleep == true { return true }
+        guard let nextStart = ScheduleLookup.nextSleepBlockStart(schedule: schedule, from: now) else { return false }
+        return nextStart.timeIntervalSince(now) <= 3600
     }
 
     /// Sesli mesaj isteği bayrağı — `quickReplyRow`'daki dalga formu düğmesiyle
@@ -227,6 +263,20 @@ final class ChatViewModel {
     /// ayırt eder — sesli mesaj beklerken normal "yazıyor" 3-nokta balonuyla
     /// AYNI görünmesin diye (bkz. ChatView.messagesList).
     var isSendingVoiceReply: Bool = false
+
+    /// Fotoğraf isteği bayrağı — `quickReplyRow`'daki kamera düğmesiyle açılır/
+    /// kapanır (bkz. ChatView). `isVoiceArmed` ile karşılıklı dışlayıcı: biri
+    /// açılınca diğeri kapanır, gönder butonu ikisinden en fazla birine yönelir.
+    var isImageArmed: Bool = false
+
+    /// `showsTypingBubble`/pending state ayrımı — fotoğraf üretimi beklenirken
+    /// normal "yazıyor" balonuyla AYNI görünmesin diye (bkz. ChatView.messagesList).
+    var isSendingImageReply: Bool = false
+
+    /// "Şu an ne yapıyor" — ScheduleLookup ile yerelden hesaplanır, ağ
+    /// çağrısı gerektirmez. `nil` = henüz rutin üretilmedi ya da eşleşen
+    /// blok yok (chat header bu durumda "Online" göstermeye devam eder).
+    var currentActivity: (label: String, detail: String)?
 
     /// `send()`'in sesli-mesaj karşılığı: aynı metni gönderir, ama cevap
     /// metin balonu yerine sesli mesaj balonu olarak eklenir. `canSend` ile
@@ -246,6 +296,7 @@ final class ChatViewModel {
         errorMessage = nil
 
         Task {
+            await handleWakeUpIfAsleep()
             try? await Task.sleep(nanoseconds: UInt64(TypingTiming.randomStartDelay() * 1_000_000_000))
             showsTypingBubble = true
             isSendingVoiceReply = true
@@ -262,7 +313,8 @@ final class ChatViewModel {
                     userMessage: text,
                     level: relationshipLevel,
                     lastMessageAt: lastMessageAt,
-                    voiceChat: true
+                    voiceChat: true,
+                    currentActivity: currentActivity?.detail
                 )
 
                 let elapsed = Date().timeIntervalSince(bubbleStartedAt)
@@ -272,7 +324,14 @@ final class ChatViewModel {
                     try? await Task.sleep(nanoseconds: UInt64(remaining * 1_000_000_000))
                 }
 
-                let lang = VoiceLanguage.detect(from: result.reply)
+                // ElevenLabs [tag] işaretleri SADECE seslendirme için — mesajın
+                // kalıcı `content`'ine (yerel geçmiş + özetlemeye giden) asla
+                // ham haliyle sızmamalı, yoksa Grok sonraki DÜZ metin turlarında
+                // kendi geçmişindeki bu işaretleri taklit etmeye başlıyor (bkz.
+                // gotchas_and_fixes — "Elif normal mesaja ses etiketiyle cevap
+                // veriyor" hatası). Dil tespiti de temiz metinle daha güvenilir.
+                let cleanedReply = Self.stripVoiceTags(result.reply)
+                let lang = VoiceLanguage.detect(from: cleanedReply)
                 let messageID = UUID()
                 guard let audioData = await TTSService().synthesizeVoiceMessage(
                     text: result.reply, role: character.personalityRole, vibe: character.vibe, lang: lang,
@@ -292,7 +351,7 @@ final class ChatViewModel {
                 store?.setTyping(character.id, false)
 
                 messages.append(Message(
-                    id: messageID, role: .assistant, content: result.reply,
+                    id: messageID, role: .assistant, content: cleanedReply,
                     voiceLocalPath: savedPath, voiceDuration: duration
                 ))
 
@@ -304,6 +363,109 @@ final class ChatViewModel {
                 store?.setTyping(character.id, false)
             }
             isSending = false
+        }
+    }
+
+    /// `send()`'in fotoğraf-isteği karşılığı: kullanıcının yazdığı tarif metninden
+    /// xAI ile gerçek bir fotoğraf üretir, sonra fotoğraftan SONRA gelen kısa bir
+    /// metin tepkisi ister (bkz. chat/index.ts IMAGE_CAPTION_RULE). GEÇMİŞ: model
+    /// isteğe bağlı bir [[no_caption]] işareti sunulunca neredeyse HER SEFERİNDE
+    /// onu seçiyordu (canlı testte 8/8) — işaret tamamen kaldırıldı, artık her
+    /// zaman gerçek bir tepki üretiliyor.
+    func sendImageRequest() {
+        let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, !isSending, !isLoadingHistory else { return }
+
+        let lastMessageAt = messages.last?.createdAt
+        messages.append(Message(role: .user, content: text))
+        updateCache()
+        NotificationScheduler.shared.noteUserSent(character: character)
+        inputText = ""
+        isImageArmed = false
+        isSending = true
+        errorMessage = nil
+
+        Task {
+            await handleWakeUpIfAsleep()
+            try? await Task.sleep(nanoseconds: UInt64(TypingTiming.randomStartDelay() * 1_000_000_000))
+            showsTypingBubble = true
+            isSendingImageReply = true
+            store?.setTyping(character.id, true)
+
+            do {
+                let stored = LocalConversationStore.shared.load(for: character.id)
+                let photoURL = try await service.generateChatImage(
+                    character: character, prompt: text,
+                    localMessages: realMessages(), summary: stored?.summary ?? ""
+                )
+
+                showsTypingBubble = false
+                isSendingImageReply = false
+                messages.append(Message(role: .assistant, content: "", imageURL: photoURL))
+
+                // İsteğe bağlı metin tepkisi — sırayla, fotoğraftan SONRA gelir.
+                showsTypingBubble = true
+                let bubbleStartedAt = Date()
+                let realMsgs = realMessages()
+                let result = try await service.sendWithLocalHistory(
+                    character: character,
+                    localMessages: realMsgs,
+                    summary: stored?.summary ?? "",
+                    userMessage: text,
+                    level: relationshipLevel,
+                    lastMessageAt: lastMessageAt,
+                    imageReactionChat: true,
+                    currentActivity: currentActivity?.detail
+                )
+
+                let elapsed = Date().timeIntervalSince(bubbleStartedAt)
+                let wanted = TypingTiming.duration(forReplyLength: result.reply.count)
+                let remaining = wanted - elapsed
+                if remaining > 0 {
+                    try? await Task.sleep(nanoseconds: UInt64(remaining * 1_000_000_000))
+                }
+                showsTypingBubble = false
+                store?.setTyping(character.id, false)
+
+                let caption = result.reply.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !caption.isEmpty {
+                    messages.append(Message(role: .assistant, content: caption))
+                }
+
+                applyPostReplyEffects(gotPhoto: photoURL, stored: stored)
+            } catch {
+                errorMessage = error.localizedDescription
+                showsTypingBubble = false
+                isSendingImageReply = false
+                store?.setTyping(character.id, false)
+            }
+            isSending = false
+        }
+    }
+
+    /// Fotoğraf tam ekranda indirilince çağrılır (bkz. ChatView.FullscreenImageView).
+    /// Sunucu foto özel/mahrem işaretli VE daha önce hiç tepki verilmemişse bir
+    /// cevap döner; öbür türlü `nil` döner ve hiçbir şey olmaz. Bu GERÇEK bir
+    /// sohbet turu DEĞİL — XP/seviye etkilenmez, kullanıcı mesajı gösterilmez.
+    func reactToPrivateDownload(imageURL: URL) {
+        Task {
+            let stored = LocalConversationStore.shared.load(for: character.id)
+            // `try?` on an `async throws -> String?` flattens to a single-level
+            // `String?` in Swift 5 (SE-0230) — nil here means either the call
+            // threw OR the server legitimately returned `{ reply: null }`
+            // (not private / already reacted). Both cases are a silent no-op.
+            guard let reply = try? await service.sendPhotoDownloadReaction(
+                character: character,
+                localMessages: realMessages(),
+                summary: stored?.summary ?? "",
+                level: relationshipLevel,
+                photoURL: imageURL
+            ) else { return }
+            let trimmed = reply.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return }
+            messages.append(Message(role: .assistant, content: trimmed))
+            updateCache()
+            store?.conversationsVersion += 1
         }
     }
 
@@ -351,21 +513,98 @@ final class ChatViewModel {
 
         let toFold = Array(real[stored.summarizedCount..<windowStart])
         let existingSummary = stored.summary
+        let previousSchedule = stored.schedule
         let characterId = character.id
 
-        Task.detached(priority: .background) { [service = self.service, character = self.character] in
-            guard let newSummary = try? await service.generateLocalSummary(
+        Task.detached(priority: .background) { [service = self.service, character = self.character, weak self] in
+            guard let result = try? await service.generateLocalSummary(
                 character: character,
                 messagesToFold: toFold,
-                existingSummary: existingSummary
+                existingSummary: existingSummary,
+                previousSchedule: previousSchedule
             ) else { return }
             await MainActor.run {
                 LocalConversationStore.shared.updateSummary(
                     for: characterId,
-                    summary: newSummary,
-                    summarizedCount: windowStart
+                    summary: result.summary,
+                    summarizedCount: windowStart,
+                    schedule: result.schedule
                 )
+                self?.refreshCurrentActivity()
             }
+        }
+    }
+
+    // MARK: - Günlük rutin
+
+    /// Cihazdaki kayıtlı rutine göre "şu an ne yapıyor" bloğunu yerelden
+    /// hesaplar — ağ çağrısı yok, ucuz, her çağrıda güvenle tekrar edilebilir.
+    private func refreshCurrentActivity() {
+        guard let schedule = LocalConversationStore.shared.load(for: character.id)?.schedule,
+              let block = ScheduleLookup.currentBlock(schedule: schedule) else {
+            currentActivity = nil
+            return
+        }
+        currentActivity = (label: block.label, detail: block.detail)
+    }
+
+    /// Karakter şu an efektif olarak uyuyorsa (bkz. CharacterSleepState) VE
+    /// henüz uyandırılmadıysa, mesaj göndermeden hemen ÖNCE gerçekliği taklit
+    /// eden özel bir gecikme akışı çalıştırır: 5sn hiçbir şey değişmez (hâlâ
+    /// uyuyor), sonra durum "Az önce uyandı"ya güncellenir, 5sn daha beklenir,
+    /// SONRA `wokenUpAt` KALICI olarak kaydedilir (bkz. LocalConversationStore
+    /// .Stored) — bir daha bu sohbet açık kaldığı sürece bu gecikme TEKRAR
+    /// ÇALIŞMAZ ("konuşma devam ettiği sürece uyanık kal"). Zaten uyandırılmışsa
+    /// (wokenUpAt != nil) gecikme tamamen atlanır — bu kontrol İLK yapılır,
+    /// çünkü CharacterSleepState.isEffectivelyAsleep zaten wokenUpAt != nil
+    /// olduğunda `false` döner (doğru davranış onun için) ama bu fonksiyonun
+    /// "uyanıkken her mesaj uyku-öncesi zamanlayıcıyı sıfırlasın" gereksinimi
+    /// o predicate'e bağlı kalamaz — aksi halde ikinci mesajdan itibaren hiç
+    /// tetiklenmez (bkz. Task 7 review, bu tam olarak o hatanın düzeltmesi).
+    private func handleWakeUpIfAsleep() async {
+        let stored = LocalConversationStore.shared.load(for: character.id)
+
+        if stored?.wokenUpAt != nil {
+            // Zaten uyandırılmış — gecikmeyi atla, sadece uyku-öncesi
+            // zamanlayıcıyı sıfırla (konuşma devam ettiği sürece uyanık kal).
+            NotificationScheduler.shared.scheduleSleepyGoodnight(for: character, from: Date())
+            return
+        }
+
+        guard CharacterSleepState.isEffectivelyAsleep(stored: stored) else { return }
+
+        try? await Task.sleep(nanoseconds: 5_000_000_000)
+        currentActivity = (
+            label: String(localized: "Just woke up"),
+            detail: "just woke up from being asleep, still a little groggy, texting from bed"
+        )
+        try? await Task.sleep(nanoseconds: 5_000_000_000)
+
+        guard var updated = LocalConversationStore.shared.load(for: character.id) else { return }
+        updated.wokenUpAt = Date()
+        LocalConversationStore.shared.save(updated, for: character.id)
+
+        NotificationScheduler.shared.scheduleSleepyGoodnight(for: character, from: Date())
+    }
+
+    /// Cihazda hiç rutin yoksa (yeni sohbet) arka planda ilk rutini üretir —
+    /// asıl üretim/kaydetme mantığı `ScheduleGenerator`'da (splash'teki toplu
+    /// üretimle paylaşılıyor, bkz. CharacterStore.load). Kullanıcının ilk
+    /// mesajını GECİKTİRMEZ — tamamlanmadan mesaj gönderilirse o tur sadece
+    /// currentActivity bağlamı olmadan devam eder.
+    private func ensureScheduleGenerated() {
+        Task.detached(priority: .background) { [service = self.service, character = self.character, weak self] in
+            await ScheduleGenerator.ensureGenerated(for: character, service: service)
+            await MainActor.run { self?.refreshCurrentActivity() }
+        }
+    }
+
+    /// `ChatView`'in `.task` içinden çağrılır — view kaybolunca SwiftUI
+    /// otomatik iptal eder, elle Timer yönetimine gerek yok.
+    func startActivityRefreshLoop() async {
+        while !Task.isCancelled {
+            refreshCurrentActivity()
+            try? await Task.sleep(nanoseconds: 60_000_000_000)
         }
     }
 
@@ -375,11 +614,14 @@ final class ChatViewModel {
         hasSyntheticOpening ? Array(messages.dropFirst()) : messages
     }
 
-    private func photoRequested(_ text: String) -> Bool {
-        let t = text.lowercased(with: Locale(identifier: "tr_TR"))
-        let keys = ["foto", "fotoğraf", "fotograf", "resim", "selfie", "selfi",
-                    "görsel", "gorsel", "pic", "fotonu", "resmini"]
-        return keys.contains { t.contains($0) }
+    /// ElevenLabs v3 ses etiketlerini ([laughs], [whispers] vb.) metinden
+    /// temizler — TTS'e giden ham metinde kalmalı, ama kalıcı `content`'e asla
+    /// sızmamalı (bkz. sendVoiceRequest).
+    private static func stripVoiceTags(_ text: String) -> String {
+        let stripped = text.replacingOccurrences(of: #"\[[^\]]*\]"#, with: "", options: .regularExpression)
+        return stripped
+            .replacingOccurrences(of: #"[ \t]{2,}"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func updateCache(msgCounter: Int? = nil) {
@@ -398,7 +640,10 @@ final class ChatViewModel {
             detectedLanguage: ConversationLanguage.resolve(
                 latestAssistantText: real.last(where: { $0.role == .assistant })?.content,
                 previouslyDetected: stored?.detectedLanguage
-            )
+            ),
+            schedule: stored?.schedule,
+            wokenUpAt: stored?.wokenUpAt,
+            manualSleepAt: stored?.manualSleepAt
         )
         LocalConversationStore.shared.save(updated, for: character.id)
     }

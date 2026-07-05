@@ -10,6 +10,7 @@ struct GalleryView: View {
     let character: Character
     @Environment(\.dismiss) private var dismiss
     @State private var showPaywall = false
+    @State private var yourPhotos: [URL] = []
 
     // Kilitli grid için galeri resimleri (şimdilik feed fotosu tekrar eder).
     private var lockedImages: [URL] {
@@ -32,6 +33,7 @@ struct GalleryView: View {
             ScrollView {
                 VStack(spacing: 24) {
                     heroCard
+                    yourPhotosSection
                     section
                 }
                 .padding(.horizontal, 16)
@@ -42,6 +44,9 @@ struct GalleryView: View {
             proCTA
         }
         .sheet(isPresented: $showPaywall) { PaywallHostView() }
+        .task {
+            yourPhotos = (try? await GeneratedPhotoService().fetch(characterId: character.id)) ?? []
+        }
     }
 
     // MARK: Hero kart
@@ -109,6 +114,42 @@ struct GalleryView: View {
                 .foregroundStyle(.white)
                 .frame(width: 36, height: 36)
                 .background(AppColor.bg.opacity(0.7), in: Circle())
+        }
+    }
+
+    // MARK: Senin Fotoğrafların
+
+    @ViewBuilder
+    private var yourPhotosSection: some View {
+        if !yourPhotos.isEmpty {
+            VStack(alignment: .leading, spacing: 16) {
+                HStack(spacing: 8) {
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 15))
+                        .foregroundStyle(AppColor.pink)
+                    Text("Your Photos")
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundStyle(.white)
+                    Spacer()
+                    Text("\(yourPhotos.count) photos")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.5))
+                }
+
+                LazyVGrid(columns: columns, spacing: 13) {
+                    ForEach(yourPhotos, id: \.self) { url in
+                        CachedImage(url: url) { image in
+                            image.resizable().scaledToFill()
+                        } placeholder: {
+                            AppColor.card
+                        }
+                        .frame(height: 200)
+                        .frame(maxWidth: .infinity)
+                        .clipped()
+                        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    }
+                }
+            }
         }
     }
 
