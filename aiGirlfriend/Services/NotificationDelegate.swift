@@ -106,11 +106,15 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
 
         guard navigate else { return }
 
-        // Level-up dışındaki bot bildirimleri sadece Sohbetler sekmesine
-        // yönlendirir — doğrudan o botun sohbetini açmaz.
-        if kind == .levelUp {
+        // Level-up dışındaki bot bildirimleri sadece ilgili sekmeye yönlendirir —
+        // doğrudan o botun sohbetini açmaz. "Liked You" artık Beğeniler
+        // sekmesine gider (bkz. LikedByStore/LikesView), diğerleri Sohbetler'e.
+        switch kind {
+        case .levelUp:
             store.pendingMeetRequest = MeetRequest(character: character, prefillText: "")
-        } else {
+        case .liked:
+            store.pendingTab = .likes
+        case .ghosted, .jealousy:
             store.pendingTab = .chat
         }
     }

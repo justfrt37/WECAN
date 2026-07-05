@@ -16,8 +16,30 @@ struct LikesView: View {
 
     private let columns = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
 
-    /// Seni beğenen karakterler (şimdilik katalogdan).
-    private var likers: [Character] { store.characters }
+    /// Seni gerçekten beğenen karakterler (bkz. LikedByStore — günde bir kere
+    /// rastgele seçilir, bkz. NotificationScheduler.rescheduleLikedYou).
+    /// Kullanıcı GERÇEKTEN cevap yazınca listeden düşer — botun ilk açılış
+    /// mesajı enjekte edilir edilmez değil, yoksa kullanıcı fark etmeden kaybolur.
+    private var likers: [Character] {
+        let likedIDs: Set<UUID> = LikedByStore.likedCharacterIDs()
+        let candidates: [Character] = store.characters.filter { likedIDs.contains($0.id) }
+        let visible: [Character] = candidates.filter { c in
+            !hasUserReplied(to: c.id) && !BlockedCharactersStore.isBlocked(c.id)
+        }
+        return visible.sorted { a, b in
+            let aDate: Date = LikedByStore.likedAt(a.id) ?? .distantPast
+            let bDate: Date = LikedByStore.likedAt(b.id) ?? .distantPast
+            return aDate > bDate
+        }
+    }
+
+    private func hasUserReplied(to characterID: UUID) -> Bool {
+        LocalConversationStore.shared.load(for: characterID)?.messages.contains { $0.role == .user } ?? false
+    }
+
+    private func isNewToday(_ characterID: UUID) -> Bool {
+        LikedByStore.likedAt(characterID).map { Calendar.current.isDateInToday($0) } ?? false
+    }
 
     var body: some View {
         ZStack {
@@ -27,16 +49,20 @@ struct LikesView: View {
 
             VStack(spacing: 0) {
                 header
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 14) {
-                        infoRow
-                        grid
+                if likers.isEmpty {
+                    emptyState
+                } else {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 14) {
+                            infoRow
+                            grid
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.top, 8)
+                        .padding(.bottom, 100)
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.top, 8)
-                    .padding(.bottom, 100)
+                    .scrollIndicators(.hidden)
                 }
-                .scrollIndicators(.hidden)
             }
         }
         .fullScreenCover(item: $profileCharacter) { CharacterProfileView(character: $0) }
@@ -76,16 +102,34 @@ struct LikesView: View {
 
     private var grid: some View {
         LazyVGrid(columns: columns, spacing: 12) {
-            ForEach(Array(likers.enumerated()), id: \.element.id) { idx, c in
+            ForEach(likers) { c in
                 Button {
                     if isPro { profileCharacter = c }
                 } label: {
                     LikeCard(character: c, locked: !isPro,
-                             badge: idx == 0 ? "NEW" : (idx == 1 ? "PRO" : nil))
+                             badge: isNewToday(c.id) ? "NEW" : nil)
                 }
                 .buttonStyle(.plain)
             }
         }
+    }
+
+    private var emptyState: some View {
+        VStack(spacing: 14) {
+            Image(systemName: "heart.slash.fill")
+                .font(.system(size: 50))
+                .foregroundStyle(AppColor.pink.opacity(0.85))
+            Text("No new likes yet")
+                .font(.title3.bold())
+                .foregroundStyle(.white)
+            Text("Check back soon — someone new likes you once a day 💕")
+                .font(.subheadline)
+                .multilineTextAlignment(.center)
+                .foregroundStyle(.white.opacity(0.6))
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.top, 60)
+        .padding(.horizontal, 32)
     }
 }
 

@@ -28,24 +28,25 @@ final class NotificationScheduler {
         (Self.roleIntervalHours[role] ?? Self.roleIntervalHours["flirty"]!) * 3600
     }
 
-    // MARK: - Liked You (twice daily, untalked catalog bots)
+    // MARK: - Liked You (once daily, untalked catalog bots, persisted in LikedByStore)
 
     private static let likedYouIDPrefix = "notif.liked."
 
+    /// Günde bir kere çağrılır (bkz. LikedByStore.hasPickedToday) — seçilen bot
+    /// LikedByStore'a kalıcı olarak eklenir (bkz. LikesView), bir daha asla
+    /// tekrar seçilmez. Zaten seçilmiş botlar `eligible`den hariç tutulur.
     func rescheduleLikedYou(characters: [Character]) {
-        center.removePendingNotificationRequests(withIdentifiers: [
-            Self.likedYouIDPrefix + "0", Self.likedYouIDPrefix + "1"
-        ])
+        guard !LikedByStore.hasPickedToday() else { return }
+        center.removePendingNotificationRequests(withIdentifiers: [Self.likedYouIDPrefix + "0"])
+        let alreadyLiked = LikedByStore.likedCharacterIDs()
         let eligible = characters.filter { character in
             character.createdBy == nil &&
-            LocalConversationStore.shared.load(for: character.id) == nil
+            LocalConversationStore.shared.load(for: character.id) == nil &&
+            !alreadyLiked.contains(character.id)
         }
-        guard let bot1 = eligible.randomElement() else { return }
-        scheduleLikedYou(bot: bot1, slotIndex: 0, hour: 13)
-
-        let remaining = eligible.filter { $0.id != bot1.id }
-        let bot2 = remaining.randomElement() ?? bot1
-        scheduleLikedYou(bot: bot2, slotIndex: 1, hour: 21)
+        guard let bot = eligible.randomElement() else { return }
+        LikedByStore.recordLike(bot.id)
+        scheduleLikedYou(bot: bot, slotIndex: 0, hour: 13)
     }
 
     private func scheduleLikedYou(bot: Character, slotIndex: Int, hour: Int) {
