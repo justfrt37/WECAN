@@ -380,8 +380,16 @@ final class ChatViewModel {
                 showsTypingBubble = false
                 store?.setTyping(character.id, false)
 
-                let caption = result.reply.trimmingCharacters(in: .whitespacesAndNewlines)
-                if caption != "[[no_caption]]" && !caption.isEmpty {
+                // Tam eşleşme kontrolü riskli — Grok talimatı harfiyen izlemeyip
+                // işaretin etrafına ekstra metin koyarsa (ör. noktalama), ham
+                // "[[no_caption]]" balonun içine sızabilirdi (bkz. ses etiketi
+                // sızıntısı hatasıyla aynı kök neden). `contains` + ayıklama.
+                let rawCaption = result.reply.trimmingCharacters(in: .whitespacesAndNewlines)
+                let noCaption = rawCaption.contains("[[no_caption]]")
+                let caption = rawCaption
+                    .replacingOccurrences(of: "[[no_caption]]", with: "")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                if !noCaption && !caption.isEmpty {
                     messages.append(Message(role: .assistant, content: caption))
                 }
 

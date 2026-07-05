@@ -407,8 +407,8 @@ struct ChatView: View {
             .padding(.horizontal, 14).frame(minHeight: 46)
             .background(.white.opacity(0.1), in: Capsule())
             .overlay(Capsule().strokeBorder(
-                (recognizer.isRecording || viewModel.isVoiceArmed) ? AppColor.pink.opacity(0.6) : .white.opacity(0.1),
-                lineWidth: viewModel.isVoiceArmed ? 2 : 1
+                (recognizer.isRecording || viewModel.isVoiceArmed || viewModel.isImageArmed) ? AppColor.pink.opacity(0.6) : .white.opacity(0.1),
+                lineWidth: (viewModel.isVoiceArmed || viewModel.isImageArmed) ? 2 : 1
             ))
 
             Button {
