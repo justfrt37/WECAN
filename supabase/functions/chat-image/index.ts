@@ -65,6 +65,18 @@ const NO_TEXT_RULE =
   "The image must contain absolutely no text, letters, numbers, captions, " +
   "subtitles, watermarks, logos, or writing of any kind anywhere in the frame.";
 
+// Tight framing (ceiling lights/door frames/furniture awkwardly clipped at the
+// very top or side edge, near-zero headroom above the head) reads as "cropped"
+// even when the display container's aspect ratio is mathematically correct —
+// this got reported as a crop bug when it was actually a composition problem.
+const FRAMING_RULE =
+  "The output canvas is a TALL VERTICAL 9:16 frame (like a phone photo/story). " +
+  "Compose for that shape: leave natural headroom above the subject's head, " +
+  "and choose a pose/crop (e.g. waist-up, three-quarter, or full-body) that " +
+  "fits the vertical frame comfortably. Never awkwardly clip background " +
+  "objects (ceiling lights, door frames, furniture, signs) right at the edge " +
+  "of the frame — either include them fully or leave them out of the shot.";
+
 function appearanceContext(opts: {
   name: string;
   profession: string | null;
@@ -239,7 +251,7 @@ async function composeImagePrompt(opts: {
     "(not full sentences):\n\n" +
     fieldGuidance +
     "\nAspect ratio and resolution are already fixed elsewhere by the caller — " +
-    `do not mention them in any field. ${NO_TEXT_RULE}\n\n` +
+    `do not mention them in any field. ${NO_TEXT_RULE} ${FRAMING_RULE}\n\n` +
     "Calibration example of the required format and level of specificity " +
     "(different photo, for format reference only — do not reuse its content):\n" +
     FIELD_FORMAT_EXAMPLE +
