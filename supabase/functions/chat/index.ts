@@ -296,12 +296,17 @@ function userIdFromJWT(authHeader: string | null): string | null {
   }
 }
 
-async function callGrok(messages: WireMessage[], maxTokens: number): Promise<string> {
+// `convId` (pass the conversationId) routes repeat requests to the same xAI
+// server for cache locality — required for prompt caching to actually hit
+// (see docs.x.ai/developers/advanced-api-usage/prompt-caching). Omitted for
+// one-off calls (summarization) where there's no stable prefix to cache anyway.
+async function callGrok(messages: WireMessage[], maxTokens: number, convId?: string): Promise<string> {
   const resp = await fetch(XAI_URL, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${XAI_API_KEY}`,
+      ...(convId ? { "x-grok-conv-id": convId } : {}),
     },
     body: JSON.stringify({
       model: MODEL,
@@ -531,7 +536,8 @@ Deno.serve(async (req: Request) => {
           { role: "system", content: reactionSystem },
           { role: "user", content: "[The user just saved this photo to their device.]" },
         ],
-        200
+        200,
+        conversationId
       );
 
       await db.from("generated_photos").update({ reacted: true }).eq("id", photoRow.id);
@@ -573,7 +579,6 @@ Deno.serve(async (req: Request) => {
     system += VARIATION_RULE;
     system += CONTINUITY_RULE;
     system += humorDirective(currentLevel);
-    system += timeContext(lastMessageAt, clientNow, tzOffsetMinutes);
     if (voiceChat) {
       system += VOICE_TAGS_RULE;
     }
@@ -589,14 +594,21 @@ Deno.serve(async (req: Request) => {
     if (!voiceChat && !imageReactionChat) {
       system += MEDIA_REQUEST_RULE;
     }
+    if (!useClientHistory && convo.summary && convo.summary.trim() !== "") {
+      system += `\n\n[Önceki konuşmalarınızın özeti]\n${stripVoiceTags(convo.summary)}`;
+    }
+
+    // ÖNEMLİ (prompt caching): timeContext/currentActivity HER turda değişir —
+    // system prompt'un İÇİNDE kalsalardı xAI'nin prefix-cache'i hiç tutmazdı
+    // (system, mesaj dizisinin İLK elemanı — tek bir farklı token bile tüm
+    // prefix eşleşmesini bozar). Bu yüzden system'i SABİT tutup, bunun yerine
+    // SON kullanıcı mesajına ekleniyorlar — o mesaj zaten her turda yeni.
+    let turnContext = timeContext(lastMessageAt, clientNow, tzOffsetMinutes);
     if (currentActivity) {
-      system += `\n\n[GÜNLÜK RUTİN] Şu anda: ${currentActivity}. Ton ve ` +
+      turnContext += `\n\n[GÜNLÜK RUTİN] Şu anda: ${currentActivity}. Ton ve ` +
         `müsaitliğini buna doğal şekilde yansıt (ör. işteyken kısa/dikkati ` +
         `dağınık, evde rahatken daha uzun sohbet edebilirsin) ama bunu her ` +
         `mesajda birebir tekrarlama.`;
-    }
-    if (!useClientHistory && convo.summary && convo.summary.trim() !== "") {
-      system += `\n\n[Önceki konuşmalarınızın özeti]\n${stripVoiceTags(convo.summary)}`;
     }
 
     // === CEVAP MODU ===
@@ -621,10 +633,10 @@ Deno.serve(async (req: Request) => {
     const grokMessages: WireMessage[] = [
       { role: "system", content: system },
       ...recent,
-      { role: "user", content: userMessage! },
+      { role: "user", content: userMessage! + turnContext },
     ];
 
-    const reply = await callGrok(grokMessages, 600);
+    const reply = await callGrok(grokMessages, 600, conversationId);
 
     // 4) Mesajları kaydet — clientHistory modunda istemci kendi saklıyor, DB'ye yazma
     if (!useClientHistory) {
