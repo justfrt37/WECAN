@@ -641,7 +641,9 @@ final class ChatViewModel {
                 latestAssistantText: real.last(where: { $0.role == .assistant })?.content,
                 previouslyDetected: stored?.detectedLanguage
             ),
-            schedule: stored?.schedule
+            schedule: stored?.schedule,
+            wokenUpAt: stored?.wokenUpAt,
+            manualSleepAt: stored?.manualSleepAt
         )
         LocalConversationStore.shared.save(updated, for: character.id)
     }
