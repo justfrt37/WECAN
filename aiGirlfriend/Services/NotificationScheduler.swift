@@ -224,6 +224,30 @@ final class NotificationScheduler {
         ])
     }
 
+    // MARK: - Bedtime Announcement (daily, level >= 5, real schedule sleep-start)
+
+    private static func bedtimeID(for characterID: UUID) -> String { "notif.bedtime.\(characterID.uuidString)" }
+
+    /// Daily, per-character — level ≥5 only (proactive announcement, gated per
+    /// product decision; the idle-timeout goodnight in scheduleSleepyGoodnight
+    /// is level-independent since it's user-triggered, not proactive).
+    func rescheduleBedtime(characters: [Character]) {
+        for character in characters {
+            let id = Self.bedtimeID(for: character.id)
+            guard !BlockedCharactersStore.isBlocked(character.id),
+                  let stored = LocalConversationStore.shared.load(for: character.id),
+                  stored.level >= 5,
+                  let schedule = stored.schedule,
+                  let fireAt = ScheduleLookup.nextSleepBlockStart(schedule: schedule)
+            else {
+                center.removePendingNotificationRequests(withIdentifiers: [id])
+                continue
+            }
+            center.removePendingNotificationRequests(withIdentifiers: [id])
+            scheduleOneShot(id: id, kind: .bedtime, characterID: character.id, characterName: character.name, fireAt: fireAt)
+        }
+    }
+
     // MARK: - Tap-handling glue
 
     func recordDelivery(kind: NotificationKind, characterID: UUID) {
@@ -246,6 +270,7 @@ final class NotificationScheduler {
             self?.rescheduleLikedYou(characters: characters)
             self?.rescheduleGhosted(characters: characters)
             self?.armJealousyTimer(characters: characters)
+            self?.rescheduleBedtime(characters: characters)
         }
     }
 
