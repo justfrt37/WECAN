@@ -98,10 +98,22 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
             line = JealousyContent.randomLine(language: language, role: character.personalityRole, vibe: character.vibe)
         case .levelUp:
             line = nil
+        case .sleepyQuestion:
+            line = SleepyContent.question(language: language)
+        case .sleepyGoodbye, .bedtime:
+            line = SleepyContent.goodbye(language: language)
         }
 
         if let line {
             injectMessage(line, for: characterID)
+        }
+
+        // .sleepyGoodbye reverts the character to genuinely asleep — clear the
+        // wake-override so CharacterSleepState.isEffectivelyAsleep is true again.
+        if kind == .sleepyGoodbye {
+            var stored = LocalConversationStore.shared.load(for: characterID)
+            stored?.wokenUpAt = nil
+            if let stored { LocalConversationStore.shared.save(stored, for: characterID) }
         }
 
         guard navigate else { return }
@@ -114,7 +126,7 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
             store.pendingMeetRequest = MeetRequest(character: character, prefillText: "")
         case .liked:
             store.pendingTab = .likes
-        case .ghosted, .jealousy:
+        case .ghosted, .jealousy, .sleepyQuestion, .sleepyGoodbye, .bedtime:
             store.pendingTab = .chat
         }
     }
