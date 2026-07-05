@@ -494,28 +494,15 @@ final class ChatViewModel {
         currentActivity = (label: block.label, detail: block.detail)
     }
 
-    /// Cihazda hiç rutin yoksa (yeni sohbet) arka planda ilk rutini üretir.
-    /// Kullanıcının ilk mesajını GECİKTİRMEZ — tamamlanmadan mesaj gönderilirse
-    /// o tur sadece currentActivity bağlamı olmadan devam eder. Diğer
-    /// Task.detached kullanan metotlarla aynı desen: ihtiyaç duyulan değerler
-    /// ÖNCEDEN çıkarılır, `self` background task içine güçlü referansla
-    /// sızmaz — sadece son UI-yenileme adımında `weak self` ile dokunulur.
+    /// Cihazda hiç rutin yoksa (yeni sohbet) arka planda ilk rutini üretir —
+    /// asıl üretim/kaydetme mantığı `ScheduleGenerator`'da (splash'teki toplu
+    /// üretimle paylaşılıyor, bkz. CharacterStore.load). Kullanıcının ilk
+    /// mesajını GECİKTİRMEZ — tamamlanmadan mesaj gönderilirse o tur sadece
+    /// currentActivity bağlamı olmadan devam eder.
     private func ensureScheduleGenerated() {
-        guard LocalConversationStore.shared.load(for: character.id)?.schedule == nil else { return }
-        let characterId = character.id
-        let fallbackLevel = relationshipLevel
-        let fallbackProgress = levelProgress
         Task.detached(priority: .background) { [service = self.service, character = self.character, weak self] in
-            guard let schedule = try? await service.generateInitialSchedule(character: character) else { return }
-            await MainActor.run {
-                var stored = LocalConversationStore.shared.load(for: characterId) ?? LocalConversationStore.Stored(
-                    messages: [], xp: 0, level: fallbackLevel, summary: "", summarizedCount: 0,
-                    levelProgress: fallbackProgress
-                )
-                stored.schedule = schedule
-                LocalConversationStore.shared.save(stored, for: characterId)
-                self?.refreshCurrentActivity()
-            }
+            await ScheduleGenerator.ensureGenerated(for: character, service: service)
+            await MainActor.run { self?.refreshCurrentActivity() }
         }
     }
 

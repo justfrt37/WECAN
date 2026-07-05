@@ -16,6 +16,9 @@ struct CharacterProfileView: View {
     /// eski/global bir alan olduğu için (bkz. gotchas), cihazdaki yerel depodan okunur.
     @State private var userLevel: Int = 1
     @State private var userLevelProgress: Double = 0
+    /// Chat header'ındakiyle aynı yerel hesap (bkz. ChatViewModel.currentActivity) —
+    /// bu view kendi ChatViewModel'ini paylaşmadığı için ayrıca hesaplanır.
+    @State private var currentActivity: (label: String, detail: String)?
 
     private var images: [URL] {
         character.galleryURLs.isEmpty
@@ -64,6 +67,9 @@ struct CharacterProfileView: View {
             if let stored = LocalConversationStore.shared.load(for: character.id) {
                 userLevel = stored.level
                 userLevelProgress = stored.levelProgress
+                if let schedule = stored.schedule, let block = ScheduleLookup.currentBlock(schedule: schedule) {
+                    currentActivity = (label: block.label, detail: block.detail)
+                }
             } else {
                 userLevel = max(1, character.relationshipLevel)
                 userLevelProgress = 0
@@ -131,7 +137,7 @@ struct CharacterProfileView: View {
                 }
                 HStack(spacing: 6) {
                     Circle().fill(Color(hex: 0x4ECB71)).frame(width: 8, height: 8)
-                    Text(character.profession ?? character.locationText ?? "")
+                    Text(currentActivity?.label ?? character.locationText ?? String(localized: "Online"))
                         .font(.system(size: 14, weight: .medium))
                         .foregroundStyle(.white.opacity(0.8))
                 }
@@ -199,6 +205,11 @@ struct CharacterProfileView: View {
                 .font(.system(size: 13, weight: .bold))
                 .tracking(0.5)
                 .foregroundStyle(.white.opacity(0.8))
+            if let profession = character.profession {
+                Text(profession)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(AppColor.pinkSoft)
+            }
             Text(character.tagline)
                 .font(.system(size: 15, weight: .medium))
                 .lineSpacing(4)

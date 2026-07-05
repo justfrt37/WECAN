@@ -82,6 +82,14 @@ final class CharacterStore {
         await ImageCache.shared.prefetch(Array(Set(urls)))
 
         isLoaded = true
+
+        // Günlük rutinleri arka planda toplu üret — kullanıcı hiçbir sohbeti
+        // AÇMADAN önce, splash'i bekletmeden (fire-and-forget). Böylece ilk
+        // kez bir sohbete girince zaten "Online" yerine gerçek aktiviteyi görür.
+        let charactersSnapshot = characters
+        Task.detached(priority: .background) {
+            await ScheduleGenerator.prewarmAll(characters: charactersSnapshot)
+        }
     }
 
     private func loadCachedCharacters() -> [Character]? {
