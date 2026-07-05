@@ -30,13 +30,6 @@ struct ChatView: View {
     /// önceden yazılır, kullanıcı düzenleyip gönderebilir (AI'ın kendi selamını değiştirmez).
     var prefillText: String? = nil
 
-    private let quickReplies = [
-        String(localized: "Hey 👋"),
-        String(localized: "What's up? 💕"),
-        String(localized: "I missed you"),
-        String(localized: "What did you do today?")
-    ]
-
     init(character: Character, bottomInset: CGFloat = 0, showsBackButton: Bool = true, prefillText: String? = nil) {
         _viewModel = State(initialValue: ChatViewModel(character: character))
         _isBlocked = State(initialValue: BlockedCharactersStore.isBlocked(character.id))
@@ -294,7 +287,9 @@ struct ChatView: View {
                     }
                     if viewModel.showsTypingBubble {
                         Group {
-                            if viewModel.isSendingVoiceReply {
+                            if viewModel.isSendingImageReply {
+                                ImagePendingIndicator()
+                            } else if viewModel.isSendingVoiceReply {
                                 VoicePendingIndicator()
                             } else {
                                 TypingIndicator()
@@ -326,43 +321,47 @@ struct ChatView: View {
         }
     }
 
-    // MARK: Hızlı yanıtlar
+    // MARK: Mod düğmeleri
 
     private var quickReplyRow: some View {
-        HStack(spacing: 8) {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    ForEach(quickReplies, id: \.self) { reply in
-                        Button {
-                            viewModel.send(reply)
-                        } label: {
-                            Text(reply)
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundStyle(.white.opacity(0.9))
-                                .padding(.horizontal, 14).frame(height: 34)
-                                .background(.white.opacity(0.08), in: Capsule())
-                                .overlay(Capsule().strokeBorder(.white.opacity(0.12), lineWidth: 1))
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(viewModel.isSending || viewModel.isLoadingHistory)
-                    }
-                }
-                .padding(.leading, 14)
+        HStack(spacing: 10) {
+            modeButton(
+                icon: viewModel.isVoiceArmed ? "waveform.circle.fill" : "waveform.circle",
+                label: String(localized: "Send me a voice"),
+                isArmed: viewModel.isVoiceArmed
+            ) {
+                viewModel.isVoiceArmed.toggle()
+                if viewModel.isVoiceArmed { viewModel.isImageArmed = false }
             }
 
-            Button {
-                viewModel.isVoiceArmed.toggle()
-            } label: {
-                Image(systemName: viewModel.isVoiceArmed ? "waveform.circle.fill" : "waveform.circle")
-                    .font(.system(size: 26))
-                    .foregroundStyle(viewModel.isVoiceArmed ? AppColor.pink : .white.opacity(0.6))
+            modeButton(
+                icon: viewModel.isImageArmed ? "camera.circle.fill" : "camera.circle",
+                label: String(localized: "Send me a photo"),
+                isArmed: viewModel.isImageArmed
+            ) {
+                viewModel.isImageArmed.toggle()
+                if viewModel.isImageArmed { viewModel.isVoiceArmed = false }
             }
-            .buttonStyle(.plain)
-            .disabled(viewModel.isSending || viewModel.isLoadingHistory)
-            .padding(.trailing, 14)
         }
+        .padding(.horizontal, 14)
         .padding(.vertical, 8)
         .background(AppColor.card.opacity(0.6))
+    }
+
+    private func modeButton(icon: String, label: String, isArmed: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Image(systemName: icon).font(.system(size: 18))
+                Text(label).font(.system(size: 13, weight: .semibold))
+            }
+            .foregroundStyle(isArmed ? AppColor.pink : .white.opacity(0.85))
+            .padding(.horizontal, 14).frame(height: 34)
+            .frame(maxWidth: .infinity)
+            .background(isArmed ? AppColor.pink.opacity(0.15) : .white.opacity(0.08), in: Capsule())
+            .overlay(Capsule().strokeBorder(isArmed ? AppColor.pink.opacity(0.5) : .white.opacity(0.12), lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+        .disabled(viewModel.isSending || viewModel.isLoadingHistory)
     }
 
     // MARK: Input
@@ -373,7 +372,8 @@ struct ChatView: View {
                 Image(systemName: "face.smiling")
                     .font(.system(size: 20)).foregroundStyle(.white.opacity(0.5))
                 TextField("", text: $viewModel.inputText,
-                          prompt: Text("Message…").foregroundColor(.white.opacity(0.4)),
+                          prompt: Text(viewModel.isImageArmed ? "Describe the photo…" : "Message…")
+                            .foregroundColor(.white.opacity(0.4)),
                           axis: .vertical)
                     .foregroundStyle(.white)
                     .lineLimit(1...4)
@@ -395,7 +395,13 @@ struct ChatView: View {
             ))
 
             Button {
-                if viewModel.isVoiceArmed { viewModel.sendVoiceRequest() } else { viewModel.send() }
+                if viewModel.isImageArmed {
+                    viewModel.sendImageRequest()
+                } else if viewModel.isVoiceArmed {
+                    viewModel.sendVoiceRequest()
+                } else {
+                    viewModel.send()
+                }
             } label: {
                 Image(systemName: "paperplane.fill")
                     .font(.system(size: 18, weight: .semibold))
@@ -560,5 +566,29 @@ private struct VoicePendingIndicator: View {
 
     private func barHeight(_ index: Int) -> CGFloat {
         [10, 18, 8, 20, 12][index % 5]
+    }
+}
+
+private struct ImagePendingIndicator: View {
+    @State private var pulse = false
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "camera.fill")
+                .font(.system(size: 14))
+                .foregroundStyle(AppColor.pink)
+                .opacity(pulse ? 1 : 0.4)
+            Text("Generating photo…")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(.white.opacity(0.7))
+        }
+        .padding(.horizontal, 14).frame(height: 34)
+        .background(AppColor.card, in: Capsule())
+        .overlay(Capsule().strokeBorder(.white.opacity(0.1), lineWidth: 1))
+        .onAppear {
+            withAnimation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true)) {
+                pulse = true
+            }
+        }
     }
 }
