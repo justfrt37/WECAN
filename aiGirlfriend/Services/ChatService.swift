@@ -32,6 +32,12 @@ private struct ChatRequest: Codable {
     /// true ise Grok'a "az önce fotoğraf gönderdin, istersen kısa bir tepki yaz,
     /// istemiyorsan [[no_caption]] yaz" talimatı eklenir (bkz. chat-image akışı).
     let imageReactionChat: Bool?
+    /// Günlük rutinden "şu an ne yapıyor" bloğunun ayrıntılı açıklaması —
+    /// bkz. ChatViewModel.currentActivity, chat/index.ts GÜNLÜK RUTİN notu.
+    let currentActivity: String?
+    /// Özetleme modunda: istemcinin şu an bildiği rutin, sunucu bunu
+    /// gözden geçirip günceller (bkz. generateLocalSummary).
+    let previousSchedule: CharacterSchedule?
 }
 
 private struct WireMessage: Codable {
@@ -48,6 +54,7 @@ private struct ChatResponse: Codable {
     let leveledUp: Bool?
     let photoUrl: String?
     let summary: String?   // özetleme modunda döner
+    let schedule: CharacterSchedule?   // özetleme modunda döner (rafine edilmiş rutin)
 }
 
 struct ChatHistory {
@@ -146,7 +153,8 @@ struct ChatService {
         level: Int,
         lastMessageAt: Date? = nil,
         voiceChat: Bool = false,
-        imageReactionChat: Bool = false
+        imageReactionChat: Bool = false,
+        currentActivity: String? = nil
     ) async throws -> ChatReply {
         let wireHistory = localMessages
             .filter { $0.imageURL == nil }
@@ -159,7 +167,8 @@ struct ChatService {
             level: level,
             lastMessageAt: lastMessageAt,
             voiceChat: voiceChat,
-            imageReactionChat: imageReactionChat
+            imageReactionChat: imageReactionChat,
+            currentActivity: currentActivity
         )
         return ChatReply(
             reply: resp.reply ?? "",
@@ -217,6 +226,41 @@ struct ChatService {
         return url
     }
 
+    private struct CharacterScheduleRequest: Codable {
+        let characterId: String
+        let systemPrompt: String
+    }
+
+    private struct CharacterScheduleResponse: Codable {
+        let schedule: CharacterSchedule?
+        let error: String?
+    }
+
+    /// İlk günlük rutin üretimi — bkz. ChatViewModel.ensureScheduleGenerated,
+    /// sadece cihazda hiç kayıtlı rutin yokken çağrılır.
+    func generateInitialSchedule(character: Character) async throws -> CharacterSchedule {
+        var request = URLRequest(url: Config.characterScheduleFunctionURL)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let bearer = UserDefaultsManager.shared.accessToken ?? Config.supabaseAnonKey
+        request.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
+        request.setValue(Config.supabaseAnonKey, forHTTPHeaderField: "apikey")
+        request.httpBody = try JSONEncoder().encode(
+            CharacterScheduleRequest(characterId: character.id.uuidString.lowercased(), systemPrompt: character.systemPrompt)
+        )
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw ChatServiceError.decoding }
+        guard (200..<300).contains(http.statusCode) else {
+            throw ChatServiceError.badStatus(http.statusCode, String(data: data, encoding: .utf8) ?? "")
+        }
+        guard let decoded = try? JSONDecoder().decode(CharacterScheduleResponse.self, from: data),
+              let schedule = decoded.schedule else {
+            throw ChatServiceError.decoding
+        }
+        return schedule
+    }
+
     /// "Sohbeti Temizle" — sunucudaki conversation/messages satırlarını siler
     /// (cascade ile memories de gider). İstemci ayrıca kendi yerel kopyasını temizler.
     func clearConversation(character: Character) async throws {
@@ -227,17 +271,19 @@ struct ChatService {
     func generateLocalSummary(
         character: Character,
         messagesToFold: [Message],
-        existingSummary: String
-    ) async throws -> String {
+        existingSummary: String,
+        previousSchedule: CharacterSchedule?
+    ) async throws -> (summary: String, schedule: CharacterSchedule?) {
         let wire = messagesToFold
             .filter { $0.imageURL == nil }
             .map { WireHistoryMessage(role: $0.role.rawValue, content: $0.content) }
         let resp = try await perform(
             character: character,
             userMessage: nil,
-            extra: .summarize(wire, existing: existingSummary)
+            extra: .summarize(wire, existing: existingSummary),
+            previousSchedule: previousSchedule
         )
-        return resp.summary ?? existingSummary
+        return (resp.summary ?? existingSummary, resp.schedule)
     }
 
     // MARK: - İç yardımcılar
@@ -265,7 +311,9 @@ struct ChatService {
         level: Int? = nil,
         lastMessageAt: Date? = nil,
         voiceChat: Bool = false,
-        imageReactionChat: Bool = false
+        imageReactionChat: Bool = false,
+        currentActivity: String? = nil,
+        previousSchedule: CharacterSchedule? = nil
     ) async throws -> ChatResponse {
         var request = URLRequest(url: Config.chatFunctionURL)
         request.httpMethod = "POST"
@@ -307,7 +355,9 @@ struct ChatService {
             tzOffsetMinutes: TimeZone.current.secondsFromGMT() / 60,
             clearConversation: clearConversation,
             voiceChat: voiceChat,
-            imageReactionChat: imageReactionChat
+            imageReactionChat: imageReactionChat,
+            currentActivity: currentActivity,
+            previousSchedule: previousSchedule
         )
         request.httpBody = try JSONEncoder().encode(body)
 

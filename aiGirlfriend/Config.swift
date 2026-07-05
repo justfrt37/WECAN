@@ -38,4 +38,9 @@ enum Config {
     static var chatImageFunctionURL: URL {
         URL(string: "\(supabaseURL)/functions/v1/chat-image")!
     }
+
+    /// Karakterin ilk günlük rutinini üretir (bkz. ChatViewModel.ensureScheduleGenerated).
+    static var characterScheduleFunctionURL: URL {
+        URL(string: "\(supabaseURL)/functions/v1/character-schedule")!
+    }
 }
