@@ -424,6 +424,32 @@ final class ChatViewModel {
         }
     }
 
+    /// Fotoğraf tam ekranda indirilince çağrılır (bkz. ChatView.FullscreenImageView).
+    /// Sunucu foto özel/mahrem işaretli VE daha önce hiç tepki verilmemişse bir
+    /// cevap döner; öbür türlü `nil` döner ve hiçbir şey olmaz. Bu GERÇEK bir
+    /// sohbet turu DEĞİL — XP/seviye etkilenmez, kullanıcı mesajı gösterilmez.
+    func reactToPrivateDownload(imageURL: URL) {
+        Task {
+            let stored = LocalConversationStore.shared.load(for: character.id)
+            // `try?` on an `async throws -> String?` flattens to a single-level
+            // `String?` in Swift 5 (SE-0230) — nil here means either the call
+            // threw OR the server legitimately returned `{ reply: null }`
+            // (not private / already reacted). Both cases are a silent no-op.
+            guard let reply = try? await service.sendPhotoDownloadReaction(
+                character: character,
+                localMessages: realMessages(),
+                summary: stored?.summary ?? "",
+                level: relationshipLevel,
+                photoURL: imageURL
+            ) else { return }
+            let trimmed = reply.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return }
+            messages.append(Message(role: .assistant, content: trimmed))
+            updateCache()
+            store?.conversationsVersion += 1
+        }
+    }
+
     /// `send()` ve `sendVoiceRequest()` ortak kuyruğu: XP/terfi hesabı,
     /// cache güncelleme, özetleme tetikleme. `gotPhoto` sesli mesaj yolunda
     /// her zaman nil (fotoğraf isteği metin mesajlarına özgü).
