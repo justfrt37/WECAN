@@ -83,6 +83,18 @@ final class ChatViewModel {
             messages = cached
             hasSyntheticOpening = false
             isLoadingHistory = false
+            // KÖK NEDEN (bkz. XP/seviye sıfırlanma hatası): bu dal SADECE mesajları
+            // geri yüklüyordu, seviyeyi/ilerlemeyi HİÇ diskten okumuyordu — init()'te
+            // atanan `max(1, character.relationshipLevel)` yerinde kalıyordu (o alan
+            // `characters` tablosunun eski/global sütunu, gerçek kullanıcı seviyesi
+            // DEĞİL). ChatListView.load() HER konuşma için chatCache'i önceden
+            // doldurduğundan, sohbet listesinden açılan HER sohbet bu dalı tetikliyor
+            // — yani level neredeyse HER ZAMAN 1'e sıfırlanıyordu, bir sonraki mesajda
+            // da bu yanlış değer updateCache() ile diske kalıcı olarak yazılıyordu.
+            if let stored = LocalConversationStore.shared.load(for: character.id) {
+                relationshipLevel = stored.level
+                levelProgress = stored.levelProgress
+            }
             markReadNow()
             refreshCurrentActivity()
             ensureScheduleGenerated()
