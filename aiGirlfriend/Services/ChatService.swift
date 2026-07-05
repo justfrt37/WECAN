@@ -29,6 +29,9 @@ private struct ChatRequest: Codable {
     /// true ise cevap sesli mesaj olarak seslendirilecek — sunucu Grok'a
     /// ElevenLabs v3 ses etiketleri (ör. [laughs], [whispers]) eklemesini söyler.
     let voiceChat: Bool?
+    /// true ise Grok'a "az önce fotoğraf gönderdin, istersen kısa bir tepki yaz,
+    /// istemiyorsan [[no_caption]] yaz" talimatı eklenir (bkz. chat-image akışı).
+    let imageReactionChat: Bool?
 }
 
 private struct WireMessage: Codable {
@@ -142,7 +145,8 @@ struct ChatService {
         userMessage: String,
         level: Int,
         lastMessageAt: Date? = nil,
-        voiceChat: Bool = false
+        voiceChat: Bool = false,
+        imageReactionChat: Bool = false
     ) async throws -> ChatReply {
         let wireHistory = localMessages
             .filter { $0.imageURL == nil }
@@ -154,13 +158,49 @@ struct ChatService {
             extra: .localHistory(wireHistory, summary: summary.isEmpty ? nil : summary),
             level: level,
             lastMessageAt: lastMessageAt,
-            voiceChat: voiceChat
+            voiceChat: voiceChat,
+            imageReactionChat: imageReactionChat
         )
         return ChatReply(
             reply: resp.reply ?? "",
             level: resp.level ?? level,
             photoURL: resp.photoUrl.flatMap(URL.init(string:))
         )
+    }
+
+    private struct ChatImageRequest: Codable {
+        let characterId: String
+        let prompt: String
+    }
+
+    private struct ChatImageResponse: Codable {
+        let url: String?
+        let error: String?
+    }
+
+    /// "Send me a photo" modu — kullanıcının tarifinden xAI ile gerçek bir
+    /// fotoğraf üretir (bkz. ChatViewModel.sendImageRequest).
+    func generateChatImage(character: Character, prompt: String) async throws -> URL {
+        var request = URLRequest(url: Config.chatImageFunctionURL)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let bearer = UserDefaultsManager.shared.accessToken ?? Config.supabaseAnonKey
+        request.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
+        request.setValue(Config.supabaseAnonKey, forHTTPHeaderField: "apikey")
+        request.httpBody = try JSONEncoder().encode(
+            ChatImageRequest(characterId: character.id.uuidString.lowercased(), prompt: prompt)
+        )
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw ChatServiceError.decoding }
+        guard (200..<300).contains(http.statusCode) else {
+            throw ChatServiceError.badStatus(http.statusCode, String(data: data, encoding: .utf8) ?? "")
+        }
+        guard let decoded = try? JSONDecoder().decode(ChatImageResponse.self, from: data),
+              let urlString = decoded.url, let url = URL(string: urlString) else {
+            throw ChatServiceError.decoding
+        }
+        return url
     }
 
     /// "Sohbeti Temizle" — sunucudaki conversation/messages satırlarını siler
@@ -210,7 +250,8 @@ struct ChatService {
         extra: RequestExtra = .none,
         level: Int? = nil,
         lastMessageAt: Date? = nil,
-        voiceChat: Bool = false
+        voiceChat: Bool = false,
+        imageReactionChat: Bool = false
     ) async throws -> ChatResponse {
         var request = URLRequest(url: Config.chatFunctionURL)
         request.httpMethod = "POST"
@@ -251,7 +292,8 @@ struct ChatService {
             clientNow: Date().timeIntervalSince1970 * 1000,
             tzOffsetMinutes: TimeZone.current.secondsFromGMT() / 60,
             clearConversation: clearConversation,
-            voiceChat: voiceChat
+            voiceChat: voiceChat,
+            imageReactionChat: imageReactionChat
         )
         request.httpBody = try JSONEncoder().encode(body)
 
