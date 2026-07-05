@@ -80,6 +80,9 @@ struct ChatView: View {
                 didPrefill = true
             }
         }
+        .task {
+            await viewModel.startActivityRefreshLoop()
+        }
         .fullScreenCover(isPresented: $showGallery) {
             GalleryView(character: viewModel.character)
         }
@@ -146,7 +149,7 @@ struct ChatView: View {
                                 .foregroundStyle(.white)
                             HStack(spacing: 5) {
                                 Circle().fill(Color(hex: 0x4ADE80)).frame(width: 7, height: 7)
-                                Text("Online")
+                                Text(viewModel.currentActivity?.label ?? String(localized: "Online"))
                                     .font(.system(size: 12, weight: .medium))
                                     .foregroundStyle(.white.opacity(0.6))
                             }
