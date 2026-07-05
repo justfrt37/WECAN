@@ -104,7 +104,8 @@ struct ChatListView: View {
 
             let last: LastMessage? = displayMessages.last.map {
                 LastMessage(conversationID: conv.id, content: $0.content,
-                            role: $0.role.rawValue, createdAt: Self.iso8601.string(from: $0.createdAt))
+                            role: $0.role.rawValue, createdAt: Self.iso8601.string(from: $0.createdAt),
+                            kind: $0.imageURL != nil ? "image" : "text")
             }
             return ChatItem(character: ch, conversationID: conv.id,
                             last: last, unread: unread, updatedAt: conv.updatedAt)
@@ -317,7 +318,12 @@ private struct ChatHistoryRow: View {
                 .foregroundStyle(AppColor.pink)
         } else if let last = item.last {
             Group {
-                if last.isUser {
+                if last.isImage {
+                    HStack(spacing: 4) {
+                        Image(systemName: "camera.fill")
+                        Text(last.isUser ? "You: \(String(localized: "Image"))" : String(localized: "Image"))
+                    }
+                } else if last.isUser {
                     Text("You: \(last.content)")
                 } else {
                     Text(last.content)

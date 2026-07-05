@@ -23,8 +23,13 @@ struct LastMessage: Codable {
     let content: String
     let role: String
     let createdAt: String
+    /// "text" | "image" — DB `messages.kind` sütunuyla aynı. Yerel (cihaz)
+    /// mesajlarından türetilirken `Message.imageURL` varlığına göre elle
+    /// set edilir (bkz. ChatListView.load()).
+    let kind: String?
 
     var isUser: Bool { role == "user" }
+    var isImage: Bool { kind == "image" }
 
     var date: Date? {
         let f = ISO8601DateFormatter()
@@ -32,9 +37,17 @@ struct LastMessage: Codable {
         return f.date(from: createdAt) ?? ISO8601DateFormatter().date(from: createdAt)
     }
 
+    init(conversationID: UUID, content: String, role: String, createdAt: String, kind: String? = nil) {
+        self.conversationID = conversationID
+        self.content = content
+        self.role = role
+        self.createdAt = createdAt
+        self.kind = kind
+    }
+
     private enum CodingKeys: String, CodingKey {
         case conversationID = "conversation_id"
-        case content, role
+        case content, role, kind
         case createdAt = "created_at"
     }
 }
@@ -48,7 +61,7 @@ struct ConversationsService {
 
     /// Tüm mesajlar (RLS ile yalnızca kullanıcınınki), en yeni üstte.
     func fetchAllMessages() async -> [LastMessage] {
-        let url = "\(Config.supabaseURL)/rest/v1/messages?select=conversation_id,content,role,created_at&order=created_at.desc"
+        let url = "\(Config.supabaseURL)/rest/v1/messages?select=conversation_id,content,role,created_at,kind&order=created_at.desc"
         return await get(url) ?? []
     }
 
