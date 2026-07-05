@@ -94,9 +94,26 @@ const FIELD_FORMAT_EXAMPLE =
   "leaning slightly forward\n" +
   "LOCATION: Bedroom at night, messy bed in background, clothes on chair";
 
-// Gerçekçi (Realistic / kayıt yok = varsayılan) kategori için alan-bazlı
-// talimat — telefon modeli, cilt dokusu, ISO/grain, flaş CAMERA DETAILS'a girer.
-function realisticFieldGuidance(hasBaseline: boolean): string {
+// ÖNEMLİ: composeImagePrompt'taki Grok çağrısı SALT METİN — baseline referans
+// fotoğrafı GÖRMÜYOR (vision değil, chat/completions metin çağrısı). Bu yüzden
+// stil kararı ("gerçekçi mi, anime mi kalsın") ASLA "resme bak" diye modele
+// bırakılmaz — DB'deki gerçek `category` alanına göre DETERMİNİSTİK seçilir.
+// Baseline sadece YÜZ/KARAKTER TUTARLILIĞI için ek bir not olarak eklenir —
+// asıl görsel-görsel eşleşmeyi zaten /v1/images/edits'e giden GERÇEK referans
+// görsel (bkz. fetchGeneratedImageBytes) sağlıyor, metin bunu SÖYLEMEZ, sadece
+// modelin o tutarlılığı bozacak çelişkili detaylar yazmamasını sağlar.
+function baselineConsistencyNote(): string {
+  return (
+    "\nA baseline reference image of this exact character is separately " +
+    "attached to the image generator (you cannot see it, but it will be used " +
+    "for face/hair/character-design consistency) — do not describe a " +
+    "different face, hairstyle, or character design than what's implied above; " +
+    "only change the expression, outfit, pose, and location per the user's " +
+    "request.\n"
+  );
+}
+
+function realisticFieldGuidance(): string {
   return (
     "CAMERA DETAILS: default to \"Shot on iPhone 17 Pro Max\" unless the mood " +
     "calls for something else (e.g. a disposable camera with direct on-camera " +
@@ -118,19 +135,11 @@ function realisticFieldGuidance(hasBaseline: boolean): string {
     "POSE: exactly how the character is positioned — where their arms and legs " +
     "are, their posture, what they're looking at.\n" +
     "LOCATION: the specific background and setting — be concrete about what's " +
-    "visible around the character.\n" +
-    (hasBaseline
-      ? "A baseline reference photo of this exact person is attached — keep the " +
-        "same face, hair, and skin tone as the reference; only change SUBJECT's " +
-        "expression, OUTFIT, POSE, and LOCATION per the user's request.\n"
-      : "")
+    "visible around the character.\n"
   );
 }
 
-// Anime/Fantasy/Sci-Fi kategorileri için aynı 6 alan, ama CAMERA DETAILS
-// yerine sanat stili/render tekniği; fotoğraf-gerçekçiliği (telefon/ISO/flaş)
-// burada geçerli değil.
-function styledFieldGuidance(category: string, hasBaseline: boolean): string {
+function styledFieldGuidance(category: string): string {
   const styleCue: Record<string, string> = {
     Anime: "clean anime illustration line art, vibrant cel-shaded coloring, detailed shading",
     Fantasy: "fantasy digital painting, magical atmosphere, painterly brushwork detail",
@@ -148,12 +157,7 @@ function styledFieldGuidance(category: string, hasBaseline: boolean): string {
     "visualize — infer something fitting if the user didn't specify.\n" +
     "POSE: exactly how the character is positioned — where their arms and legs " +
     "are, their posture, what they're looking at.\n" +
-    "LOCATION: the specific background and setting.\n" +
-    (hasBaseline
-      ? "A baseline reference image of this exact character is attached — keep " +
-        "the same face, hair, and outfit style as the reference; only change " +
-        "SUBJECT's expression, OUTFIT, POSE, and LOCATION per the user's request.\n"
-      : "")
+    "LOCATION: the specific background and setting.\n"
   );
 }
 
@@ -177,10 +181,14 @@ async function composeImagePrompt(opts: {
   userPrompt: string;
   hasBaseline: boolean;
 }): Promise<string> {
+  // Stil kararı HER ZAMAN gerçek `category` alanından — bir görseli hiç
+  // görmeyen metin modeline "resme bak, stilini anla" diye bırakılmaz (bkz.
+  // baselineConsistencyNote üstteki not). Baseline sadece ek bir tutarlılık
+  // notu olarak eklenir.
   const isRealistic = opts.category !== "Anime" && opts.category !== "Fantasy" && opts.category !== "Sci-Fi";
-  const fieldGuidance = isRealistic
-    ? realisticFieldGuidance(opts.hasBaseline)
-    : styledFieldGuidance(opts.category, opts.hasBaseline);
+  const fieldGuidance =
+    (isRealistic ? realisticFieldGuidance() : styledFieldGuidance(opts.category)) +
+    (opts.hasBaseline ? baselineConsistencyNote() : "");
 
   const systemPrompt =
     "You are a professional photo director writing the exact prompt that will be " +
@@ -191,6 +199,11 @@ async function composeImagePrompt(opts: {
     "generator to infer or guess. Every field below must contain concrete, " +
     "specific details, exactly as concrete as the calibration example further " +
     "down.\n\n" +
+    "PRIORITY RULE: if the user's request explicitly specifies a detail for any " +
+    "field (an exact outfit, pose, location, camera/lighting style, etc.), use " +
+    "exactly what they specified for that field — do not change, substitute, or " +
+    "reinterpret it. Only invent details for the fields (or parts of fields) the " +
+    "user left unspecified.\n\n" +
     "Structure the final prompt using EXACTLY these six labeled fields, each on " +
     "its own line, each followed by short comma-separated descriptive phrases " +
     "(not full sentences):\n\n" +
@@ -297,7 +310,7 @@ Deno.serve(async (req: Request) => {
 
     const { data: character, error: charErr } = await db
       .from("characters")
-      .select("name, profession, tagline, builder_selections, photo_url, avatar_url")
+      .select("name, profession, tagline, category, builder_selections, photo_url, avatar_url")
       .eq("id", characterId)
       .maybeSingle();
     if (charErr || !character) return json({ error: "character not found" }, 400);
@@ -305,7 +318,9 @@ Deno.serve(async (req: Request) => {
     // "Most of the time use the profile picture" — karakterin mevcut fotoğrafı
     // varsa image-to-image baseline olarak kullanılır (bkz. fetchGeneratedImageBytes).
     const baselineImageUrl: string | null = character.photo_url || character.avatar_url || null;
-    const category: string = character.builder_selections?.category ?? "Realistic";
+    // `category` katalog karakterlerinde ÜST SEVİYE bir kolon (builder_selections
+    // yalnızca kullanıcı-yaratımı karakterlerde dolu) — bkz. architecture_db.
+    const category: string = character.category ?? character.builder_selections?.category ?? "Realistic";
 
     let photoUrl: string;
     try {
