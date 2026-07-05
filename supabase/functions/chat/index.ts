@@ -159,6 +159,20 @@ const MEDIA_REQUEST_RULE =
   "dokunmasını öner (düğmenin adını birebir tekrarlamak zorunda değilsin, " +
   "doğal bir şekilde ima et — ör. \"o düğmeye bas da göndereyim\" gibi).";
 
+// Fires once per photo, only the first time a private/intimate generated
+// photo is downloaded (server checks generated_photos.reacted — see the
+// photoDownloadReaction branch below). Written in English per project
+// convention for instructional prompts.
+const PHOTO_DOWNLOAD_REACTION_RULE =
+  "\n\n[PHOTO DOWNLOAD REACTION] The user just downloaded a private/intimate " +
+  "photo of you to their own device. Write ONE short, natural, in-character " +
+  "reaction to this — a cute, genuine complaint or tease about it (e.g. " +
+  "concern about it being shared, playful mock-offense, flustered teasing) — " +
+  "whatever actually fits your personality and how close you are with the " +
+  "user right now. Reason this out yourself in the moment; never reuse a " +
+  "fixed template line, and never sound robotic or like a canned response. " +
+  "Output ONLY the reaction line itself, nothing else.";
+
 // Belirli kalıp cümleleri yasaklamak (blocklist) işe yaramıyor — model yine de
 // onları üretebiliyor (negatif talimatlar LLM'lerde güvenilir değil). Bunun yerine
 // modele NİYET/DUYGU seviyesinde düşünmesini ve o niyeti her seferinde doğal,
@@ -385,8 +399,8 @@ Deno.serve(async (req: Request) => {
     const imageReactionChat: boolean = body.imageReactionChat === true;
     // Cevap dili — kullanıcının kendi metninden deterministik tespit edilir
     // (bkz. detectReplyLanguage), modelin fark edip geçmesine güvenilmiyor.
-    const detectedLanguage = userMessage
-      ? detectReplyLanguage(userMessage, clientHistory)
+    const detectedLanguage = (userMessage || body.photoDownloadReaction === true)
+      ? detectReplyLanguage(userMessage ?? "", clientHistory)
       : null;
     // Günlük rutin (bkz. character-schedule fonksiyonu) — istemci "şu an ne
     // yapıyor" bloğunun `detail` metnini gönderir, burada tona yansıtılır.
@@ -462,6 +476,67 @@ Deno.serve(async (req: Request) => {
         xp: convo.xp ?? 0,
         level: convo.relationship_level ?? 1,
       });
+    }
+
+    // === FOTOĞRAF İNDİRME TEPKİSİ MODU (photoDownloadReaction: true) ===
+    // Kullanıcı özel/mahrem işaretli bir fotoğrafı cihazına indirdi. userMessage
+    // YOK — bu gerçek bir sohbet turu değil, XP/seviye/mesaj geçmişi etkilenmez.
+    if (body.photoDownloadReaction === true) {
+      const photoURL: string = body.photoURL;
+      if (!photoURL) return json({ reply: null });
+
+      const { data: photoRow } = await db
+        .from("generated_photos")
+        .select("id, is_private, reacted")
+        .eq("url", photoURL)
+        .eq("user_id", uid)
+        .maybeSingle();
+
+      if (!photoRow || !photoRow.is_private || photoRow.reacted) {
+        return json({ reply: null });
+      }
+
+      const reactionLevel: number = convo.relationship_level ?? 1;
+      const reactionDirective = await fetchDirective(characterId, personalityRole, reactionLevel);
+      let reactionSystem = systemPrompt;
+      reactionSystem += `\n\n${reactionDirective}`;
+      if (exHistory) {
+        reactionSystem += `\n\n[SHARED HISTORY — reference these memories naturally in conversation]\n${exHistory}`;
+      }
+
+      const { data: reactionMemoryRows } = await db
+        .from("memories")
+        .select("content")
+        .eq("conversation_id", conversationId)
+        .order("created_at", { ascending: true });
+      const { data: reactionBehaviorRows } = await db
+        .from("conversation_behaviors")
+        .select("content")
+        .eq("conversation_id", conversationId)
+        .order("created_at", { ascending: true });
+      if (reactionMemoryRows && reactionMemoryRows.length > 0) {
+        reactionSystem += `\n\n[MEMORIES — facts to remember about the user/relationship]\n` +
+          reactionMemoryRows.map((m) => `- ${m.content}`).join("\n");
+      }
+      if (reactionBehaviorRows && reactionBehaviorRows.length > 0) {
+        reactionSystem += `\n\n[BEHAVIOR PREFERENCES — how the user wants you to act]\n` +
+          reactionBehaviorRows.map((b) => `- ${b.content}`).join("\n");
+      }
+
+      reactionSystem += languageDirective(detectedLanguage);
+      reactionSystem += PHOTO_DOWNLOAD_REACTION_RULE;
+
+      const reactionReply = await callGrok(
+        [
+          { role: "system", content: reactionSystem },
+          { role: "user", content: "[The user just saved this photo to their device.]" },
+        ],
+        200
+      );
+
+      await db.from("generated_photos").update({ reacted: true }).eq("id", photoRow.id);
+
+      return json({ reply: reactionReply });
     }
 
     // === CEVAP MODU: sistem promptunu hazırla ===
