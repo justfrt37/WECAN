@@ -31,6 +31,29 @@ enum ScheduleLookup {
         return nil
     }
 
+    /// Karakterin GERÇEK programına göre bir sonraki uyku bloğunun başlangıç
+    /// anı — bugün henüz gelmediyse bugün, geldiyse (ya da yoksa) ileriki
+    /// günlere bakar (en fazla bir hafta ileri, sonsuz döngüye girmesin diye).
+    /// Bkz. NotificationScheduler.rescheduleBedtime.
+    static func nextSleepBlockStart(
+        schedule: CharacterSchedule,
+        from: Date = Date(),
+        calendar: Calendar = .current
+    ) -> Date? {
+        for dayOffset in 0..<8 {
+            guard let candidateDay = calendar.date(byAdding: .day, value: dayOffset, to: from) else { continue }
+            let blocks = calendar.isDateInWeekend(candidateDay) ? schedule.weekend : schedule.weekday
+            let starts: [Date] = blocks.compactMap { block -> Date? in
+                guard block.isSleep, let startMinutes = minutesFromHHmm(block.start) else { return nil }
+                return calendar.date(
+                    bySettingHour: startMinutes / 60, minute: startMinutes % 60, second: 0, of: candidateDay
+                )
+            }.filter { $0 > from }
+            if let earliest = starts.min() { return earliest }
+        }
+        return nil
+    }
+
     private static func minutesFromHHmm(_ s: String) -> Int? {
         let parts = s.split(separator: ":")
         guard parts.count == 2, let h = Int(parts[0]), let m = Int(parts[1]) else { return nil }
