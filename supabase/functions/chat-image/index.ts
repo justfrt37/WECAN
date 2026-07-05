@@ -101,11 +101,18 @@ function appearanceContext(opts: {
 // çalışıyorum") sadece cihaz-yerel geçmişte var olabilir — istemci bunu
 // `history`/`summary` olarak gönderirse burada kullanılır. YOKSA composer bu
 // tür detayları TAHMİN ETMEK ZORUNDA kalır (bkz. LOCATION alan talimatı).
+function stripVoiceTags(text: string): string {
+  return text.replace(/\[[^\]]*\]/g, "").replace(/[ \t]{2,}/g, " ").trim();
+}
+
 function conversationContext(history: { role: string; content: string }[], summary: string | null): string {
   const parts: string[] = [];
-  if (summary && summary.trim()) parts.push(summary.trim());
+  // Ses etiketleri ([laughs] vb.) bu prompta sızarsa, yönetmen bunları gerçek
+  // sahne detayı sanıp SUBJECT/POSE alanlarına yanlışlıkla sızdırabilir —
+  // aynı temizleme chat/index.ts'de de var (bkz. oradaki stripVoiceTags notu).
+  if (summary && summary.trim()) parts.push(stripVoiceTags(summary));
   if (history.length > 0) {
-    parts.push(history.slice(-12).map((m) => `${m.role === "user" ? "User" : "Character"}: ${m.content}`).join("\n"));
+    parts.push(history.slice(-12).map((m) => `${m.role === "user" ? "User" : "Character"}: ${stripVoiceTags(m.content)}`).join("\n"));
   }
   if (parts.length === 0) return "";
   return (

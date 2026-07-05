@@ -42,6 +42,18 @@ const db = createClient(SUPABASE_URL, SERVICE_ROLE, {
 
 interface WireMessage { role: string; content: string }
 
+// İstemci tarafındaki temizleme (bkz. ChatViewModel.stripVoiceTags) sadece
+// BUNDAN SONRA yazılan yeni mesajları korur — halihazırda cihazda/summary'de
+// duran eski [laughs]/[whispers] etiketli içerik (fix'ten ÖNCE kaydedilmiş,
+// ya da istemci henüz rebuild edilmemiş) prompta girmeye devam eder ve Grok
+// düz metin turlarında bu deseni taklit etmeyi sürdürür. Bu yüzden sunucu,
+// prompta giren HER kaynağı (clientHistory, localSummary, DB geçmişi/özeti,
+// özetleme girişi) burada da savunma amaçlı temizler — geriye dönük veriyi
+// göç ettirmeye gerek kalmadan sızıntıyı kökten keser.
+function stripVoiceTags(text: string): string {
+  return text.replace(/\[[^\]]*\]/g, "").replace(/[ \t]{2,}/g, " ").trim();
+}
+
 // ─────────────────────────── İlişki seviyesi ───────────────────────────
 // XP terfi hesabı (eskiden burada) artık istemcide — bkz. RelationshipXP.swift.
 // Sunucu SADECE `conversations.relationship_level` değerini saklar/döner:
@@ -315,7 +327,7 @@ Deno.serve(async (req: Request) => {
     // Kullanıcı karakterleri her 20 mesajda bir bunu tetikler.
     if (Array.isArray(body.summarizeMessages) && body.summarizeMessages.length > 0) {
       const convoText = (body.summarizeMessages as WireMessage[])
-        .map((m) => `${m.role === "user" ? "Kullanıcı" : "Sen"}: ${m.content}`)
+        .map((m) => `${m.role === "user" ? "Kullanıcı" : "Sen"}: ${stripVoiceTags(m.content)}`)
         .join("\n");
       const summaryPrompt: WireMessage[] = [
         {
@@ -334,7 +346,7 @@ Deno.serve(async (req: Request) => {
         {
           role: "user",
           content:
-            `Önceki özet:\n${body.existingSummary || "(yok)"}\n\n` +
+            `Önceki özet:\n${body.existingSummary ? stripVoiceTags(body.existingSummary) : "(yok)"}\n\n` +
             `Yeni konuşma:\n${convoText}\n\nGüncellenmiş özet:`,
         },
       ];
@@ -399,7 +411,7 @@ Deno.serve(async (req: Request) => {
       system += IMAGE_CAPTION_RULE;
     }
     if (useClientHistory && localSummary && localSummary.trim() !== "") {
-      system += `\n\n[Önceki konuşmalarınızın özeti]\n${localSummary}`;
+      system += `\n\n[Önceki konuşmalarınızın özeti]\n${stripVoiceTags(localSummary)}`;
     }
 
     // Sadece DÜZ metin turlarında — voiceChat/imageReactionChat zaten düğme
@@ -408,7 +420,7 @@ Deno.serve(async (req: Request) => {
       system += MEDIA_REQUEST_RULE;
     }
     if (!useClientHistory && convo.summary && convo.summary.trim() !== "") {
-      system += `\n\n[Önceki konuşmalarınızın özeti]\n${convo.summary}`;
+      system += `\n\n[Önceki konuşmalarınızın özeti]\n${stripVoiceTags(convo.summary)}`;
     }
 
     // === CEVAP MODU ===
@@ -425,6 +437,10 @@ Deno.serve(async (req: Request) => {
         .limit(KEEP_RECENT);
       recent = (recentDesc ?? []).reverse();
     }
+    // Geçmişteki HERHANGİ bir mesaj (fix'ten önce kaydedilmiş sesli mesaj
+    // cevapları dahil) ses etiketi taşıyabilir — Grok bunu görüp taklit
+    // etmesin diye burada da temizleniyor (bkz. stripVoiceTags üstteki not).
+    recent = recent.map((m) => ({ ...m, content: stripVoiceTags(m.content) }));
 
     const grokMessages: WireMessage[] = [
       { role: "system", content: system },
