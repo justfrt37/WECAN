@@ -220,6 +220,28 @@ async function callGrokText(messages: { role: string; content: string }[], maxTo
   return d?.choices?.[0]?.message?.content ?? "";
 }
 
+// Reuses the already-composed photo-director prompt text to decide if the
+// photo reads as private/intimate — no vision call needed, the SUBJECT/
+// OUTFIT/POSE fields already describe exactly what will be in frame.
+async function classifyPrivacy(imagePrompt: string): Promise<boolean> {
+  const raw = await callGrokText(
+    [
+      {
+        role: "system",
+        content:
+          "You are a content classifier. Given a photo description, answer " +
+          "with exactly one word: YES if the described photo is private, " +
+          "intimate, sexy, revealing, or something a person wouldn't want " +
+          "shared publicly; NO if it's an ordinary, presentable photo. " +
+          "Answer with only YES or NO, nothing else.",
+      },
+      { role: "user", content: imagePrompt },
+    ],
+    5
+  );
+  return raw.trim().toUpperCase().startsWith("Y");
+}
+
 /// Grok'u "fotoğraf yönetmeni" gibi kullanarak kullanıcının isteğini + alan
 /// talimatlarını 6 etiketli alandan oluşan TEK bir görsel-üretim promptuna
 /// dönüştürür (CAMERA DETAILS / LIGHTING / SUBJECT / OUTFIT / POSE / LOCATION).
@@ -376,6 +398,7 @@ Deno.serve(async (req: Request) => {
     const category: string = character.category ?? character.builder_selections?.category ?? "Realistic";
 
     let photoUrl: string;
+    let isPrivate = false;
     try {
       const imagePrompt = await composeImagePrompt({
         appearance: appearanceContext({
@@ -389,8 +412,12 @@ Deno.serve(async (req: Request) => {
         hasBaseline: baselineImageUrl !== null,
         context: conversationContext(history, summary),
       });
-      const bytes = await fetchGeneratedImageBytes(imagePrompt, baselineImageUrl);
+      const [bytes, privacyResult] = await Promise.all([
+        fetchGeneratedImageBytes(imagePrompt, baselineImageUrl),
+        classifyPrivacy(imagePrompt),
+      ]);
       photoUrl = await uploadGeneratedImage(bytes);
+      isPrivate = privacyResult;
     } catch (e) {
       console.error("chat-image generation failed:", String(e));
       return json({ error: "image_generation_failed" }, 502);
@@ -417,6 +444,7 @@ Deno.serve(async (req: Request) => {
       character_id: characterId,
       user_id: uid,
       url: photoUrl,
+      is_private: isPrivate,
     });
     if (insErr) console.error("generated_photos insert failed:", insErr.message);
 
