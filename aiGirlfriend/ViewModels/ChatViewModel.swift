@@ -536,25 +536,34 @@ final class ChatViewModel {
     /// SONRA `wokenUpAt` KALICI olarak kaydedilir (bkz. LocalConversationStore
     /// .Stored) — bir daha bu sohbet açık kaldığı sürece bu gecikme TEKRAR
     /// ÇALIŞMAZ ("konuşma devam ettiği sürece uyanık kal"). Zaten uyandırılmışsa
-    /// (wokenUpAt != nil) gecikme tamamen atlanır. Her iki durumda da, uyanıkken
-    /// gönderilen her mesaj uyku-öncesi zamanlayıcıyı sıfırlar (bkz.
-    /// NotificationScheduler.scheduleSleepyGoodnight).
+    /// (wokenUpAt != nil) gecikme tamamen atlanır — bu kontrol İLK yapılır,
+    /// çünkü CharacterSleepState.isEffectivelyAsleep zaten wokenUpAt != nil
+    /// olduğunda `false` döner (doğru davranış onun için) ama bu fonksiyonun
+    /// "uyanıkken her mesaj uyku-öncesi zamanlayıcıyı sıfırlasın" gereksinimi
+    /// o predicate'e bağlı kalamaz — aksi halde ikinci mesajdan itibaren hiç
+    /// tetiklenmez (bkz. Task 7 review, bu tam olarak o hatanın düzeltmesi).
     private func handleWakeUpIfAsleep() async {
         let stored = LocalConversationStore.shared.load(for: character.id)
+
+        if stored?.wokenUpAt != nil {
+            // Zaten uyandırılmış — gecikmeyi atla, sadece uyku-öncesi
+            // zamanlayıcıyı sıfırla (konuşma devam ettiği sürece uyanık kal).
+            NotificationScheduler.shared.scheduleSleepyGoodnight(for: character, from: Date())
+            return
+        }
+
         guard CharacterSleepState.isEffectivelyAsleep(stored: stored) else { return }
 
-        if stored?.wokenUpAt == nil {
-            try? await Task.sleep(nanoseconds: 5_000_000_000)
-            currentActivity = (
-                label: String(localized: "Just woke up"),
-                detail: "just woke up from being asleep, still a little groggy, texting from bed"
-            )
-            try? await Task.sleep(nanoseconds: 5_000_000_000)
+        try? await Task.sleep(nanoseconds: 5_000_000_000)
+        currentActivity = (
+            label: String(localized: "Just woke up"),
+            detail: "just woke up from being asleep, still a little groggy, texting from bed"
+        )
+        try? await Task.sleep(nanoseconds: 5_000_000_000)
 
-            guard var updated = LocalConversationStore.shared.load(for: character.id) else { return }
-            updated.wokenUpAt = Date()
-            LocalConversationStore.shared.save(updated, for: character.id)
-        }
+        guard var updated = LocalConversationStore.shared.load(for: character.id) else { return }
+        updated.wokenUpAt = Date()
+        LocalConversationStore.shared.save(updated, for: character.id)
 
         NotificationScheduler.shared.scheduleSleepyGoodnight(for: character, from: Date())
     }
