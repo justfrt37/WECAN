@@ -315,9 +315,14 @@ Deno.serve(async (req: Request) => {
           role: "system",
           content:
             "Bir sohbet özeti güncelliyorsun. Karakterin İLERİDE hatırlaması " +
-            "gereken kalıcı bilgileri çıkar: kullanıcının adı, tercihleri, " +
-            "ilişki durumu/önemli anlar, söz verilen şeyler, devam eden konular. " +
-            "Kısa madde madde yaz. Önceki özeti koru, yenileri ekle.",
+            "gereken kalıcı bilgileri çıkar — hem KULLANICI hakkında (adı, " +
+            "tercihleri, ilişki durumu/önemli anlar, söz verilen şeyler) HEM DE " +
+            "KARAKTERİN KENDİSİ hakkında kendi söylediği kalıcı gerçekler (mesleği, " +
+            "iş yeri/çalıştığı yer, ailesi, geçmişi, hobileri, ilişkileri — " +
+            "sohbette kendi ağzından bahsettiği her şey). Karakter kendi hakkında " +
+            "bir şey söylediyse (ör. \"laboratuvarda çalışıyorum\") bunu MUTLAKA " +
+            "özete ekle ki ileride aynı soruya tutarlı cevap verebilsin. Kısa " +
+            "madde madde yaz. Önceki özeti koru, yenileri ekle.",
         },
         {
           role: "user",
