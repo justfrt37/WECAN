@@ -1134,6 +1134,46 @@
         }
       }
     },
+    "Fictional" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fiktiv"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ficticio"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fictif"
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fittizio"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fictício"
+          }
+        },
+        "tr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kurgusal"
+          }
+        }
+      }
+    },
     "Aquiline" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -8459,6 +8499,166 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "şimdi"
+          }
+        }
+      }
+    },
+    "No new likes yet" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Noch keine neuen Likes"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aún no hay likes nuevos"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pas encore de nouveaux likes"
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ancora nessun nuovo like"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ainda sem novas curtidas"
+          }
+        },
+        "tr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Henüz yeni beğeni yok"
+          }
+        }
+      }
+    },
+    "Check back soon — someone new likes you once a day 💕" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Schau bald wieder vorbei — jeden Tag mag dich jemand Neues 💕"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vuelve pronto — alguien nuevo te da like cada día 💕"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reviens bientôt — quelqu'un de nouveau t'aime chaque jour 💕"
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Torna presto — ogni giorno qualcuno di nuovo ti mette like 💕"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Volte em breve — alguém novo curte você todo dia 💕"
+          }
+        },
+        "tr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Yakında tekrar bak — her gün biri seni beğeniyor 💕"
+          }
+        }
+      }
+    },
+    "You're all caught up!" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Du bist auf dem neuesten Stand!"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "¡Ya estás al día!"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tu es à jour !"
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sei aggiornato!"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Você está em dia!"
+          }
+        },
+        "tr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hepsini tamamladın!"
+          }
+        }
+      }
+    },
+    "You've started chatting with everyone in Discover. Check back later for new people." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Du hast mit allen in Entdecken bereits geschrieben. Schau später nach neuen Leuten vorbei."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ya empezaste a chatear con todos en Descubrir. Vuelve más tarde para ver gente nueva."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tu as déjà discuté avec tout le monde dans Découvrir. Reviens plus tard pour de nouvelles personnes."
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hai già iniziato a chattare con tutti in Scopri. Torna più tardi per nuove persone."
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Você já começou a conversar com todos em Descobrir. Volte mais tarde para ver gente nova."
+          }
+        },
+        "tr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Keşfet'teki herkesle sohbete zaten başladın. Yeni insanlar için daha sonra tekrar bak."
           }
         }
       }
