@@ -198,6 +198,10 @@ struct ChatService {
         let prompt: String
         let history: [WireHistoryMessage]
         let summary: String?
+        /// "Şu an ne yapıyor" (bkz. ChatViewModel.currentActivity) — üretilen
+        /// fotoğrafın karakterin GERÇEK şu anki durumunu yansıtması için
+        /// (ör. kanepede kitap okurken, iş kıyafeti/laboratuvar DEĞİL).
+        let currentActivity: String?
     }
 
     private struct ChatImageResponse: Codable {
@@ -210,7 +214,7 @@ struct ChatService {
     /// `summary` — sohbette daha önce kurulmuş gerçekleri (ör. "laboratuvarda
     /// çalışıyorum") görsel üretim promptuna taşımak için, `sendWithLocalHistory`
     /// ile aynı amaçla gönderilir.
-    func generateChatImage(character: Character, prompt: String, localMessages: [Message], summary: String) async throws -> URL {
+    func generateChatImage(character: Character, prompt: String, localMessages: [Message], summary: String, currentActivity: String? = nil) async throws -> URL {
         var request = URLRequest(url: Config.chatImageFunctionURL)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -226,7 +230,8 @@ struct ChatService {
                 characterId: character.id.uuidString.lowercased(),
                 prompt: prompt,
                 history: wireHistory,
-                summary: summary.isEmpty ? nil : summary
+                summary: summary.isEmpty ? nil : summary,
+                currentActivity: currentActivity
             )
         )
 

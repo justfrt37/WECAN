@@ -123,6 +123,21 @@ function conversationContext(history: { role: string; content: string }[], summa
   );
 }
 
+// İstemcinin ScheduleLookup ile hesapladığı "şu an ne yapıyor" bloğu (bkz.
+// chat/index.ts GÜNLÜK RUTİN notu) — bu olmadan foto her zaman genel
+// meslek/kategori varsayımına düşüyordu (ör. "laboratuvarda" fotoğraf, kız
+// aslında o an kanepede kitap okuyorken/evdeyken bile) — bkz. kullanıcı
+// raporu: metin cevabı doğru aktiviteyi yansıttı ama foto yansıtmadı.
+function currentActivityContext(currentActivity: string | null): string {
+  if (!currentActivity || !currentActivity.trim()) return "";
+  return (
+    "\n\nCHARACTER'S CURRENT REAL-TIME SITUATION — reflect this in LOCATION/" +
+    "POSE/OUTFIT unless the user's request explicitly specifies otherwise " +
+    "(this is what the character is ACTUALLY doing right now, takes " +
+    "priority over generic profession-based assumptions): " + currentActivity.trim()
+  );
+}
+
 // Kalibrasyon örneği — kullanıcının verdiği örnekle birebir aynı, sadece
 // FORMATI/ayrıntı seviyesini göstermek için modele verilir (içeriği değil).
 const FIELD_FORMAT_EXAMPLE =
@@ -382,6 +397,7 @@ Deno.serve(async (req: Request) => {
     // modundakiyle aynı şekle sahip, sadece görsel üretim promptu için kullanılır.
     const history: { role: string; content: string }[] = Array.isArray(b.history) ? b.history : [];
     const summary: string | null = typeof b.summary === "string" ? b.summary : null;
+    const currentActivity: string | null = typeof b.currentActivity === "string" ? b.currentActivity : null;
     if (!characterId) return json({ error: "characterId required" }, 400);
     if (!userPrompt) return json({ error: "prompt required" }, 400);
 
@@ -412,7 +428,7 @@ Deno.serve(async (req: Request) => {
         category,
         userPrompt,
         hasBaseline: baselineImageUrl !== null,
-        context: conversationContext(history, summary),
+        context: conversationContext(history, summary) + currentActivityContext(currentActivity),
       });
       const [bytes, privacyResult] = await Promise.all([
         fetchGeneratedImageBytes(imagePrompt, baselineImageUrl),
