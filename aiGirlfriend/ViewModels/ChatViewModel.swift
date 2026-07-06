@@ -582,6 +582,7 @@ final class ChatViewModel {
 
         guard var updated = LocalConversationStore.shared.load(for: character.id) else { return }
         updated.wokenUpAt = Date()
+        updated.manualSleepAt = nil
         LocalConversationStore.shared.save(updated, for: character.id)
 
         NotificationScheduler.shared.scheduleSleepyGoodnight(for: character, from: Date())
