@@ -483,13 +483,15 @@ private struct ChatBubble: View {
             if message.isVoice {
                 VoiceMessageBubble(message: message, isUser: message.isUser, isPlaying: isVoicePlaying, onTap: { onPlayVoice?() })
             } else if let imageURL = message.imageURL {
-                // Foto mesajı (kızın gönderdiği fotoğraf)
-                // 9:16 üretilen fotoğrafla EŞLEŞEN kutu oranı — farklı bir oranda
-                // kutu kullanmak scaledToFill ile görüntünün kırpılmasına yol açar.
+                // Foto mesajı (kızın gönderdiği fotoğraf) — WhatsApp tarzı KÜÇÜK
+                // önizleme kutusu: 9:16 üretilen fotoğrafın tamamı burada
+                // gösterilmiyor (kırpılıyor, ASLA gerilmiyor — scaledToFill +
+                // clipped), tam hâli sadece tam ekran görünümde (onTapImage).
                 CachedImage(url: imageURL) { img in
                     img.resizable().scaledToFill()
                 } placeholder: { AppColor.card }
-                .frame(width: 180, height: 320)
+                .frame(width: 220, height: 260)
+                .clipped()
                 .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                 .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(.white.opacity(0.1), lineWidth: 1))
                 .onTapGesture { onTapImage?(imageURL) }
