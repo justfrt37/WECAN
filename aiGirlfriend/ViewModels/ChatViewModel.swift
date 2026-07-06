@@ -451,6 +451,14 @@ final class ChatViewModel {
     func reactToPrivateDownload(imageURL: URL) {
         Task {
             let stored = LocalConversationStore.shared.load(for: character.id)
+            // Normal send()'deki AYNI "insan gibi tereddüt" gecikmesi + yazıyor
+            // balonu — bu bir arka plan olayı olsa da kullanıcıya ANINDA
+            // gelen bir mesaj gibi değil, gerçek bir cevap gibi hissettirsin.
+            try? await Task.sleep(nanoseconds: UInt64(TypingTiming.randomStartDelay() * 1_000_000_000))
+            showsTypingBubble = true
+            store?.setTyping(character.id, true)
+            let bubbleStartedAt = Date()
+
             // `try?` on an `async throws -> String?` flattens to a single-level
             // `String?` in Swift 5 (SE-0230) — nil here means either the call
             // threw OR the server legitimately returned `{ reply: null }`
@@ -461,9 +469,27 @@ final class ChatViewModel {
                 summary: stored?.summary ?? "",
                 level: relationshipLevel,
                 photoURL: imageURL
-            ) else { return }
+            ) else {
+                showsTypingBubble = false
+                store?.setTyping(character.id, false)
+                return
+            }
             let trimmed = reply.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else { return }
+            guard !trimmed.isEmpty else {
+                showsTypingBubble = false
+                store?.setTyping(character.id, false)
+                return
+            }
+
+            let elapsed = Date().timeIntervalSince(bubbleStartedAt)
+            let wanted = TypingTiming.duration(forReplyLength: trimmed.count)
+            let remaining = wanted - elapsed
+            if remaining > 0 {
+                try? await Task.sleep(nanoseconds: UInt64(remaining * 1_000_000_000))
+            }
+            showsTypingBubble = false
+            store?.setTyping(character.id, false)
+
             messages.append(Message(role: .assistant, content: trimmed))
             updateCache()
             store?.conversationsVersion += 1
