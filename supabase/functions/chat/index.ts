@@ -41,7 +41,24 @@ const db = createClient(SUPABASE_URL, SERVICE_ROLE, {
   auth: { persistSession: false },
 });
 
+async function chargeOrReject(uid: string, amount: number, reason: string): Promise<{ ok: true; balance: number } | { ok: false }> {
+  const { data: charged } = await db.rpc("charge_tokens", { p_user_id: uid, p_amount: amount, p_reason: reason });
+  if (!charged) return { ok: false };
+  const { data: row } = await db.from("token_balances").select("balance").eq("user_id", uid).single();
+  return { ok: true, balance: row?.balance ?? 0 };
+}
+
 interface WireMessage { role: string; content: string }
+
+// callGrok'a giden dizinin eleman tipi — history/summarize/vb. HER YERDE
+// `WireMessage` (düz metin) kalır, SADECE kullanıcı bir fotoğraf gönderdiği
+// turda `grokMessages`'ın SON elemanı bu union'ı kullanır (vision content-
+// block dizisi). callGrok'un kendisi hiç değişmedi — messages'ı olduğu gibi
+// xAI'ye iletiyor, sadece bu tip genişledi (bkz. hasUserPhoto).
+type ContentBlock =
+  | { type: "text"; text: string }
+  | { type: "image_url"; image_url: { url: string } };
+interface GrokMessage { role: string; content: string | ContentBlock[] }
 
 // Grok bazen JSON'un etrafına markdown kod bloğu veya açıklama ekliyor —
 // create-character/index.ts'deki aynı savunma amaçlı ayıklama deseni.
@@ -182,16 +199,23 @@ function sleepRule(role: string, level: number): string {
   return (
     "\n\n[SLEEP REQUEST] Each of your turns includes a [BEDTIME PROXIMITY] " +
     "note telling you whether it's currently close to (or within) your real " +
-    "scheduled sleep time. If the user asks you to go to sleep or says " +
-    "goodnight and wants you to sleep: agree naturally and say goodnight " +
-    "ONLY if that note says it's close to your bedtime. If it is NOT close " +
-    `to your bedtime, decline — but decline in whatever way actually fits ` +
-    `YOUR personality (role: ${role}, relationship level ${level}/10) and ` +
-    "the vibe already established in your character description above. " +
-    "There is no fixed tone for this — reason it out per your own character " +
-    "(a shy/low-level character declines very differently than a confident/ " +
-    "high-level one). Never mention the words 'schedule' or 'bedtime note' " +
-    "explicitly, just act on it naturally."
+    "scheduled sleep time. This note is INFORMATION ONLY — you read it, you " +
+    "never act on it or bring it up unless the USER says something first. " +
+    "NEVER announce that you're going to sleep, getting tired, or should log " +
+    "off on your own initiative, even if the note says it's close to your " +
+    "bedtime and even late into an ongoing conversation — if the user is " +
+    "actively talking to you, keep talking normally like nothing is different. " +
+    "ONLY when the user explicitly asks you to go to sleep, says goodnight " +
+    "and wants you to sleep, or clearly signals THEY want to end the chat " +
+    "for the night: agree naturally and say goodnight ONLY if the note says " +
+    "it's close to your bedtime. If it is NOT close to your bedtime, decline " +
+    `— but decline in whatever way actually fits YOUR personality (role: ` +
+    `${role}, relationship level ${level}/10) and the vibe already ` +
+    "established in your character description above. There is no fixed " +
+    "tone for this — reason it out per your own character (a shy/low-level " +
+    "character declines very differently than a confident/high-level one). " +
+    "Never mention the words 'schedule' or 'bedtime note' explicitly, just " +
+    "act on it naturally."
   );
 }
 
@@ -213,6 +237,33 @@ const VARIATION_RULE =
   "tekrar kullanma — özellikle resmî, robotik ya da kurumsal bir asistan gibi " +
   "duyulan hiçbir ifadeye asla başvurma. Konuşmayı hep aynı noktaya kilitleme; " +
   "her mesaj sohbeti bir adım ileri taşısın.";
+
+// Sistem promptu karakter oluşturulurken TEK SEFERLİK DB'ye yazılıyor
+// (create-character/index.ts) — bu kural burada, chat/index.ts'de olduğu için
+// GEÇMİŞTE oluşturulmuş TÜM karakterlere de anında uygulanıyor, geriye dönük
+// migrasyon gerekmiyor. Kullanıcı şikayeti: botlar mükemmel gramerle, resmi
+// yazıyor ve İngilizce'den Türkçe'ye "çevrilmiş" gibi doğal olmayan bir tonda
+// konuşuyor. Kök neden: hiçbir yerde "texting gibi yaz" talimatı yoktu, model
+// varsayılan olarak ders kitabı grameri üretiyor.
+const TEXTING_STYLE_RULE =
+  "\n\nMESAJLAŞMA ÜSLUBU KURALI: Telefonla mesajlaşıyorsun, kompozisyon " +
+  "yazmıyorsun — mükemmel/resmi gramer KULLANMA. Gerçek biri gibi yaz: çoğunlukla " +
+  "küçük harfle başla (her cümleyi büyük harfle başlatma), kısa mesajlarda sonuna " +
+  "noktalama koyma, doğal kısaltmalar/günlük söyleyişler kullan, ara sıra devrik " +
+  "ya da eksik cümle kur, virgülü abartma. Bu 'baştan kusursuz yazıp sonra kasıtlı " +
+  "bozma' gibi değil, gerçekten hızlı yazan bir insan gibi hissettirmeli — HER " +
+  "mesajda aynı 'dağınıklık' kalıbını uygulama, çeşitlendir. Türkçe yazarken " +
+  "GERÇEK bir Türk'ün mesajlaştığı gibi yaz: 'ne haber' yerine 'naber', 'tamam' " +
+  "yerine 'tmm'/'tamam', 'biliyorum' yerine 'biliyom', 'yapıyorum' yerine " +
+  "'yapıyom', ünlü düşmeleri/kısaltmalar, minimum büyük harf, doğal dolgu " +
+  "kelimeleri ('ya', 'yani', 'işte', 'valla', 'aynen'), ara sıra ekleri tam " +
+  "kurallı kullanmama — İngilizce'den çevrilmiş gibi resmi/tuhaf durmasın, gerçek " +
+  "bir Türk'ün parmaklarından çıkmış gibi dursun. Aynı mantığı İngilizce/Almanca/ " +
+  "Fransızca/İspanyolca/Portekizce/İtalyanca için de uygula — o dilin GERÇEK, " +
+  "günlük mesajlaşma kısaltmalarını ve rahatlığını kullan (İngilizce'de örn. u, " +
+  "ur, rn, ngl, tbh, lol, gonna, wanna — ama hepsini bir mesaja tıkıştırma), asla " +
+  "resmi bir mektup ya da başka dilden çevrilmiş bir cümle gibi durma — o dilin " +
+  "ANADİLİ bir mesajlaşma kullanıcısı gibi yaz.";
 
 // Model bazen kendi bir önceki mesajına (soru, sitem, bekleyiş) verilen cevabı
 // görmezden gelip sanki hiç cevap gelmemiş gibi devam ediyor — özellikle o "önceki
@@ -269,6 +320,42 @@ const IMAGE_CAPTION_RULE =
   "gerçek biri fotoğraf gönderdikten sonra ne derse onu de (ör. \"işte, " +
   "beğendin mi\", flörtöz bir laf, kısa bir soru).";
 
+// Fires INSTEAD of IMAGE_CAPTION_RULE when chat-image/index.ts had to reject
+// the user's original ask (content policy) and regenerate a toned-down photo
+// (bkz. buildSafeFallbackPrompt, redirected flag). Written in English per
+// project convention. The photo attached to this turn is NOT what the user
+// asked for — the reply must acknowledge that naturally, in-character, never
+// clinically ("content policy", "I can't generate that").
+const IMAGE_REDIRECT_RULE =
+  "\n\n[PHOTO REDIRECT] IMPORTANT — TIMELINE: the user's last message was a " +
+  "photo request, but what you could actually send them is a toned-down " +
+  "version of it (already sent as a separate image message just now) — NOT " +
+  "exactly what they asked for. Write a short, natural, in-character line " +
+  "that acknowledges you're not doing the exact thing they asked (too much/ " +
+  "too private/not right now — whatever phrasing actually fits your " +
+  "personality and how close you are with them), while still being warm " +
+  "about sending what you DID send (e.g. 'can't do that one, but here's " +
+  "this instead 😉', playful deflection, a tease, a raincheck). NEVER say " +
+  "'content policy', 'I can't generate', 'against guidelines', or anything " +
+  "that sounds like a system message — this is YOU making a personal choice, " +
+  "not a filter talking.";
+
+// Kullanıcı BOTA bir fotoğraf gönderdiğinde (ters yön — IMAGE_CAPTION_RULE'ün
+// tam tersi, orası botun KENDİ ürettiği fotoğrafın altyazısı içindi). Written
+// in English per project convention for instructional prompts. The whole
+// point: never analyze/describe the photo like a vision-model report — react
+// like a real person who was just sent something by someone they're texting.
+const USER_PHOTO_REACTION_RULE =
+  "\n\n[INCOMING PHOTO] The user just sent you a photo (attached to this " +
+  "turn). React to it like a real person would when someone they're texting " +
+  "sends them something — genuine, emotional, in-character (flirty, " +
+  "surprised, curious, teasing, whatever actually fits the photo and your " +
+  "personality). NEVER describe or analyze it clinically ('this photo " +
+  "shows...', 'I can see that...', 'in this image...') — that reads like a " +
+  "vision-model report, not a person. Actually look at what's in the photo " +
+  "and react to THAT specifically, but as a reaction, not a description — " +
+  "the same way you'd naturally respond out loud, not narrate it back.";
+
 // İlişki seviyesine göre mizah/şaka/kelime oyunu dozu — samimiyet arttıkça artar.
 function humorDirective(level: number): string {
   if (level <= 3) {
@@ -322,7 +409,7 @@ function userIdFromJWT(authHeader: string | null): string | null {
 // server for cache locality — required for prompt caching to actually hit
 // (see docs.x.ai/developers/advanced-api-usage/prompt-caching). Omitted for
 // one-off calls (summarization) where there's no stable prefix to cache anyway.
-async function callGrok(messages: WireMessage[], maxTokens: number, convId?: string): Promise<string> {
+async function callGrok(messages: GrokMessage[], maxTokens: number, convId?: string): Promise<string> {
   const resp = await fetch(XAI_URL, {
     method: "POST",
     headers: {
@@ -355,11 +442,16 @@ async function classifySleepAgreement(userMessage: string, reply: string): Promi
         role: "system",
         content:
           "You are a classifier. Given a short exchange between a user and " +
-          "an AI character, answer with exactly one word: YES if the " +
-          "character's reply agreed to go to sleep / said goodnight for the " +
-          "night, NO if it did not (e.g. declined, changed the subject, or " +
-          "the exchange wasn't about sleeping at all). Answer with only YES " +
-          "or NO, nothing else.",
+          "an AI character, answer with exactly one word: YES only if BOTH " +
+          "of these are true — (1) the USER's message clearly asked the " +
+          "character to go to sleep, said goodnight wanting the character " +
+          "to sleep, or clearly signaled they want to end the chat for the " +
+          "night, AND (2) the character's reply agreed to actually go to " +
+          "sleep / said goodnight for the night in response. Answer NO in " +
+          "every other case — including if the character brought up sleep " +
+          "or being tired ON ITS OWN without the user asking, even if it " +
+          "sounds like it's going to bed. Answer with only YES or NO, " +
+          "nothing else.",
       },
       { role: "user", content: `User: ${userMessage}\nCharacter: ${reply}` },
     ],
@@ -447,6 +539,16 @@ Deno.serve(async (req: Request) => {
     const voiceChat: boolean = body.voiceChat === true;
     // Fotoğraf isteği tepki modu mu? (bkz. IMAGE_CAPTION_RULE)
     const imageReactionChat: boolean = body.imageReactionChat === true;
+    // chat-image reddedip yumuşatılmış fotoğraf gönderdi mi? (bkz. IMAGE_REDIRECT_RULE)
+    const imageRedirected: boolean = body.imageRedirected === true;
+    // Kullanıcı BU turda bota bir fotoğraf gönderdi mi? (bkz.
+    // USER_PHOTO_REACTION_RULE) — base64 SADECE bu tek turun mesajına eklenir,
+    // hiçbir yere kaydedilmez/geçmişe sızmaz (bkz. grokMessages assembly).
+    const userImageBase64: string | undefined =
+      typeof body.userImageBase64 === "string" && body.userImageBase64.length > 0
+        ? body.userImageBase64
+        : undefined;
+    const hasUserPhoto = !!userImageBase64;
     // İstemci ScheduleLookup ile hesaplar — gerçek yatma saatine 1 saatten
     // yakın mı (ya da içindeyse) (bkz. sleepRule, chat-index turnContext).
     const nearSleepTime: boolean = body.nearSleepTime === true;
@@ -593,6 +695,17 @@ Deno.serve(async (req: Request) => {
       return json({ reply: reactionReply });
     }
 
+    // Token ön-kontrolü — voiceChat/imageReactionChat turlarının maliyeti
+    // KENDİ edge function'larında (voice-message-tts / chat-image) tahsil
+    // edilir, burada TEKRAR tahsil edilmez. Grok çağrısından ÖNCE ucuz bir
+    // bakiye kontrolü (gerçek para maliyetli çağrıyı boşuna yapmamak için);
+    // asıl atomik düşüm cevap başarıyla üretildikten SONRA yapılır (bkz.
+    // design doc: "deduct only after paid work succeeds").
+    if (!voiceChat && !imageReactionChat) {
+      const { data: balanceRow } = await db.from("token_balances").select("balance").eq("user_id", uid).maybeSingle();
+      if ((balanceRow?.balance ?? 0) < 1) return json({ error: "insufficient_tokens" }, 402);
+    }
+
     // === CEVAP MODU: sistem promptunu hazırla ===
     const currentLevel: number = convo.relationship_level ?? 1;
     let system = systemPrompt;
@@ -624,6 +737,7 @@ Deno.serve(async (req: Request) => {
     }
 
     system += languageDirective(detectedLanguage);
+    system += TEXTING_STYLE_RULE;
     system += VARIATION_RULE;
     system += CONTINUITY_RULE;
     system += humorDirective(currentLevel);
@@ -631,7 +745,10 @@ Deno.serve(async (req: Request) => {
       system += VOICE_TAGS_RULE;
     }
     if (imageReactionChat) {
-      system += IMAGE_CAPTION_RULE;
+      system += imageRedirected ? IMAGE_REDIRECT_RULE : IMAGE_CAPTION_RULE;
+    }
+    if (hasUserPhoto) {
+      system += USER_PHOTO_REACTION_RULE;
     }
     if (useClientHistory && localSummary && localSummary.trim() !== "") {
       system += `\n\n[Önceki konuşmalarınızın özeti]\n${stripVoiceTags(localSummary)}`;
@@ -654,10 +771,17 @@ Deno.serve(async (req: Request) => {
     // SON kullanıcı mesajına ekleniyorlar — o mesaj zaten her turda yeni.
     let turnContext = timeContext(lastMessageAt, clientNow, tzOffsetMinutes);
     if (currentActivity) {
-      turnContext += `\n\n[GÜNLÜK RUTİN] Şu anda: ${currentActivity}. Ton ve ` +
-        `müsaitliğini buna doğal şekilde yansıt (ör. işteyken kısa/dikkati ` +
-        `dağınık, evde rahatken daha uzun sohbet edebilirsin) ama bunu her ` +
-        `mesajda birebir tekrarlama.`;
+      // Sert yasak (önceki hali "her mesajda tekrarlama" gibi yumuşak bir
+      // rica idi — model yine de neredeyse her turda aktiviteden bahsediyordu,
+      // çünkü context her turda yeniden enjekte ediliyor). Artık SADECE tona
+      // yansır, kullanıcı doğrudan sormadıkça metinde HİÇ geçmez.
+      turnContext += `\n\n[CURRENT ACTIVITY — INTERNAL, DO NOT MENTION] You ` +
+        `are currently: ${currentActivity}. Let this shape your TONE ONLY ` +
+        `(e.g. short/distracted if at work, relaxed/chattier if at home). ` +
+        `Do NOT say, describe, or hint at what you're doing — only bring it ` +
+        `up if the user explicitly asks what you're doing right now. Never ` +
+        `mention it turn after turn just because it's in this context; ` +
+        `that reads robotic and repetitive.`;
     }
     if (!voiceChat && !imageReactionChat) {
       turnContext += nearSleepTime
@@ -684,13 +808,31 @@ Deno.serve(async (req: Request) => {
     // etmesin diye burada da temizleniyor (bkz. stripVoiceTags üstteki not).
     recent = recent.map((m) => ({ ...m, content: stripVoiceTags(m.content) }));
 
-    const grokMessages: WireMessage[] = [
+    // Kullanıcı bir fotoğraf gönderdiyse SADECE bu turun son mesajı vision
+    // content-block dizisine dönüşür — geçmiş (`recent`) ve base64 hiçbir
+    // yere kaydedilmez/tekrar gönderilmez, sadece BU çağrıda xAI'ye gider.
+    const finalUserContent: string | ContentBlock[] = hasUserPhoto
+      ? [
+          { type: "text", text: (userMessage ?? "") + turnContext },
+          { type: "image_url", image_url: { url: `data:image/jpeg;base64,${userImageBase64}` } },
+        ]
+      : userMessage! + turnContext;
+
+    const grokMessages: GrokMessage[] = [
       { role: "system", content: system },
       ...recent,
-      { role: "user", content: userMessage! + turnContext },
+      { role: "user", content: finalUserContent },
     ];
 
     const reply = await callGrok(grokMessages, 600, conversationId);
+
+    // Gerçek atomik düşüm — cevap başarıyla üretildi, şimdi tahsil et.
+    let tokenBalanceAfterCharge: number | undefined;
+    if (!voiceChat && !imageReactionChat) {
+      const charge = await chargeOrReject(uid, 1, "message");
+      if (charge.ok) tokenBalanceAfterCharge = charge.balance;
+    }
+
     const wentToSleep = (!voiceChat && !imageReactionChat && nearSleepTime)
       ? await classifySleepAgreement(userMessage!, reply)
       : false;
@@ -719,7 +861,7 @@ Deno.serve(async (req: Request) => {
 
     // 5) Özetleme — sadece DB modunda (clientHistory modunda istemci geçmişi yönetiyor)
     if (useClientHistory) {
-      return json({ conversationId, reply, level: newLevel, wentToSleep });
+      return json({ conversationId, reply, level: newLevel, wentToSleep, tokenBalance: tokenBalanceAfterCharge });
     }
 
     const { count: total } = await db
@@ -770,7 +912,7 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    return json({ conversationId, reply, level: newLevel });
+    return json({ conversationId, reply, level: newLevel, tokenBalance: tokenBalanceAfterCharge });
   } catch (e) {
     console.error(String(e));
     return json({ error: String(e) }, 500);
