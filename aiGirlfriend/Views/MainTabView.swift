@@ -41,8 +41,11 @@ enum MainTab: Int, CaseIterable, Identifiable {
 
 struct MainTabView: View {
     @Environment(CharacterStore.self) private var store
+    @Environment(TokenStore.self) private var tokenStore
     @State private var selection: MainTab = .discover
     @State private var path = NavigationPath()
+    @State private var showTokenStore = false
+    @State private var streakResult: StreakClaimResult?
 
     var body: some View {
         // Tek NavigationStack: ChatView'a push edilince kök (tab bar dahil) yerini
@@ -65,6 +68,11 @@ struct MainTabView: View {
                 CustomTabBar(selection: $selection)
             }
             .toolbar(.hidden, for: .navigationBar)
+            .overlay(alignment: .topTrailing) {
+                TokenBadge(balance: tokenStore.balance) { showTokenStore = true }
+                    .padding(.top, 8)
+                    .padding(.trailing, 16)
+            }
             .navigationDestination(for: Character.self) { character in
                 ChatView(character: character)
             }
@@ -85,6 +93,24 @@ struct MainTabView: View {
             }
         }
         .tint(AppColor.pink)
+        .fullScreenCover(isPresented: $showTokenStore) {
+            TokenStoreView()
+        }
+        .task {
+            if let result = await StreakService.claim(), result.granted {
+                streakResult = result
+            }
+        }
+        .fullScreenCover(item: Binding(
+            get: { streakResult.map { IdentifiableStreakResult(result: $0) } },
+            set: { _ in streakResult = nil }
+        )) { wrapped in
+            StreakPopupView(result: wrapped.result) {
+                streakResult = nil
+                Task { await tokenStore.refresh() }
+            }
+            .presentationBackground(.clear)
+        }
     }
 }
 
