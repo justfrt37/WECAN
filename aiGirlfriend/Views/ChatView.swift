@@ -522,11 +522,11 @@ struct ChatView: View {
                 Image(systemName: icon).font(.system(size: 18))
                 Text(label).font(.system(size: 13, weight: .semibold))
             }
-            .foregroundStyle(isArmed ? AppColor.pink : .white.opacity(0.85))
+            .foregroundStyle(isArmed ? AppColor.amber : .white.opacity(0.85))
             .padding(.horizontal, 14).frame(height: 34)
             .frame(maxWidth: .infinity)
-            .background(isArmed ? AppColor.pink.opacity(0.15) : .white.opacity(0.08), in: Capsule())
-            .overlay(Capsule().strokeBorder(isArmed ? AppColor.pink.opacity(0.5) : .white.opacity(0.12), lineWidth: 1))
+            .background(isArmed ? AppColor.amber.opacity(0.15) : .white.opacity(0.08), in: Capsule())
+            .overlay(Capsule().strokeBorder(isArmed ? AppColor.amber.opacity(0.5) : .white.opacity(0.12), lineWidth: 1))
         }
         .buttonStyle(.plain)
         .disabled(viewModel.isSending || viewModel.isLoadingHistory)
