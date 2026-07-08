@@ -81,13 +81,36 @@ struct CharacterProfileView: View {
 
     private var hero: some View {
         ZStack(alignment: .bottom) {
-            // Kaydırılabilir resimler
+            // Kaydırılabilir resimler — hazır galeri fotoğrafları (pre-made)
+            // SADECE burada gösteriliyor (bkz. GalleryView, "More Photos" oradan
+            // kaldırıldı). İlk foto (ana profil fotosu) her zaman açık — geri
+            // kalanı PRO olmayanlar için bulanık/kilitli kalır.
             TabView(selection: $page) {
                 ForEach(Array(images.enumerated()), id: \.offset) { idx, url in
-                    CachedImage(url: url) { image in
-                        image.resizable().scaledToFill()
-                    } placeholder: {
-                        AppColor.card
+                    let locked = idx > 0 && !PurchaseService.shared.isPro
+                    ZStack {
+                        CachedImage(url: url) { image in
+                            image.resizable().scaledToFill()
+                        } placeholder: {
+                            AppColor.card
+                        }
+                        .blur(radius: locked ? 22 : 0)
+
+                        if locked {
+                            Color.black.opacity(0.25)
+                            Button { showPaywall = true } label: {
+                                VStack(spacing: 8) {
+                                    Image(systemName: "lock.fill")
+                                        .font(.system(size: 30))
+                                        .foregroundStyle(.white)
+                                        .shadow(color: .black.opacity(0.5), radius: 8, y: 4)
+                                    Text("Upgrade to PRO")
+                                        .font(.system(size: 13, weight: .bold))
+                                        .foregroundStyle(.white)
+                                }
+                            }
+                            .buttonStyle(.plain)
+                        }
                     }
                     .tag(idx)
                 }
