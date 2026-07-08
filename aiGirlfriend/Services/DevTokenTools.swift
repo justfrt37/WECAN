@@ -7,6 +7,10 @@
 
 import Foundation
 
+/// `TokenStore`/`PurchaseService` are both `@MainActor` — this whole enum
+/// runs on the main actor too so it can call `setBalance`/set `tier`
+/// directly, without every call site needing its own hop.
+@MainActor
 enum DevTokenTools {
     private struct Response: Decodable {
         let balance: Int?
