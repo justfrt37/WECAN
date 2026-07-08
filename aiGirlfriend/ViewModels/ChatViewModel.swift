@@ -613,12 +613,23 @@ final class ChatViewModel {
         guard !text.isEmpty, !isSending, !isLoadingHistory else { return }
 
         messages.append(Message(role: .user, content: text))
-        messages.append(Message(role: .assistant, content: "", pendingImagePrompt: text))
         updateCache()
         NotificationScheduler.shared.noteUserSent(character: character)
         inputText = ""
         isImageArmed = false
         errorMessage = nil
+
+        // Kısa, rastgele bir gecikmeden sonra bulanık balon "gelir" — botun az
+        // önce kendi kararıyla bir foto gönderdiği hissi (bkz. kullanıcı talebi:
+        // "whoosh" giriş animasyonu, ChatView'daki .transition ile eşleşir).
+        Task {
+            let delay = Double.random(in: 0.5...1.0)
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            withAnimation(.spring(response: 0.45, dampingFraction: 0.72)) {
+                messages.append(Message(role: .assistant, content: "", pendingImagePrompt: text))
+            }
+            updateCache()
+        }
     }
 
     /// Bir "ödeme bekleyen" foto balonuna dokununca — 25 token tahsil edip

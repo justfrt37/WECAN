@@ -425,8 +425,16 @@ struct ChatView: View {
                         }, isGeneratingImage: viewModel.generatingImageMessageIDs.contains(message.id),
                            isGeneratingVoice: viewModel.generatingVoiceMessageIDs.contains(message.id),
                            onGenerateImage: { viewModel.generatePendingImage(for: message.id) },
-                           onGenerateVoice: { viewModel.generatePendingVoice(for: message.id) })
+                           onGenerateVoice: { viewModel.generatePendingVoice(for: message.id) },
+                           characterPhotoURL: viewModel.character.photoURL)
                         .id(message.id)
+                        // "Whoosh" girişi — pending foto balonu botun az önce
+                        // kendi kararıyla gönderdiği bir şey gibi kaysın/belirsin
+                        // (bkz. ChatViewModel.sendImageRequest'teki withAnimation).
+                        .transition(.asymmetric(
+                            insertion: .move(edge: .leading).combined(with: .opacity),
+                            removal: .opacity
+                        ))
                     }
                     if viewModel.showsTypingBubble {
                         Group {
@@ -682,6 +690,9 @@ private struct ChatBubble: View {
     var isGeneratingVoice: Bool = false
     var onGenerateImage: (() -> Void)? = nil
     var onGenerateVoice: (() -> Void)? = nil
+    /// Ödeme bekleyen foto balonunun bulanık arka planı — karakterin KENDİ
+    /// profil fotoğrafı (bkz. PendingImageBubble), henüz gerçek foto yok.
+    var characterPhotoURL: URL? = nil
 
     /// Her fotoğraf balonu ilk halde bulanık gelir + "Tap to view" ister —
     /// bu ilk dokunuş sadece bulanıklığı açar (tam ekrana gitmez); balon zaten
@@ -700,7 +711,7 @@ private struct ChatBubble: View {
             }
 
             if message.isPendingImage {
-                PendingImageBubble(prompt: message.pendingImagePrompt ?? "",
+                PendingImageBubble(backdropURL: characterPhotoURL,
                                     isGenerating: isGeneratingImage,
                                     onTap: { onGenerateImage?() })
             } else if message.isPendingVoice {
@@ -886,30 +897,39 @@ private struct VoicePendingIndicator: View {
 /// `onTap` (ChatViewModel.generatePendingImage) tetiklenir. Üretim sürerken
 /// (`isGenerating`) yükleme çubuğu gösterilir, dokunma devre dışı kalır —
 /// bulanıklık görsel CİHAZA TAM İNENE kadar kalkmaz (bkz. ChatViewModel).
+/// Aynı bulanıklık/"Tap to view" tasarımı zaten üretilmiş fotoğraflarda
+/// kullanılıyor (bkz. ChatBubble'ın imageURL dalı) — burada AYNI görsel dil,
+/// arkada gerçek foto yerine karakterin KENDİ profil fotoğrafı bulanık
+/// gösteriliyor (henüz üretilmiş bir şey yok). Tek fark: token maliyeti
+/// SADECE burada (ödeme bekleyen istek) gösterilir, zaten-üretilmiş foto
+/// balonunda hiç yok.
 private struct PendingImageBubble: View {
-    let prompt: String
+    let backdropURL: URL?
     let isGenerating: Bool
     let onTap: () -> Void
 
     var body: some View {
         ZStack {
-            LinearGradient(colors: [AppColor.card, AppColor.bg2], startPoint: .topLeading, endPoint: .bottomTrailing)
-            Color.black.opacity(0.15)
+            CachedImage(url: backdropURL) { img in
+                img.resizable().scaledToFill()
+            } placeholder: { AppColor.card }
+            .frame(width: 220, height: 260)
+            .clipped()
+            .blur(radius: 26)
+
+            Color.black.opacity(0.25)
 
             if isGenerating {
-                VStack(spacing: 10) {
-                    Text("📸").font(.system(size: 30)).opacity(0.6)
-                    ImagePendingIndicator()
-                }
+                ImagePendingIndicator()
             } else {
-                VStack(spacing: 8) {
-                    Text("📸").font(.system(size: 30)).opacity(0.6)
-                    Text("25 💠")
-                        .font(.system(size: 15, weight: .heavy))
-                        .foregroundStyle(AppColor.amber)
-                    Text("Tap to generate")
-                        .font(.system(size: 12, weight: .bold))
+                VStack(spacing: 6) {
+                    Text("👀").font(.system(size: 30))
+                    Text("Tap to view")
+                        .font(.system(size: 13, weight: .bold))
                         .foregroundStyle(.white)
+                    Text("25 💠")
+                        .font(.system(size: 13, weight: .heavy))
+                        .foregroundStyle(AppColor.amber)
                 }
             }
         }
