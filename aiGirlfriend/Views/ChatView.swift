@@ -424,7 +424,10 @@ struct ChatView: View {
                             fullscreenImageURL = url
                         }, onTapLocalImage: { image in
                             fullscreenLocalImage = image
-                        })
+                        }, isGeneratingImage: viewModel.generatingImageMessageIDs.contains(message.id),
+                           isGeneratingVoice: viewModel.generatingVoiceMessageIDs.contains(message.id),
+                           onGenerateImage: { viewModel.generatePendingImage(for: message.id) },
+                           onGenerateVoice: { viewModel.generatePendingVoice(for: message.id) })
                         .id(message.id)
                     }
                     if viewModel.showsTypingBubble {
@@ -677,10 +680,17 @@ private struct ChatBubble: View {
     var onPlayVoice: (() -> Void)? = nil
     var onTapImage: ((URL) -> Void)? = nil
     var onTapLocalImage: ((UIImage) -> Void)? = nil
+    var isGeneratingImage: Bool = false
+    var isGeneratingVoice: Bool = false
+    var onGenerateImage: (() -> Void)? = nil
+    var onGenerateVoice: (() -> Void)? = nil
 
     /// Her fotoğraf balonu ilk halde bulanık gelir + "Tap to view" ister —
     /// bu ilk dokunuş sadece bulanıklığı açar (tam ekrana gitmez); balon zaten
     /// açıkken tekrar dokunmak eskisi gibi tam ekranı açar (`onTapImage`).
+    /// Az önce ödeyip ÜRETTİRDİĞİMİZ bir foto burada zaten `true` başlar —
+    /// tekrar bulanıklaştırmak (çifte bulanıklık) kötü UX olurdu (bkz.
+    /// ChatViewModel.generatePendingImage'ın hemen sonrası).
     @State private var imageRevealed = false
 
     var body: some View {
@@ -691,7 +701,14 @@ private struct ChatBubble: View {
                 timestampLabel
             }
 
-            if message.isVoice {
+            if message.isPendingImage {
+                PendingImageBubble(prompt: message.pendingImagePrompt ?? "",
+                                    isGenerating: isGeneratingImage,
+                                    onTap: { onGenerateImage?() })
+            } else if message.isPendingVoice {
+                PendingVoiceBubble(isGenerating: isGeneratingVoice,
+                                    onTap: { onGenerateVoice?() })
+            } else if message.isVoice {
                 VoiceMessageBubble(message: message, isUser: message.isUser, isPlaying: isVoicePlaying, onTap: { onPlayVoice?() })
             } else if let localPath = message.localImagePath,
                       let localImage = UserPhotoStore.loadUserPhoto(relativePath: localPath) {
@@ -772,7 +789,8 @@ private struct ChatBubble: View {
             }
 
             // Kızın mesajını seslendir (oynat/durdur)
-            if !message.isUser, message.imageURL == nil, !message.isVoice, let onSpeak {
+            if !message.isUser, message.imageURL == nil, !message.isVoice,
+               !message.isPendingImage, !message.isPendingVoice, let onSpeak {
                 Button(action: onSpeak) {
                     Image(systemName: isSpeaking ? "stop.circle.fill" : "speaker.wave.2.fill")
                         .font(.system(size: 16))
@@ -786,6 +804,14 @@ private struct ChatBubble: View {
             if !message.isUser { Spacer(minLength: 50) }
         }
         .padding(.horizontal, 16)
+        // Az önce (bu oturumda) pending'den üretilmiş bir foto otomatik açık
+        // gelsin — kullanıcı zaten ödeyip dokunarak üretti, hemen ardından
+        // İKİNCİ bir "tap to view" bulanıklığı görmesi kötü UX olur. Geçmişten
+        // yüklenen (hiç pending olmamış) fotolar bu satırı hiç tetiklemez,
+        // eski "tap to view" gizlilik bulanıklığını korurlar.
+        .onChange(of: message.pendingImagePrompt) { old, new in
+            if old != nil && new == nil { imageRevealed = true }
+        }
     }
 
     private var timestampLabel: some View {
@@ -855,6 +881,88 @@ private struct VoicePendingIndicator: View {
 /// decision: the photo itself arrives blurred behind a "Tap to view" prompt,
 /// see `ChatBubble`'s `imageURL` case, so this indicator doesn't need to
 /// announce anything either).
+// MARK: - Ödeme bekleyen foto/ses balonları
+
+/// Botun fotoğrafı — ilk halde HİÇ üretilmemiş, sadece tarif metni saklı
+/// (bkz. Message.pendingImagePrompt). Bulanık kutu + token maliyeti; dokununca
+/// `onTap` (ChatViewModel.generatePendingImage) tetiklenir. Üretim sürerken
+/// (`isGenerating`) yükleme çubuğu gösterilir, dokunma devre dışı kalır —
+/// bulanıklık görsel CİHAZA TAM İNENE kadar kalkmaz (bkz. ChatViewModel).
+private struct PendingImageBubble: View {
+    let prompt: String
+    let isGenerating: Bool
+    let onTap: () -> Void
+
+    var body: some View {
+        ZStack {
+            LinearGradient(colors: [AppColor.card, AppColor.bg2], startPoint: .topLeading, endPoint: .bottomTrailing)
+            Color.black.opacity(0.15)
+
+            if isGenerating {
+                VStack(spacing: 10) {
+                    Text("📸").font(.system(size: 30)).opacity(0.6)
+                    ImagePendingIndicator()
+                }
+            } else {
+                VStack(spacing: 8) {
+                    Text("📸").font(.system(size: 30)).opacity(0.6)
+                    Text("25 💠")
+                        .font(.system(size: 15, weight: .heavy))
+                        .foregroundStyle(AppColor.amber)
+                    Text("Tap to generate")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(.white)
+                }
+            }
+        }
+        .frame(width: 220, height: 260)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(.white.opacity(0.1), lineWidth: 1))
+        .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .onTapGesture { if !isGenerating { onTap() } }
+    }
+}
+
+/// Botun sesli mesajı — ilk halde HİÇ üretilmemiş, süresi belirsiz (henüz
+/// sentezlenmedi, bkz. Message.pendingVoiceRequest). Dokununca `onTap`
+/// (ChatViewModel.generatePendingVoice) tetiklenir.
+private struct PendingVoiceBubble: View {
+    let isGenerating: Bool
+    let onTap: () -> Void
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: isGenerating ? "waveform" : "lock.fill")
+                .font(.system(size: 16))
+                .foregroundStyle(isGenerating ? AppColor.pink : AppColor.amber)
+
+            if isGenerating {
+                ImagePendingIndicator()
+            } else {
+                HStack(spacing: 3) {
+                    ForEach(0..<10, id: \.self) { _ in
+                        Capsule().fill(.white.opacity(0.25)).frame(width: 2.5, height: 10)
+                    }
+                }
+                Text("0:––")
+                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.5))
+            }
+
+            if !isGenerating {
+                Text("12 💠")
+                    .font(.system(size: 13, weight: .heavy))
+                    .foregroundStyle(AppColor.amber)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(AppColor.card, in: RoundedRectangle(cornerRadius: 18))
+        .contentShape(RoundedRectangle(cornerRadius: 18))
+        .onTapGesture { if !isGenerating { onTap() } }
+    }
+}
+
 private struct ImagePendingIndicator: View {
     @State private var sweep = false
 

@@ -452,32 +452,58 @@ final class ChatViewModel {
     /// normal "yazıyor" balonuyla AYNI görünmesin diye (bkz. ChatView.messagesList).
     var isSendingImageReply: Bool = false
 
+    /// Şu an gerçekten üretim/indirme sürüyor olan pending foto/ses balonları
+    /// (bkz. ChatBubble pending dalları — bu id'ler için yükleme çubuğu
+    /// gösterilir ve tekrar dokunma engellenir). Kalıcı DEĞİL — sadece bu
+    /// oturumda; uygulama yeniden açılırsa yarım kalan bir üretim varsa
+    /// balon "dokun, üret" durumuna geri döner (bkz. pendingImagePrompt/
+    /// pendingVoiceRequest hâlâ dolu kalır).
+    var generatingImageMessageIDs: Set<UUID> = []
+    var generatingVoiceMessageIDs: Set<UUID> = []
+
     /// "Şu an ne yapıyor" — ScheduleLookup ile yerelden hesaplanır, ağ
     /// çağrısı gerektirmez. `nil` = henüz rutin üretilmedi ya da eşleşen
     /// blok yok (chat header bu durumda "Online" göstermeye devam eder).
     var currentActivity: (label: String, detail: String)?
 
-    /// `send()`'in sesli-mesaj karşılığı: aynı metni gönderir, ama cevap
-    /// metin balonu yerine sesli mesaj balonu olarak eklenir. `canSend` ile
-    /// aynı boş-metin koruması — "boş dürtme" senaryosu yok, chat edge
-    /// function'ında değişiklik gerekmiyor.
+    /// `send()`'in sesli-mesaj karşılığı — ama artık HEMEN üretmez: kullanıcının
+    /// metnini gönderir ve karşılığında "ödeme bekleyen" bir sesli mesaj balonu
+    /// ekler (bkz. Message.pendingVoiceRequest). Asıl bot cevabı + TTS + token
+    /// tahsili SADECE o balona dokununca olur (bkz. generatePendingVoice) —
+    /// bu sayede kullanıcı önce token maliyetini görüp sonra karar verir.
     func sendVoiceRequest() {
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !isSending, !isLoadingHistory else { return }
         guard PurchaseService.shared.isPro else { showPaywall = true; return }
 
-        let lastMessageAt = messages.last?.createdAt
         messages.append(Message(role: .user, content: text))
+        messages.append(Message(role: .assistant, content: "", pendingVoiceRequest: true))
         updateCache()
         NotificationScheduler.shared.noteUserSent(character: character)
         inputText = ""
         isVoiceArmed = false
+        errorMessage = nil
+    }
+
+    /// Bir "ödeme bekleyen" sesli mesaj balonuna dokununca — bot cevabını
+    /// üretir (ücretsiz, bkz. chat/index.ts voiceChat charge skip), sonra TTS
+    /// ile seslendirir (12 token, bkz. voice-message-tts). Ses tam olarak
+    /// cihaza kaydedilene KADAR balon "üretiliyor" durumunda kalır.
+    func generatePendingVoice(for messageID: UUID) {
+        guard let idx = messages.firstIndex(where: { $0.id == messageID }),
+              messages[idx].isPendingVoice,
+              !generatingVoiceMessageIDs.contains(messageID)
+        else { return }
+        guard let userMessageIdx = messages[..<idx].lastIndex(where: { $0.role == .user }) else { return }
+        let text = messages[userMessageIdx].content
+        let lastMessageAt = userMessageIdx > 0 ? messages[userMessageIdx - 1].createdAt : nil
+
+        generatingVoiceMessageIDs.insert(messageID)
         isSending = true
         errorMessage = nil
 
         Task {
             await handleWakeUpIfAsleep()
-            try? await Task.sleep(nanoseconds: UInt64(TypingTiming.randomStartDelay() * 1_000_000_000))
             showsTypingBubble = true
             isSendingVoiceReply = true
             store?.setTyping(character.id, true)
@@ -512,7 +538,6 @@ final class ChatViewModel {
                 // veriyor" hatası). Dil tespiti de temiz metinle daha güvenilir.
                 let cleanedReply = Self.stripVoiceTags(result.reply)
                 let lang = VoiceLanguage.detect(from: cleanedReply)
-                let messageID = UUID()
                 let ttsResult = await TTSService().synthesizeVoiceMessage(
                     text: result.reply, role: character.personalityRole, vibe: character.vibe, lang: lang,
                     useElevenLabs: true
@@ -523,6 +548,7 @@ final class ChatViewModel {
                     audioData = data
                     handleTokenBalance(tokenBalance)
                 case .insufficientTokens:
+                    generatingVoiceMessageIDs.remove(messageID)
                     showsTypingBubble = false
                     isSendingVoiceReply = false
                     store?.setTyping(character.id, false)
@@ -530,6 +556,7 @@ final class ChatViewModel {
                     isSending = false
                     return
                 case .failure:
+                    generatingVoiceMessageIDs.remove(messageID)
                     showsTypingBubble = false
                     isSendingVoiceReply = false
                     store?.setTyping(character.id, false)
@@ -538,6 +565,7 @@ final class ChatViewModel {
                     return
                 }
                 guard let savedPath = VoicePlayer.saveVoiceMessage(audioData, messageID: messageID) else {
+                    generatingVoiceMessageIDs.remove(messageID)
                     showsTypingBubble = false
                     isSendingVoiceReply = false
                     store?.setTyping(character.id, false)
@@ -551,13 +579,17 @@ final class ChatViewModel {
                 isSendingVoiceReply = false
                 store?.setTyping(character.id, false)
 
-                messages.append(Message(
-                    id: messageID, role: .assistant, content: cleanedReply,
-                    voiceLocalPath: savedPath, voiceDuration: duration
-                ))
+                if let finalIdx = messages.firstIndex(where: { $0.id == messageID }) {
+                    messages[finalIdx].content = cleanedReply
+                    messages[finalIdx].voiceLocalPath = savedPath
+                    messages[finalIdx].voiceDuration = duration
+                    messages[finalIdx].pendingVoiceRequest = nil
+                }
+                generatingVoiceMessageIDs.remove(messageID)
 
                 applyPostReplyEffects(gotPhoto: nil, stored: stored)
             } catch {
+                generatingVoiceMessageIDs.remove(messageID)
                 errorMessage = isInsufficientTokensError(error)
                     ? String(localized: "Not enough tokens. Get more to keep chatting.")
                     : error.localizedDescription
@@ -575,54 +607,76 @@ final class ChatViewModel {
     /// isteğe bağlı bir [[no_caption]] işareti sunulunca neredeyse HER SEFERİNDE
     /// onu seçiyordu (canlı testte 8/8) — işaret tamamen kaldırıldı, artık her
     /// zaman gerçek bir tepki üretiliyor.
+    /// Fotoğraf HEMEN üretilmez — kullanıcının tarifi bir "ödeme bekleyen"
+    /// balonda (bkz. Message.pendingImagePrompt) saklanır, bulanık gösterilir.
+    /// Asıl üretim + 25 token tahsili SADECE o balona dokununca olur (bkz.
+    /// generatePendingImage).
     func sendImageRequest() {
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !isSending, !isLoadingHistory else { return }
         guard PurchaseService.shared.isPro else { showPaywall = true; return }
 
-        let lastMessageAt = messages.last?.createdAt
         messages.append(Message(role: .user, content: text))
+        messages.append(Message(role: .assistant, content: "", pendingImagePrompt: text))
         updateCache()
         NotificationScheduler.shared.noteUserSent(character: character)
         inputText = ""
         isImageArmed = false
+        errorMessage = nil
+    }
+
+    /// Bir "ödeme bekleyen" foto balonuna dokununca — 25 token tahsil edip
+    /// gerçek görseli üretir. Balon, görsel CİHAZA TAM İNENE kadar (sadece
+    /// URL dönmesi değil) "üretiliyor" durumunda kalır — `ImageCache.prefetch`
+    /// tamamlanmadan `imageURL` set edilmez, yoksa CachedImage 1-2 saniye
+    /// boş görünürdü (bkz. kullanıcı talebi).
+    func generatePendingImage(for messageID: UUID) {
+        guard let idx = messages.firstIndex(where: { $0.id == messageID }),
+              let prompt = messages[idx].pendingImagePrompt,
+              messages[idx].imageURL == nil,
+              !generatingImageMessageIDs.contains(messageID)
+        else { return }
+
+        generatingImageMessageIDs.insert(messageID)
         isSending = true
         errorMessage = nil
 
         Task {
             await handleWakeUpIfAsleep()
-            try? await Task.sleep(nanoseconds: UInt64(TypingTiming.randomStartDelay() * 1_000_000_000))
-            showsTypingBubble = true
-            isSendingImageReply = true
-            store?.setTyping(character.id, true)
-
             do {
                 let stored = LocalConversationStore.shared.load(for: character.id)
                 let imageResult = try await service.generateChatImage(
-                    character: character, prompt: text,
+                    character: character, prompt: prompt,
                     localMessages: realMessages(), summary: stored?.summary ?? "",
                     currentActivity: currentActivity?.detail
                 )
 
-                showsTypingBubble = false
-                isSendingImageReply = false
-                messages.append(Message(role: .assistant, content: "", imageURL: imageResult.url))
+                // Gerçekten indirildi garantisi — CachedImage boş kare göstermesin.
+                await ImageCache.shared.prefetch([imageResult.url])
+
+                if let finalIdx = messages.firstIndex(where: { $0.id == messageID }) {
+                    messages[finalIdx].imageURL = imageResult.url
+                    messages[finalIdx].pendingImagePrompt = nil
+                }
+                generatingImageMessageIDs.remove(messageID)
                 handleTokenBalance(imageResult.tokenBalance)
+                updateCache()
 
                 // İsteğe bağlı metin tepkisi — sırayla, fotoğraftan SONRA gelir.
                 // `imageResult.redirected` true ise (orijinal istek reddedilip
                 // yumuşatılmış bir fotoğrafla değiştirildi) normal tepki yerine
                 // doğal bir yönlendirme cevabı istenir (bkz. IMAGE_REDIRECT_RULE).
                 showsTypingBubble = true
+                isSendingImageReply = true
+                store?.setTyping(character.id, true)
                 let bubbleStartedAt = Date()
                 let realMsgs = realMessages()
                 let result = try await service.sendWithLocalHistory(
                     character: character,
                     localMessages: realMsgs,
                     summary: stored?.summary ?? "",
-                    userMessage: text,
+                    userMessage: prompt,
                     level: relationshipLevel,
-                    lastMessageAt: lastMessageAt,
                     imageReactionChat: true,
                     currentActivity: currentActivity?.detail,
                     imageRedirected: imageResult.redirected
@@ -635,6 +689,7 @@ final class ChatViewModel {
                     try? await Task.sleep(nanoseconds: UInt64(remaining * 1_000_000_000))
                 }
                 showsTypingBubble = false
+                isSendingImageReply = false
                 store?.setTyping(character.id, false)
 
                 let caption = result.reply.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -644,6 +699,7 @@ final class ChatViewModel {
 
                 applyPostReplyEffects(gotPhoto: imageResult.url, stored: stored)
             } catch {
+                generatingImageMessageIDs.remove(messageID)
                 errorMessage = isInsufficientTokensError(error)
                     ? String(localized: "Not enough tokens. Get more to keep chatting.")
                     : error.localizedDescription

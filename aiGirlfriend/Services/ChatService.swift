@@ -189,7 +189,7 @@ struct ChatService {
         imageRedirected: Bool = false
     ) async throws -> ChatReply {
         let wireHistory = localMessages
-            .filter { $0.imageURL == nil && $0.localImagePath == nil }
+            .filter { $0.imageURL == nil && $0.localImagePath == nil && !$0.isPending }
             .suffix(20)
             .map { WireHistoryMessage(role: $0.role.rawValue, content: $0.content) }
         let resp = try await perform(
@@ -230,7 +230,7 @@ struct ChatService {
         nearSleepTime: Bool = false
     ) async throws -> ChatReply {
         let wireHistory = localMessages
-            .filter { $0.imageURL == nil && $0.localImagePath == nil }
+            .filter { $0.imageURL == nil && $0.localImagePath == nil && !$0.isPending }
             .suffix(20)
             .map { WireHistoryMessage(role: $0.role.rawValue, content: $0.content) }
         let wireCaption = userCaption.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? " " : userCaption
@@ -295,7 +295,7 @@ struct ChatService {
         request.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
         request.setValue(Config.supabaseAnonKey, forHTTPHeaderField: "apikey")
         let wireHistory = localMessages
-            .filter { $0.imageURL == nil && $0.localImagePath == nil }
+            .filter { $0.imageURL == nil && $0.localImagePath == nil && !$0.isPending }
             .suffix(20)
             .map { WireHistoryMessage(role: $0.role.rawValue, content: $0.content) }
         request.httpBody = try JSONEncoder().encode(
@@ -332,7 +332,7 @@ struct ChatService {
         photoURL: URL
     ) async throws -> String? {
         let wireHistory = localMessages
-            .filter { $0.imageURL == nil && $0.localImagePath == nil }
+            .filter { $0.imageURL == nil && $0.localImagePath == nil && !$0.isPending }
             .suffix(20)
             .map { WireHistoryMessage(role: $0.role.rawValue, content: $0.content) }
         let resp = try await perform(
@@ -393,7 +393,7 @@ struct ChatService {
         previousSchedule: CharacterSchedule?
     ) async throws -> (summary: String, schedule: CharacterSchedule?) {
         let wire = messagesToFold
-            .filter { $0.imageURL == nil && $0.localImagePath == nil }
+            .filter { $0.imageURL == nil && $0.localImagePath == nil && !$0.isPending }
             .map { WireHistoryMessage(role: $0.role.rawValue, content: $0.content) }
         let resp = try await perform(
             character: character,
