@@ -12,6 +12,11 @@ import Observation
 @Observable
 final class TokenStore {
     var balance: Int = 0
+    /// Son `setBalance` çağrısındaki fark — TokenBadge bunu izleyip kısa bir
+    /// "+1000"/"-25" animasyonu gösterir, sonra kendini `nil`'e sıfırlar
+    /// (bkz. TokenBadge.spendAnimation). `refresh()` bunu TETİKLEMEZ — sadece
+    /// gerçek harcama/kazanma anlarında (setBalance) dolar.
+    var lastDelta: Int?
     private let cacheKey = "tokens.cachedBalance"
 
     init() {
@@ -39,7 +44,9 @@ final class TokenStore {
     /// Bir edge function cevabından gelen `tokenBalance` alanıyla anında
     /// günceller — bir sonraki `refresh()`'i beklemeden (bkz. ChatViewModel).
     func setBalance(_ value: Int) {
+        let delta = value - balance
         balance = value
         UserDefaults.standard.set(value, forKey: cacheKey)
+        if delta != 0 { lastDelta = delta }
     }
 }

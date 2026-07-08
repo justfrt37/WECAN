@@ -92,7 +92,7 @@ struct MainTabView: View {
         // böylece ChatView push edilince (kök yerini alınca) rozet KAYBOLMAZ,
         // her zaman en üstte kalır (bkz. tasarım: "chat içinde de görünmeli").
         .overlay(alignment: .topTrailing) {
-            TokenBadge(balance: tokenStore.balance) { showTokenStore = true }
+            TokenBadge(tokenStore: tokenStore) { showTokenStore = true }
                 .padding(.top, 8)
                 .padding(.trailing, 16)
         }
@@ -110,7 +110,9 @@ struct MainTabView: View {
         )) { wrapped in
             StreakPopupView(result: wrapped.result) {
                 streakResult = nil
-                Task { await tokenStore.refresh() }
+                // `setBalance` (not `refresh`) — streak grants trigger the
+                // same "+N tokens" badge animation as any other gain.
+                if let balance = wrapped.result.balance { tokenStore.setBalance(balance) }
             }
             .presentationBackground(.clear)
         }
