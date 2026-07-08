@@ -34,6 +34,64 @@ private let roleOptions: [RoleOption] = [
           description: String(localized: "Acts like she's moved on… hasn't")),
 ]
 
+// MARK: - Personality definitions (role + vibe merged into one pick)
+//
+// "Select Mood" step used to be two separate steps (role, then vibe) — the
+// role step was never actually wired into the wizard (dead `roleStep` var,
+// `selectedRole` silently stayed at its "flirty" default). Merging them into
+// one curated set fixes that gap and drops incoherent role/vibe pairings
+// (e.g. Distant+Energetic). `role`/`vibe` still map 1:1 to the existing
+// `personality_role`/`builder_selections.vibe` fields — no backend change.
+// `crazy`/`ex` keep their existing single-role behavior (no vibe pairing,
+// same as before), just borrowing one of the 4 existing vibe photos below
+// so their card isn't blank.
+private struct PersonalityOption: Identifiable {
+    let id: String
+    let role: String    // → personality_role
+    let vibe: String    // → builder_selections.vibe / BuilderImages "vibe" key
+    let label: String
+    let description: String
+}
+
+private let personalityOptions: [PersonalityOption] = [
+    .init(id: "flirty_energetic", role: "flirty", vibe: "Energetic",
+          label: String(localized: "Firecracker"),
+          description: String(localized: "Bubbly and forward, always chasing you")),
+    .init(id: "flirty_elegant", role: "flirty", vibe: "Elegant",
+          label: String(localized: "Charmer"),
+          description: String(localized: "Smooth, confident, effortlessly seductive")),
+    .init(id: "distant_mysterious", role: "distant", vibe: "Mysterious",
+          label: String(localized: "Enigma"),
+          description: String(localized: "Aloof and guarded, impossible not to chase")),
+    .init(id: "distant_elegant", role: "distant", vibe: "Elegant",
+          label: String(localized: "Ice Queen"),
+          description: String(localized: "Cold and refined, hard to impress")),
+    .init(id: "shy_sweet", role: "shy", vibe: "Sweet",
+          label: String(localized: "Shy Sweetheart"),
+          description: String(localized: "Nervous and sweet, opens up slowly")),
+    .init(id: "shy_mysterious", role: "shy", vibe: "Mysterious",
+          label: String(localized: "Quiet Mystery"),
+          description: String(localized: "Reserved outside, secretly deep")),
+    .init(id: "playful_energetic", role: "playful", vibe: "Energetic",
+          label: String(localized: "Livewire"),
+          description: String(localized: "Loud, witty, chaotic energy")),
+    .init(id: "playful_mysterious", role: "playful", vibe: "Mysterious",
+          label: String(localized: "Trickster"),
+          description: String(localized: "Teasing jokes, keeps you guessing")),
+    .init(id: "devoted_sweet", role: "devoted", vibe: "Sweet",
+          label: String(localized: "Devoted Sweetheart"),
+          description: String(localized: "Warm and attached from day one")),
+    .init(id: "devoted_energetic", role: "devoted", vibe: "Energetic",
+          label: String(localized: "Adoring"),
+          description: String(localized: "Enthusiastic, always excited for you")),
+    .init(id: "crazy", role: "crazy", vibe: "Energetic",
+          label: String(localized: "Crazy"),
+          description: String(localized: "Intense love, always overthinking")),
+    .init(id: "ex", role: "ex", vibe: "Mysterious",
+          label: String(localized: "The Ex"),
+          description: String(localized: "Acts like she's moved on… hasn't")),
+]
+
 // MARK: - Profession definitions
 
 private struct ProfessionOption: Identifiable {
@@ -72,7 +130,7 @@ struct CreateCharacterView: View {
     // Tüm adımlar varsayılan olarak ilk seçenek seçili gelir.
     @State private var selectedRole = "flirty"
     @State private var selectedCategory = "Realistic"
-    @State private var selectedVibe = "Sweet"
+    @State private var selectedVibe = "Energetic"
     @State private var selectedProfession = "Student"
     @State private var selectedAgeRange = AppearanceOptions.ageRanges[0]
     @State private var selectedHairstyle = AppearanceOptions.hairstyles[0]
@@ -81,6 +139,7 @@ struct CreateCharacterView: View {
     @State private var selectedEyeColor = AppearanceOptions.eyeColors[0]
     @State private var selectedNoseShape = AppearanceOptions.noseShapes[0]
     @State private var selectedSkinTone = AppearanceOptions.skinTones[0]
+    @State private var selectedBodyType = AppearanceOptions.bodyTypes[0]
     @State private var selectedEthnicity = AppearanceOptions.ethnicities[0]
     @State private var exHistory = ""
     @State private var selectedInterests: Set<String> = [CreateCharacterView.hobbies[0]]
@@ -111,6 +170,10 @@ struct CreateCharacterView: View {
     @State private var photoRevealed = false
     @State private var generating = false
     @State private var revealedImage: Image?  // gerçek fotoğraf (önceden indirilir)
+    /// PRO olmayan kullanıcı "See character"a basınca açılır — gerçek üretim
+    /// SADECE PRO ise başlar (bkz. reveal()). Paywall kapanınca PRO olduysa
+    /// otomatik devam eder (bkz. onDismiss).
+    @State private var showPaywall = false
 
     private enum Phase { case steps, generatingPhoto, photoPreview, creating, ready }
 
@@ -120,7 +183,7 @@ struct CreateCharacterView: View {
     // Sıra: 0=kategori 1=isim 2=etnik köken 3=yaş 4=tarz(vibe) 5=meslek
     //       6=ilgi alanları 7=saç stili 8=saç rengi 9=göz rengi 10=ten tonu 11=anı(geçmiş)
     // Fotoğraf ("kız kısmı") TÜM adımlar bittikten SONRA üretilir.
-    private var totalSteps: Int { 12 }
+    private var totalSteps: Int { 13 }
     private var isLastStep: Bool { stepIndex == totalSteps - 1 }
 
     var body: some View {
@@ -138,9 +201,14 @@ struct CreateCharacterView: View {
                 case .ready:           readyContent
                 }
             }
-            .navigationDestination(for: Character.self) { ChatView(character: $0) }
         }
         .tint(AppColor.pink)
+        .sheet(isPresented: $showPaywall, onDismiss: {
+            // Paywall kapandı — PRO oldularsa fotoğrafı hemen üret ve devam et.
+            if PurchaseService.shared.isPro { reveal() }
+        }) {
+            PaywallHostView()
+        }
     }
 
     /// Ortak duvar-saati nabzı (0..1). İki TimelineView(.animation) aynı display-link
@@ -226,15 +294,15 @@ struct CreateCharacterView: View {
         case 1: nameStep                                                                          // İsim
         case 2: optionGrid(options: AppearanceOptions.ethnicities, binding: $selectedEthnicity, imageKey: "eth")   // Etnik köken
         case 3: optionGrid(options: AppearanceOptions.ageRanges, binding: $selectedAgeRange, imageKey: "age")      // Yaş
-        case 4: optionGrid(options: ["Sweet", "Mysterious", "Energetic", "Elegant"],
-                           binding: $selectedVibe, imageKey: "vibe")                              // Tarz
+        case 4: moodStep                                                                          // Kişilik (rol+tarz birleşik)
         case 5: professionStep                                                                    // Meslek
         case 6: interestsStep                                                                     // İlgi alanları
         case 7: appearanceOptionGrid(options: AppearanceOptions.hairstyles, feature: .hairstyle, binding: $selectedHairstyle, imageKey: "hair")
         case 8: appearanceOptionGrid(options: AppearanceOptions.hairColors, feature: .hairColor, binding: $selectedHairColor, imageKey: "haircolor")
         case 9: eyeColorStep
         case 10: appearanceOptionGrid(options: AppearanceOptions.skinTones, feature: .skinTone, binding: $selectedSkinTone, imageKey: "skin")
-        default: exHistoryStep                                                                    // Anı ekle (11)
+        case 11: optionGrid(options: AppearanceOptions.bodyTypes, binding: $selectedBodyType)     // Vücut tipi (görsel önizleme yok, metin chip)
+        default: exHistoryStep                                                                    // Anı ekle (12)
         }
     }
 
@@ -361,6 +429,88 @@ struct CreateCharacterView: View {
                 }
                 .buttonStyle(.plain)
             }
+        }
+    }
+
+    // MARK: Step 4 — Mood (personality: role + vibe merged)
+
+    private var moodStep: some View {
+        LazyVGrid(columns: columns2, spacing: 12) {
+            ForEach(personalityOptions) { p in
+                let selected = selectedRole == p.role && selectedVibe == p.vibe
+                Button {
+                    selectedRole = p.role
+                    selectedVibe = p.vibe
+                } label: {
+                    moodCard(p, selected: selected)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    /// Reuses the 4 existing vibe photos (Sweet/Mysterious/Energetic/Elegant) — every
+    /// personality maps to one, so no card art is missing. Two labels on top of the photo:
+    /// the personality name (bottom, matches every other image card in this wizard) and a
+    /// small vibe tag (top) so the reused photo's mood is still legible on its own — both
+    /// sit on a ~40%-opaque colored plate rather than relying on the photo's own contrast,
+    /// since the same 4 photos now appear under very different personalities/crops.
+    private func moodCard(_ p: PersonalityOption, selected: Bool) -> some View {
+        let height = cardHeight(for: "vibe")
+        return ZStack(alignment: .bottomLeading) {
+            if let asset = BuilderImages.asset("vibe", p.vibe) {
+                Image(asset).resizable().scaledToFill()
+                    .frame(maxWidth: .infinity).frame(height: height).clipped()
+            } else {
+                AppColor.card.frame(height: height)
+            }
+            LinearGradient(colors: [.clear, .black.opacity(0.75)], startPoint: .center, endPoint: .bottom)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(p.label)
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(.white)
+                Text(p.description)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.white.opacity(0.85))
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(10)
+
+            Text(Self.vibeLabel(p.vibe))
+                .font(.system(size: 10, weight: .bold))
+                .textCase(.uppercase)
+                .foregroundStyle(.white)
+                .padding(.horizontal, 8).padding(.vertical, 4)
+                .background(AppColor.pink.opacity(0.4), in: Capsule())
+                .padding(8)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        }
+        .frame(height: height)
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 18)
+            .strokeBorder(selected ? AppColor.pink : .white.opacity(0.12), lineWidth: selected ? 3 : 1))
+        .overlay(alignment: .topTrailing) {
+            if selected {
+                Image(systemName: "checkmark.circle.fill").font(.system(size: 20))
+                    .foregroundStyle(AppColor.pink).padding(8)
+                    .background(Circle().fill(.white).padding(10))
+            }
+        }
+    }
+
+    /// The 4 vibe values are fixed/known — map each to its own `String(localized:)` literal
+    /// (matches the existing catalog keys "Sweet"/"Mysterious"/"Energetic"/"Elegant") rather
+    /// than building a `LocalizationValue` from a runtime string, so extraction/catalog
+    /// lookup works the normal way.
+    private static func vibeLabel(_ vibe: String) -> String {
+        switch vibe {
+        case "Sweet": return String(localized: "Sweet")
+        case "Mysterious": return String(localized: "Mysterious")
+        case "Energetic": return String(localized: "Energetic")
+        case "Elegant": return String(localized: "Elegant")
+        default: return vibe
         }
     }
 
@@ -791,8 +941,12 @@ struct CreateCharacterView: View {
                 .onTapGesture { reveal() }
 
                 if let c = created {
-                    // Karakter oluşturuldu → doğrudan sohbete git.
-                    NavigationLink(value: c) {
+                    // Karakter oluşturuldu → modalı kapat, sohbete gerçek (app
+                    // çapındaki) NavigationStack üzerinden git — böylece chat'ten
+                    // geri dönünce "hazır" ekranına değil, tüm sohbetler listesine düşer.
+                    Button {
+                        goToChat(with: c)
+                    } label: {
                         Text("Continue")
                             .font(.system(size: 17, weight: .bold))
                             .foregroundStyle(.white)
@@ -913,7 +1067,9 @@ struct CreateCharacterView: View {
                                 .foregroundStyle(.white.opacity(0.7))
                         }
 
-                        NavigationLink(value: c) {
+                        Button {
+                            goToChat(with: c)
+                        } label: {
                             Text("Start Chatting")
                                 .font(.system(size: 17, weight: .bold))
                                 .foregroundStyle(.white)
@@ -941,13 +1097,14 @@ struct CreateCharacterView: View {
         case 1: return String(localized: "Karakterine bir isim seç")
         case 2: return String(localized: "Ethnicity")
         case 3: return String(localized: "Age range")
-        case 4: return String(localized: "Vibe")
+        case 4: return String(localized: "Select Mood")
         case 5: return String(localized: "Profession")
         case 6: return String(localized: "Interests")
         case 7: return String(localized: "Hairstyle")
         case 8: return String(localized: "Hair color")
         case 9: return String(localized: "Eye color")
         case 10: return String(localized: "Skin tone")
+        case 11: return String(localized: "Body type")
         default: return String(localized: "History & Memories")
         }
     }
@@ -968,6 +1125,7 @@ struct CreateCharacterView: View {
         case 8: return !selectedHairColor.isEmpty
         case 9: return !selectedEyeColor.isEmpty
         case 10: return !selectedSkinTone.isEmpty
+        case 11: return !selectedBodyType.isEmpty
         default: return true // ex history is optional
         }
     }
@@ -986,11 +1144,21 @@ struct CreateCharacterView: View {
         }
     }
 
+    /// Modalı kapatır ve sohbeti app'in ana NavigationStack'i (MainTabView)
+    /// üzerinden açar — chat kendi lokal stack'imizde değil, gerçek stack'te
+    /// push edilsin ki geri tuşu "hazır" ekranına değil, sohbetler listesine dönsün.
+    private func goToChat(with character: Character) {
+        store.pendingTab = .chat
+        store.pendingMeetRequest = MeetRequest(character: character, prefillText: "")
+        dismiss()
+    }
+
     /// "See character": gerçek fotoğrafı üretir + karakteri oluşturur, sonra
     /// bulanıklığı yumuşak animasyonla açar (createCharacter'ın fallback'i
     /// olduğu için görsel başarısız olsa bile karakter mutlaka oluşturulur).
     private func reveal() {
         guard !generating && created == nil else { return }
+        guard PurchaseService.shared.tier != .none else { showPaywall = true; return }
         generating = true
         photoGenError = nil
         // @MainActor: tüm @State güncellemeleri ana thread'de olsun (arka planda
@@ -1041,6 +1209,7 @@ struct CreateCharacterView: View {
             eyeColor: selectedEyeColor,
             noseShape: selectedNoseShape,
             skinTone: selectedSkinTone,
+            bodyType: selectedBodyType,
             category: selectedCategory,
             vibe: selectedVibe,
             profession: selectedProfession,
@@ -1060,7 +1229,7 @@ struct CreateCharacterView: View {
         let photo = generatedPhotoURL ?? ""
         let history = exHistory.trimmingCharacters(in: .whitespaces)
 
-        if let c = await service.create(
+        let outcome = await service.create(
             name: capitalizedName(characterName),
             photoUrl: photo,
             personalityRole: selectedRole,
@@ -1074,13 +1243,29 @@ struct CreateCharacterView: View {
             eyeColor: selectedEyeColor,
             noseShape: selectedNoseShape,
             skinTone: selectedSkinTone,
+            bodyType: selectedBodyType,
             exHistory: history.isEmpty ? nil : history,
             interests: Array(selectedInterests),
             ethnicity: selectedEthnicity
-        ) {
+        )
+
+        switch outcome {
+        case .success(let c):
             withAnimation { created = c }
             store.characters.append(c)
             return
+        case .rejected(let errorCode):
+            // Sunucu bilerek reddetti (abonelik yok / haftalık hak bitti) —
+            // ASLA yerel-sadece bir fallback karakter oluşturma, bu gating'i
+            // tamamen atlar (bkz. create-character/index.ts checkCreationAllowance).
+            photoRevealed = true
+            photoGenError = errorCode == "weekly_limit_reached"
+                ? String(localized: "You've used all your character slots this week.")
+                : String(localized: "Subscribe to create characters.")
+            showPaywall = errorCode != "weekly_limit_reached"
+            return
+        case .networkFailure:
+            break // aşağıdaki yerel fallback'e düş
         }
 
         // Fallback: local character if server unreachable — üretilmiş fotoğraf
