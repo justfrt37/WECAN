@@ -75,7 +75,7 @@ struct ProfileView: View {
         .padding(.vertical, 24)
         .frame(maxWidth: .infinity)
         .background(
-            LinearGradient(colors: [Color(hex: 0x2E1E14), Color(hex: 0x3D2A1A)],
+            LinearGradient(colors: [AppColor.bg2, AppColor.card],
                            startPoint: .topLeading, endPoint: .bottomTrailing),
             in: RoundedRectangle(cornerRadius: 24)
         )
@@ -125,6 +125,8 @@ struct ProfileView: View {
             notificationRow
             divider
             Button { showHelp = true } label: { menuRow("questionmark.circle.fill", "Help & Support", tint: Color(hex: 0x5B8DEF)) }
+            divider
+            devProToggleRow
         }
         .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 20))
         .overlay(
@@ -134,6 +136,28 @@ struct ProfileView: View {
 
     private var divider: some View {
         Rectangle().fill(.white.opacity(0.06)).frame(height: 1)
+    }
+
+    /// GEÇİCİ DEV DÜĞMESİ — RevenueCat gerçek abonelik entegrasyonu kurulunca
+    /// KALDIRILACAK. PurchaseService.isPro'yu elle true/false yapıp tüm PRO
+    /// kilitlerini (karakter fotoğrafı, foto/ses gönderme, sesli/fotoğraf
+    /// isteme) test etmeye yarıyor.
+    private var devProToggleRow: some View {
+        HStack(spacing: 14) {
+            rowIcon("hammer.fill", tint: Color(hex: 0x9B59B6))
+            Text("DEV: Force PRO")
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(.white)
+            Spacer()
+            Toggle("", isOn: Binding(
+                get: { PurchaseService.shared.isPro },
+                set: { PurchaseService.shared.tier = $0 ? .max : .none }
+            ))
+            .labelsHidden()
+            .tint(AppColor.pink)
+        }
+        .padding(.horizontal, 18)
+        .frame(height: 54)
     }
 
     private func menuRow(_ icon: String, _ title: LocalizedStringKey, tint: Color) -> some View {
