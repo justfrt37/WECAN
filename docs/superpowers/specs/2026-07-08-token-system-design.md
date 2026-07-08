@@ -93,9 +93,9 @@ This cannot be a client-only `UserDefaults` store like the app's other lightweig
 
 ## Persistent token badge
 
-- Truly every screen, per the original ask — not just the 5 main tabs. That includes the fullScreenCover-presented views that live outside `MainTabView`'s `NavigationStack` (`CreateCharacterView`, `CharacterProfileView`, `GalleryView`, `AddCharacterNoteSheet`, `HelpSupportView`, etc.), not only `MainTabView`'s tab bar destinations and `ChatView`.
-- The one screen it's *not* shown on is the token/subscription page itself (redundant — you're already there).
-- Implementation: a single reusable `TokenBadge` view + a `.tokenBadge()` view modifier (top-trailing overlay) applied at each screen's own top-level container, mirroring how `headerButton`/`circleButton` are already duplicated per-view in this codebase rather than centralized — consistent with existing patterns, not a new architectural layer. The plan should decide the exact modifier call sites (every `View`'s top-level `body`), but the requirement is: no screen may render without it, including modals.
+- Scoped to `MainTabView`'s own `NavigationStack` only: the 5 tabs (Discover/`FeedView`, `ChatListView`, `ExploreView`, `LikesView`, `ProfileView`) plus `ChatView` (which pushes onto that same stack, replacing the tab bar, per the existing "Tek NavigationStack" comment in `MainTabView.swift`).
+- Explicitly **not** shown on anything presented as a separate `fullScreenCover`/modal outside that stack — `CreateCharacterView`, `CharacterProfileView`, `GalleryView`, `AddCharacterNoteSheet`, `HelpSupportView`, the token/subscription page itself, etc.
+- Implementation: a single reusable `TokenBadge` view, placed once at the `MainTabView`-level container (e.g. as an overlay on the outer `ZStack`/`NavigationStack` in `MainTabView.swift`) rather than duplicated per-tab — since all 5 tabs and `ChatView` already share that one stack, one placement covers all of them.
 - Rectangular pill: token count on the left, a smaller square "+" box on the right, both inside one tappable container — tapping anywhere on the pill (count or the `+` box) opens the token/subscription page. Not two separate tap targets.
 - Reads live from `token_balances` (cached locally like other stores, refreshed on relevant events — after sending a message/voice/photo, after a purchase, after a streak claim).
 
