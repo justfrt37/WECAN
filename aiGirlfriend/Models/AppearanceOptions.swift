@@ -20,6 +20,9 @@ enum AppearanceOptions {
                               "Roman", "Snub", "Nubian", "Greek"]
     // Ten tonu — app içindeki görsellerle eşleşen set.
     static let skinTones = ["Porcelain", "Fair", "Tan", "Deep", "Golden", "Caramel"]
+    // Vücut tipi — görsel üretim promptuna gider (bkz. chat-image/appearanceContext,
+    // create-character/buildImagePrompt), önizleme görseli yok (metin chip).
+    static let bodyTypes = ["Slim", "Athletic", "Curvy", "Average", "Voluptuous", "Plus Size"]
     // Etnik köken (değer=İngilizce prompt için, gösterim=Türkçe). Görseller: "Etnik Köken" klasörü.
     static let ethnicities = ["African", "Mediterranean", "European", "East Asian",
                                "South Asian", "Southeast Asian", "Scandinavian",
@@ -54,6 +57,9 @@ enum AppearanceOptions {
         "East Asian": "Doğu Asya", "South Asian": "Güney Asya", "Southeast Asian": "Güneydoğu Asya",
         "Scandinavian": "İskandinav", "Mixed": "Karışık", "North African": "Kuzey Afrikalı",
         "Latina": "Latin", "Middle Eastern": "Orta Doğu", "Slavic": "Slav",
+        // Vücut tipi
+        "Slim": "İnce", "Athletic": "Atletik", "Curvy": "Dolgun Hatlı",
+        "Average": "Ortalama", "Voluptuous": "Vücutlu", "Plus Size": "Artı Beden",
     ]
 
     static func hairColorValue(_ name: String) -> Color {
