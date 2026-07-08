@@ -128,9 +128,15 @@ final class NotificationScheduler {
         }
     }
 
-    /// Called right after the user sends a message — resets that bot's silence window.
+    /// Called right after the user sends a message — resets that bot's silence window
+    /// and lifts the post-ghosted proactive-notification freeze (see `rescheduleGhosted`'s
+    /// `ghostedAt` gate on jealousy/bedtime/level-up).
     func noteUserSent(character: Character) {
         center.removePendingNotificationRequests(withIdentifiers: [Self.ghostedID(for: character.id)])
+        if var stored = LocalConversationStore.shared.load(for: character.id), stored.ghostedAt != nil {
+            stored.ghostedAt = nil
+            LocalConversationStore.shared.save(stored, for: character.id)
+        }
         rescheduleGhosted(characters: [character])
     }
 
@@ -145,6 +151,7 @@ final class NotificationScheduler {
             let stored = LocalConversationStore.shared.load(for: character.id)
             return !BlockedCharactersStore.isBlocked(character.id) &&
                 stored != nil &&
+                stored?.ghostedAt == nil &&
                 NotificationPreferencesStore.canSendMore(for: character.id) &&
                 !CharacterSleepState.isEffectivelyAsleep(stored: stored)
         }
@@ -187,6 +194,7 @@ final class NotificationScheduler {
             let stored = LocalConversationStore.shared.load(for: character.id)
             return !BlockedCharactersStore.isBlocked(character.id) &&
                 (stored?.levelProgress ?? 0) >= 0.8 &&
+                stored?.ghostedAt == nil &&
                 NotificationPreferencesStore.canSendMore(for: character.id) &&
                 !CharacterSleepState.isEffectivelyAsleep(stored: stored)
         }
@@ -268,6 +276,7 @@ final class NotificationScheduler {
             let id = Self.bedtimeID(for: character.id)
             guard !BlockedCharactersStore.isBlocked(character.id),
                   let stored = LocalConversationStore.shared.load(for: character.id),
+                  stored.ghostedAt == nil,
                   stored.level >= 5,
                   let schedule = stored.schedule,
                   let fireAt = ScheduleLookup.nextSleepBlockStart(schedule: schedule)
