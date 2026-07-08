@@ -301,7 +301,7 @@ struct CreateCharacterView: View {
         case 8: appearanceOptionGrid(options: AppearanceOptions.hairColors, feature: .hairColor, binding: $selectedHairColor, imageKey: "haircolor")
         case 9: eyeColorStep
         case 10: appearanceOptionGrid(options: AppearanceOptions.skinTones, feature: .skinTone, binding: $selectedSkinTone, imageKey: "skin")
-        case 11: optionGrid(options: AppearanceOptions.bodyTypes, binding: $selectedBodyType)     // Vücut tipi (görsel önizleme yok, metin chip)
+        case 11: optionGrid(options: AppearanceOptions.bodyTypes, binding: $selectedBodyType, imageKey: "bodytype")     // Vücut tipi
         default: exHistoryStep                                                                    // Anı ekle (12)
         }
     }
@@ -611,7 +611,7 @@ struct CreateCharacterView: View {
     /// diye daha uzun kart kullanılır (dikey 9:16 görselden daha fazlası görünür).
     private func cardHeight(for imageKey: String?) -> CGFloat {
         switch imageKey {
-        case "hair", "haircolor", "skin", "age", "vibe", "prof": return 240
+        case "hair", "haircolor", "skin", "age", "vibe", "prof", "bodytype": return 240
         default: return 180
         }
     }
