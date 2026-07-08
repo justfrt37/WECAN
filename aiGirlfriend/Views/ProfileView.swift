@@ -11,9 +11,11 @@ import UIKit
 import UserNotifications
 
 struct ProfileView: View {
+    @Environment(TokenStore.self) private var tokenStore
     @State private var notificationsOn = false
     @State private var showPaywall = false
     @State private var showHelp = false
+    @State private var devTier: SubscriptionTier = PurchaseService.shared.tier
 
     var body: some View {
         VStack(spacing: 0) {
@@ -23,6 +25,7 @@ struct ProfileView: View {
                     avatarCard
                     proBanner
                     settingsMenu
+                    devTokenTestPanel
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 4)
@@ -75,7 +78,7 @@ struct ProfileView: View {
         .padding(.vertical, 24)
         .frame(maxWidth: .infinity)
         .background(
-            LinearGradient(colors: [Color(hex: 0x2E1E14), Color(hex: 0x3D2A1A)],
+            LinearGradient(colors: [AppColor.bg2, AppColor.card],
                            startPoint: .topLeading, endPoint: .bottomTrailing),
             in: RoundedRectangle(cornerRadius: 24)
         )
@@ -134,6 +137,58 @@ struct ProfileView: View {
 
     private var divider: some View {
         Rectangle().fill(.white.opacity(0.06)).frame(height: 1)
+    }
+
+    /// GEÇİCİ DEV PANELİ — RevenueCat/gerçek IAP kurulunca KALDIRILACAK (bkz.
+    /// DevTokenTools, dev-token-tools edge function). Token mekaniklerini
+    /// (harcama/kazanma, abonelik tier'ları) gerçek ödeme olmadan test etmeye
+    /// yarıyor — tier butonları GERÇEK bir ilk-kez-abone-olma gibi davranır:
+    /// hem `subscriptions` satırını hem o haftalık token miktarını basar.
+    private var devTokenTestPanel: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 8) {
+                Image(systemName: "hammer.fill").foregroundStyle(Color(hex: 0x9B59B6))
+                Text("DEV: Token Testing")
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(.white)
+            }
+
+            HStack(spacing: 10) {
+                devActionButton("+1000 💠") { await DevTokenTools.addTokens(into: tokenStore) }
+                devActionButton("-1000 💠") { await DevTokenTools.removeTokens(from: tokenStore) }
+            }
+
+            Text("Subscription tier")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.5))
+
+            Picker("", selection: $devTier) {
+                Text("Off").tag(SubscriptionTier.none)
+                Text("Pro").tag(SubscriptionTier.pro)
+                Text("Pro+").tag(SubscriptionTier.proPlus)
+                Text("Max").tag(SubscriptionTier.max)
+            }
+            .pickerStyle(.segmented)
+            .onChange(of: devTier) { _, newTier in
+                Task { await DevTokenTools.setTier(newTier, tokenStore: tokenStore) }
+            }
+        }
+        .padding(16)
+        .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 20))
+        .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(.white.opacity(0.08), lineWidth: 1))
+    }
+
+    private func devActionButton(_ title: String, action: @escaping () async -> Void) -> some View {
+        Button {
+            Task { await action() }
+        } label: {
+            Text(title)
+                .font(.system(size: 13, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(maxWidth: .infinity).padding(.vertical, 10)
+                .background(AppColor.pink.opacity(0.25), in: RoundedRectangle(cornerRadius: 12))
+        }
+        .buttonStyle(.plain)
     }
 
     private func menuRow(_ icon: String, _ title: LocalizedStringKey, tint: Color) -> some View {

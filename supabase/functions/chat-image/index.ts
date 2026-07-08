@@ -37,6 +37,13 @@ const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
 const db = createClient(SUPABASE_URL, SERVICE_ROLE, { auth: { persistSession: false } });
 
+async function chargeOrReject(uid: string, amount: number, reason: string): Promise<{ ok: true; balance: number } | { ok: false }> {
+  const { data: charged } = await db.rpc("charge_tokens", { p_user_id: uid, p_amount: amount, p_reason: reason });
+  if (!charged) return { ok: false };
+  const { data: row } = await db.from("token_balances").select("balance").eq("user_id", uid).single();
+  return { ok: true, balance: row?.balance ?? 0 };
+}
+
 function userIdFromJWT(authHeader: string | null): string | null {
   if (!authHeader) return null;
   const jwt = authHeader.replace("Bearer ", "").trim();
@@ -57,6 +64,7 @@ interface BuilderSelections {
   eye_color?: string;
   nose_shape?: string;
   skin_tone?: string;
+  body_type?: string;
 }
 
 // Görüntü içinde ASLA yazı/metin/logo olmasın — hem talimat metninde hem de
@@ -84,11 +92,12 @@ function appearanceContext(opts: {
   builderSelections: BuilderSelections | null;
 }): string {
   const bs = opts.builderSelections;
+  const bodyType = bs?.body_type ? `, ${bs.body_type.toLowerCase()} body type` : "";
   const base = (bs && (bs.hairstyle || bs.hair_color || bs.eye_shape || bs.eye_color))
     ? `${opts.name}, a person with ${(bs.hairstyle ?? "").toLowerCase()} ` +
       `${(bs.hair_color ?? "").toLowerCase()} hair, ${(bs.eye_shape ?? "").toLowerCase()} ` +
       `${(bs.eye_color ?? "").toLowerCase()} eyes, ${(bs.nose_shape ?? "").toLowerCase()} nose, ` +
-      `${(bs.skin_tone ?? "").toLowerCase()} skin tone`
+      `${(bs.skin_tone ?? "").toLowerCase()} skin tone${bodyType}`
     // Katalog karakteri — kayıtlı görünüm alanı yok, en iyi ihtimalle isim/meslek.
     : `${opts.name}${opts.profession ? `, a ${opts.profession.toLowerCase()}` : ""}`;
   // Bio/tagline genelde meslek/yaşam detayı taşır (ör. "araştırma laboratuvarında
@@ -123,6 +132,21 @@ function conversationContext(history: { role: string; content: string }[], summa
   );
 }
 
+// İstemcinin ScheduleLookup ile hesapladığı "şu an ne yapıyor" bloğu (bkz.
+// chat/index.ts GÜNLÜK RUTİN notu) — bu olmadan foto her zaman genel
+// meslek/kategori varsayımına düşüyordu (ör. "laboratuvarda" fotoğraf, kız
+// aslında o an kanepede kitap okuyorken/evdeyken bile) — bkz. kullanıcı
+// raporu: metin cevabı doğru aktiviteyi yansıttı ama foto yansıtmadı.
+function currentActivityContext(currentActivity: string | null): string {
+  if (!currentActivity || !currentActivity.trim()) return "";
+  return (
+    "\n\nCHARACTER'S CURRENT REAL-TIME SITUATION — reflect this in LOCATION/" +
+    "POSE/OUTFIT unless the user's request explicitly specifies otherwise " +
+    "(this is what the character is ACTUALLY doing right now, takes " +
+    "priority over generic profession-based assumptions): " + currentActivity.trim()
+  );
+}
+
 // Kalibrasyon örneği — kullanıcının verdiği örnekle birebir aynı, sadece
 // FORMATI/ayrıntı seviyesini göstermek için modele verilir (içeriği değil).
 const FIELD_FORMAT_EXAMPLE =
@@ -148,10 +172,12 @@ function baselineConsistencyNote(): string {
   return (
     "\nA baseline reference image of this exact character is separately " +
     "attached to the image generator (you cannot see it, but it will be used " +
-    "for face/hair/character-design consistency) — do not describe a " +
-    "different face, hairstyle, or character design than what's implied above; " +
-    "only change the expression, outfit, pose, and location per the user's " +
-    "request.\n"
+    "for face/hair/character-design consistency). THE FACE IS NON-NEGOTIABLE " +
+    "— it must be recognizably the SAME PERSON as the reference: same face " +
+    "shape, same bone structure, same freckles/moles/distinguishing marks, " +
+    "same exact face. Never describe a different face, hairstyle, or " +
+    "character design than what's implied above — only the expression, " +
+    "outfit, pose, and location may change per the user's request.\n"
   );
 }
 
@@ -170,7 +196,15 @@ function realisticFieldGuidance(): string {
     "SUBJECT: the character's appearance (given below), plus natural skin " +
     "texture with visible pores and subtle imperfections — NEVER \"plastic,\" " +
     "\"airbrushed,\" \"waxy,\" \"over-smoothed,\" or \"AI-generated\" looking " +
-    "skin — plus the expression implied by the user's request.\n" +
+    "skin. EXPRESSION MUST MATCH THE MOOD OF THIS SPECIFIC PHOTO, not the " +
+    "character's default/profile-picture smile — a baseline reference photo " +
+    "showing her smiling does NOT mean every photo should smile. Choose " +
+    "whatever expression a real person would actually have for this exact " +
+    "moment/pose/outfit/request (e.g. a smoldering, half-lidded, or serious/" +
+    "sultry look for something intimate or a thirst-trap-style photo; a " +
+    "genuine laugh for something silly; a soft neutral look for something " +
+    "candid) — reason it out per the specific photo, never default to " +
+    "smiling out of habit.\n" +
     "OUTFIT: exactly what the character is wearing, specific enough to " +
     "visualize (garment type, fit, color) — infer something fitting if the " +
     "user didn't specify.\n" +
@@ -201,8 +235,14 @@ function styledFieldGuidance(): string {
     "explicitly instead of a camera/phone.\n" +
     "LIGHTING: the specific light source, quality, and overall color palette " +
     "matching the scene and art style.\n" +
-    "SUBJECT: the character's appearance (given below), plus the expression " +
-    "implied by the user's request.\n" +
+    "SUBJECT: the character's appearance (given below). EXPRESSION MUST MATCH " +
+    "THE MOOD OF THIS SPECIFIC PHOTO, not the character's default/profile-" +
+    "picture smile — a baseline reference showing her smiling does NOT mean " +
+    "every photo should smile. Choose whatever expression actually fits this " +
+    "exact moment/pose/outfit/request (e.g. smoldering/half-lidded/serious " +
+    "for something intimate or a thirst-trap-style photo, a genuine laugh for " +
+    "something silly, soft/neutral for something candid) — never default to " +
+    "smiling out of habit.\n" +
     "OUTFIT: exactly what the character is wearing, specific enough to " +
     "visualize — infer something fitting if the user didn't specify.\n" +
     "POSE: exactly how the character is positioned — where their arms and legs " +
@@ -302,6 +342,40 @@ async function composeImagePrompt(opts: {
   return trimmed ? `${trimmed}\n${NO_TEXT_RULE}` : `${opts.userPrompt}\n${NO_TEXT_RULE}`;
 }
 
+// Called ONLY when the original image-generation request was rejected
+// (typically the image model's own content-policy block on an explicit/NSFW
+// ask). Rewrites the SAME six-field prompt into something the image model
+// will actually accept — same character/setting/mood, explicit elements
+// toned down to suggestive-at-most. This is what lets the bot still send
+// a real photo instead of erroring out, paired with a natural in-character
+// redirect line (bkz. chat/index.ts IMAGE_REDIRECT_RULE).
+async function buildSafeFallbackPrompt(userPrompt: string, rejectedPrompt: string): Promise<string> {
+  const raw = await callGrokText(
+    [
+      {
+        role: "system",
+        content:
+          "You are a photo director. The following exact image-generation " +
+          "prompt was REJECTED by the image model's content policy (too " +
+          "explicit/NSFW to generate). Rewrite it into a new prompt for the " +
+          "SAME character, setting, and mood, but tone down or remove " +
+          "whatever made it explicit — keep it tasteful and suggestive at " +
+          "most, never nudity or explicit sexual content. Keep the exact " +
+          "same labeled-field structure and the same level of concrete, " +
+          "specific detail as the rejected prompt. Output ONLY the " +
+          "rewritten prompt, nothing else, no commentary.",
+      },
+      {
+        role: "user",
+        content: `Original user request: "${userPrompt}"\n\nRejected prompt:\n${rejectedPrompt}`,
+      },
+    ],
+    500
+  );
+  const trimmed = raw.trim();
+  return trimmed ? `${trimmed}\n${NO_TEXT_RULE}` : `${userPrompt}\n${NO_TEXT_RULE}`;
+}
+
 async function bytesFromImageResponse(r: Response): Promise<Uint8Array> {
   if (!r.ok) throw new Error(`Image gen ${r.status}: ${await r.text()}`);
   const d = await r.json();
@@ -319,26 +393,34 @@ async function bytesFromImageResponse(r: Response): Promise<Uint8Array> {
 
 /// `baselineImageUrl` varsa (çoğunlukla karakterin profil fotoğrafı) image-to-image
 /// /v1/images/edits kullanılır — aynı yüz/saç/cilt tonu korunur, sadece sahne/poz/
-/// açı/ışık değişir. Edits başarısız olursa (desteklenmeyen format vb.) TEK SEFER
-/// düz /v1/images/generations'a düşer.
+/// açı/ışık değişir. Bu, YÜZÜN aynı kalmasını sağlayan TEK mekanizma — metin
+/// açıklaması (appearanceContext) asla gerçek bir referans görsel kadar güvenilir
+/// değil. Bu yüzden edits başarısız olursa ÖNCE BİR KEZ DAHA denenir (çoğu hata
+/// geçici — ağ/5xx) — sadece İKİ deneme de başarısız olursa referanssız düz
+/// /v1/images/generations'a düşülür (o zaman yüz KESİNLİKLE tutmaz, bu yüzden
+/// son çare). ESKİDEN: tek hata → sessizce referanssız üretime düşüyordu, bu da
+/// kullanıcı raporlarındaki "bazen yüz tamamen farklı" hatasının kök nedeniydi.
 async function fetchGeneratedImageBytes(prompt: string, baselineImageUrl: string | null): Promise<Uint8Array> {
   if (baselineImageUrl) {
-    try {
-      const r = await fetch(XAI_IMAGE_EDITS_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${XAI_API_KEY}` },
-        body: JSON.stringify({
-          model: IMAGE_MODEL,
-          prompt,
-          image: { url: baselineImageUrl, type: "image_url" },
-          aspect_ratio: IMAGE_ASPECT_RATIO,
-          resolution: IMAGE_RESOLUTION,
-        }),
-      });
-      return await bytesFromImageResponse(r);
-    } catch (e) {
-      console.error("chat-image edits (baseline) failed, falling back to generations:", String(e));
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        const r = await fetch(XAI_IMAGE_EDITS_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${XAI_API_KEY}` },
+          body: JSON.stringify({
+            model: IMAGE_MODEL,
+            prompt,
+            image: { url: baselineImageUrl, type: "image_url" },
+            aspect_ratio: IMAGE_ASPECT_RATIO,
+            resolution: IMAGE_RESOLUTION,
+          }),
+        });
+        return await bytesFromImageResponse(r);
+      } catch (e) {
+        console.error(`chat-image edits (baseline) attempt ${attempt} failed:`, String(e));
+      }
     }
+    console.error("chat-image edits (baseline) failed twice — falling back to referenceless generation, face will NOT match.");
   }
 
   const r = await fetch(XAI_IMAGE_GENERATIONS_URL, {
@@ -382,8 +464,14 @@ Deno.serve(async (req: Request) => {
     // modundakiyle aynı şekle sahip, sadece görsel üretim promptu için kullanılır.
     const history: { role: string; content: string }[] = Array.isArray(b.history) ? b.history : [];
     const summary: string | null = typeof b.summary === "string" ? b.summary : null;
+    const currentActivity: string | null = typeof b.currentActivity === "string" ? b.currentActivity : null;
     if (!characterId) return json({ error: "characterId required" }, 400);
     if (!userPrompt) return json({ error: "prompt required" }, 400);
+
+    // Ucuz ön-kontrol — gerçek görsel üretim çağrısını (xAI, $0.02) boşuna
+    // yapmamak için. Asıl atomik düşüm görsel BAŞARIYLA üretildikten sonra.
+    const { data: preCheckBalance } = await db.from("token_balances").select("balance").eq("user_id", uid).maybeSingle();
+    if ((preCheckBalance?.balance ?? 0) < 25) return json({ error: "insufficient_tokens" }, 402);
 
     const { data: character, error: charErr } = await db
       .from("characters")
@@ -399,21 +487,28 @@ Deno.serve(async (req: Request) => {
     // yalnızca kullanıcı-yaratımı karakterlerde dolu) — bkz. architecture_db.
     const category: string = character.category ?? character.builder_selections?.category ?? "Realistic";
 
+    const imagePrompt = await composeImagePrompt({
+      appearance: appearanceContext({
+        name: character.name,
+        profession: character.profession,
+        tagline: character.tagline,
+        builderSelections: character.builder_selections ?? null,
+      }),
+      category,
+      userPrompt,
+      hasBaseline: baselineImageUrl !== null,
+      context: conversationContext(history, summary) + currentActivityContext(currentActivity),
+    });
+
     let photoUrl: string;
     let isPrivate = false;
+    // `redirected` — the original ask got rejected (content policy) and we
+    // regenerated a tamer version instead. Client uses this to ask chat/
+    // index.ts for a natural "that's too much right now, but here's this"
+    // reply instead of the normal photo-reaction caption (bkz.
+    // IMAGE_REDIRECT_RULE) — never just silently swap the photo.
+    let redirected = false;
     try {
-      const imagePrompt = await composeImagePrompt({
-        appearance: appearanceContext({
-          name: character.name,
-          profession: character.profession,
-          tagline: character.tagline,
-          builderSelections: character.builder_selections ?? null,
-        }),
-        category,
-        userPrompt,
-        hasBaseline: baselineImageUrl !== null,
-        context: conversationContext(history, summary),
-      });
       const [bytes, privacyResult] = await Promise.all([
         fetchGeneratedImageBytes(imagePrompt, baselineImageUrl),
         classifyPrivacy(imagePrompt),
@@ -421,8 +516,17 @@ Deno.serve(async (req: Request) => {
       photoUrl = await uploadGeneratedImage(bytes);
       isPrivate = privacyResult;
     } catch (e) {
-      console.error("chat-image generation failed:", String(e));
-      return json({ error: "image_generation_failed" }, 502);
+      console.error("chat-image generation failed, trying safe fallback prompt:", String(e));
+      try {
+        const safePrompt = await buildSafeFallbackPrompt(userPrompt, imagePrompt);
+        const bytes = await fetchGeneratedImageBytes(safePrompt, baselineImageUrl);
+        photoUrl = await uploadGeneratedImage(bytes);
+        isPrivate = false; // toned-down by construction
+        redirected = true;
+      } catch (e2) {
+        console.error("chat-image safe fallback also failed:", String(e2));
+        return json({ error: "image_generation_failed" }, 502);
+      }
     }
 
     // Konuşmayı bul ya da oluştur (chat/add-character-note ile aynı desen).
@@ -450,7 +554,8 @@ Deno.serve(async (req: Request) => {
     });
     if (insErr) console.error("generated_photos insert failed:", insErr.message);
 
-    return json({ url: photoUrl });
+    const charge = await chargeOrReject(uid, 25, "photo");
+    return json({ url: photoUrl, redirected, tokenBalance: charge.ok ? charge.balance : undefined });
   } catch (e) {
     console.error(String(e));
     return json({ error: String(e) }, 500);

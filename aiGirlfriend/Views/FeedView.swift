@@ -18,6 +18,7 @@ struct FeedView: View {
     private var characters: [Character] {
         store.characters.filter {
             !BlockedCharactersStore.isBlocked($0.id) &&
+            !PassedCharactersStore.isPassed($0.id) &&
             LocalConversationStore.shared.load(for: $0.id) == nil
         }
     }
@@ -53,12 +54,21 @@ struct FeedView: View {
                         likeOverlay.opacity(likeOpacity)
                         nopeOverlay.opacity(nopeOpacity)
                     }
-                    .offset(x: dragOffset.width, y: dragOffset.height * 0.15)
+                    .offset(x: dragOffset.width, y: 0)
                     .rotationEffect(.degrees(Double(dragOffset.width) / 22), anchor: .bottom)
                     .gesture(
                         DragGesture(minimumDistance: 10)
-                            .onChanged { v in dragOffset = v.translation }
-                            .onEnded { v in handleSwipe(v.translation, w: geo.size.width) }
+                            .onChanged { v in
+                                guard abs(v.translation.width) > abs(v.translation.height) else { return }
+                                dragOffset = CGSize(width: v.translation.width, height: 0)
+                            }
+                            .onEnded { v in
+                                guard abs(v.translation.width) > abs(v.translation.height) else {
+                                    withAnimation(.spring()) { dragOffset = .zero }
+                                    return
+                                }
+                                handleSwipe(v.translation, w: geo.size.width)
+                            }
                     )
                 } else {
                     emptyState
@@ -177,22 +187,37 @@ struct FeedView: View {
         let threshold: CGFloat = 100
         if abs(t.width) > threshold {
             let dir: CGFloat = t.width > 0 ? 1 : -1
-            let liked = characters.indices.contains(currentIndex) ? characters[currentIndex] : nil
+            let current = characters.indices.contains(currentIndex) ? characters[currentIndex] : nil
             withAnimation(.easeOut(duration: 0.35)) {
                 dragOffset = CGSize(width: dir * w * 1.6, height: t.height * 0.3)
+            }
+            if dir == 1, let current {
+                if UserDefaultsManager.shared.skipMeetConfirm {
+                    store.pendingMeetRequest = MeetRequest(character: current, prefillText: IcebreakerPool.next())
+                } else {
+                    meetCandidate = current
+                }
+            } else if dir == -1, let current {
+                // Kart hemen `characters`ten düşsün (PassedCharactersStore
+                // filtreye giriyor) — önceden HİÇBİR yere kaydedilmiyordu,
+                // "nope" görsel olarak ilerliyordu ama karakter asla
+                // kaybolmuyordu (deste döngüsünde tekrar tekrar çıkıyordu;
+                // tek karakter kalmışsa hep AYNI kart görünüyordu).
+                PassedCharactersStore.pass(current.id)
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.36) {
                 dragOffset = .zero
                 guard !characters.isEmpty else { return }
-                currentIndex = (currentIndex + 1) % characters.count
-                store.currentCharacterID = characters[currentIndex].id
-            }
-            if dir == 1, let liked {
-                if UserDefaultsManager.shared.skipMeetConfirm {
-                    store.pendingMeetRequest = MeetRequest(character: liked, prefillText: IcebreakerPool.next())
-                } else {
-                    meetCandidate = liked
+                // Beğenide (dir==1) kart hâlâ destede — bir sonrakine geç.
+                // Nope'ta (dir==-1) kart zaten listeden düştü, aynı index
+                // artık bir sonraki karta işaret ediyor — TEKRAR ilerletme
+                // (ilerletirse bir kart atlanır).
+                if dir == 1 {
+                    currentIndex = (currentIndex + 1) % characters.count
+                } else if currentIndex >= characters.count {
+                    currentIndex = 0
                 }
+                store.currentCharacterID = characters[currentIndex].id
             }
         } else {
             withAnimation(.spring(response: 0.4, dampingFraction: 0.75)) {

@@ -12,6 +12,7 @@
 
 import { voiceNameFor } from "./voiceMap.ts";
 import { elevenVoiceIdFor } from "./elevenVoiceMap.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -24,6 +25,31 @@ const GOOGLE_TTS_URL = "https://texttospeech.googleapis.com/v1/text:synthesize";
 
 const ELEVENLABS_API_KEY = Deno.env.get("ELEVEN_LABS") ?? "";
 const ELEVENLABS_TTS_URL = "https://api.elevenlabs.io/v1/text-to-speech";
+
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
+const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+const db = createClient(SUPABASE_URL, SERVICE_ROLE, { auth: { persistSession: false } });
+
+function userIdFromJWT(authHeader: string | null): string | null {
+  if (!authHeader?.startsWith("Bearer ")) return null;
+  const token = authHeader.slice(7);
+  const parts = token.split(".");
+  if (parts.length < 2) return null;
+  try {
+    let b64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+    while (b64.length % 4) b64 += "=";
+    return JSON.parse(atob(b64)).sub ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function chargeOrReject(uid: string, amount: number, reason: string): Promise<{ ok: true; balance: number } | { ok: false }> {
+  const { data: charged } = await db.rpc("charge_tokens", { p_user_id: uid, p_amount: amount, p_reason: reason });
+  if (!charged) return { ok: false };
+  const { data: row } = await db.from("token_balances").select("balance").eq("user_id", uid).single();
+  return { ok: true, balance: row?.balance ?? 0 };
+}
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -43,6 +69,22 @@ Deno.serve(async (req) => {
         JSON.stringify({ error: "text, role, vibe, lang are all required" }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
+    }
+
+    const uid = userIdFromJWT(req.headers.get("Authorization"));
+    if (!uid) {
+      return new Response(JSON.stringify({ error: "unauthorized" }), {
+        status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    // Ucuz ön-kontrol — gerçek TTS çağrısını boşuna yapmamak için. Asıl
+    // atomik düşüm sentez BAŞARIYLA tamamlandıktan sonra (aşağıdaki iki
+    // başarı dönüşünden hemen önce).
+    const { data: preCheckBalance } = await db.from("token_balances").select("balance").eq("user_id", uid).maybeSingle();
+    if ((preCheckBalance?.balance ?? 0) < 12) {
+      return new Response(JSON.stringify({ error: "insufficient_tokens" }), {
+        status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
     if (useElevenLabs) {
@@ -69,9 +111,13 @@ Deno.serve(async (req) => {
         );
       }
       const bytes = new Uint8Array(await elevenResp.arrayBuffer());
+      const charge = await chargeOrReject(uid, 12, "voice");
       return new Response(bytes, {
         status: 200,
-        headers: { ...corsHeaders, "Content-Type": "audio/mpeg" },
+        headers: {
+          ...corsHeaders, "Content-Type": "audio/mpeg",
+          "X-Token-Balance": charge.ok ? String(charge.balance) : "",
+        },
       });
     }
 
@@ -106,9 +152,13 @@ Deno.serve(async (req) => {
     const { audioContent } = await googleResp.json(); // base64 mp3
     const bytes = Uint8Array.from(atob(audioContent), (c) => c.charCodeAt(0));
 
+    const charge = await chargeOrReject(uid, 12, "voice");
     return new Response(bytes, {
       status: 200,
-      headers: { ...corsHeaders, "Content-Type": "audio/mpeg" },
+      headers: {
+        ...corsHeaders, "Content-Type": "audio/mpeg",
+        "X-Token-Balance": charge.ok ? String(charge.balance) : "",
+      },
     });
   } catch (error) {
     return new Response(

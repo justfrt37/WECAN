@@ -42,10 +42,18 @@ enum SupabaseAuth {
         return await perform(r, label: "token yenileme")
     }
 
-    /// 401 sonrası kurtarma: önce refresh, olmazsa yeni anonim giriş.
+    /// 401 sonrası kurtarma: önce refresh (birkaç kez — tek seferlik ağ
+    /// hatası yüzünden anonim kimliğe düşülmesin, bkz. AuthService), olmazsa
+    /// yeni anonim giriş.
     @discardableResult
     static func recover() async -> Bool {
-        if await refresh() { return true }
+        for attempt in 1...3 {
+            if await refresh() { return true }
+            if attempt < 3 {
+                let seconds = pow(2.0, Double(attempt - 1)) // 1s, 2s
+                try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+            }
+        }
         return await signInAnonymously()
     }
 

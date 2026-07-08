@@ -41,8 +41,11 @@ enum MainTab: Int, CaseIterable, Identifiable {
 
 struct MainTabView: View {
     @Environment(CharacterStore.self) private var store
+    @Environment(TokenStore.self) private var tokenStore
     @State private var selection: MainTab = .discover
     @State private var path = NavigationPath()
+    @State private var showTokenStore = false
+    @State private var streakResult: StreakClaimResult?
 
     var body: some View {
         // Tek NavigationStack: ChatView'a push edilince kök (tab bar dahil) yerini
@@ -85,6 +88,34 @@ struct MainTabView: View {
             }
         }
         .tint(AppColor.pink)
+        // NavigationStack'in KENDİSİNE bindirilmiş overlay — kök içeriğe değil,
+        // böylece ChatView push edilince (kök yerini alınca) rozet KAYBOLMAZ,
+        // her zaman en üstte kalır (bkz. tasarım: "chat içinde de görünmeli").
+        .overlay(alignment: .topTrailing) {
+            TokenBadge(tokenStore: tokenStore) { showTokenStore = true }
+                .padding(.top, 8)
+                .padding(.trailing, 16)
+        }
+        .fullScreenCover(isPresented: $showTokenStore) {
+            TokenStoreView()
+        }
+        .task {
+            if let result = await StreakService.claim(), result.granted {
+                streakResult = result
+            }
+        }
+        .fullScreenCover(item: Binding(
+            get: { streakResult.map { IdentifiableStreakResult(result: $0) } },
+            set: { _ in streakResult = nil }
+        )) { wrapped in
+            StreakPopupView(result: wrapped.result) {
+                streakResult = nil
+                // `setBalance` (not `refresh`) — streak grants trigger the
+                // same "+N tokens" badge animation as any other gain.
+                if let balance = wrapped.result.balance { tokenStore.setBalance(balance) }
+            }
+            .presentationBackground(.clear)
+        }
     }
 }
 

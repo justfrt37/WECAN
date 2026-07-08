@@ -144,20 +144,14 @@ struct ChatListView: View {
                 .font(.system(size: 28, weight: .bold))
                 .foregroundStyle(.white)
             Spacer()
-            roundIcon("slider.horizontal.3")
-            roundIcon("square.and.pencil")
         }
-        .padding(.horizontal, 20)
+        // Sağda TokenBadge için yer bırakılıyor (bkz. MainTabView) — burada
+        // hiçbir işlevi olmayan "filter"/"new chat" ikonları kaldırıldı
+        // (ikisi de Button'a sarılı değildi, dokunulamıyordu).
+        .padding(.leading, 20)
+        .padding(.trailing, 96)
         .padding(.top, 12)
         .padding(.bottom, 8)
-    }
-
-    private func roundIcon(_ name: String) -> some View {
-        Image(systemName: name)
-            .font(.system(size: 16))
-            .foregroundStyle(.white)
-            .frame(width: 38, height: 38)
-            .background(.white.opacity(0.08), in: Circle())
     }
 
     private var searchBar: some View {

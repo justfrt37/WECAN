@@ -5,13 +5,15 @@
 
 import SwiftUI
 import Photos
+import PhotosUI
+import UIKit
 
 struct ChatView: View {
     @State private var viewModel: ChatViewModel
     @Environment(\.dismiss) private var dismiss
     @Environment(CharacterStore.self) private var store
+    @Environment(TokenStore.self) private var tokenStore
 
-    @State private var showGallery = false
     @State private var showProfile = false
     @State private var addSheetKind: NoteKind?
     @State private var showBlockConfirm = false
@@ -25,6 +27,25 @@ struct ChatView: View {
     @State private var expandedMessageID: Message.ID?
     /// Bir foto balonuna dokununca tam ekran açılır.
     @State private var fullscreenImageURL: URL?
+    /// Kullanıcının KENDİ gönderdiği fotoğrafa dokununca tam ekran (yerel, CachedImage YOK).
+    @State private var fullscreenLocalImage: UIImage?
+
+    // Sesli mesaj kaydı: `recognizer.isRecording` kayıt sırasında, `isReviewingVoice`
+    // durdurulduktan sonra Send/Cancel bekleme aşamasında (bkz. plan: recording overlay).
+    @State private var isReviewingVoice = false
+
+    // Fotoğraf gönderme: kamera veya kütüphaneden seçilen görsel, gönderilmeden
+    // önce tam ekran review ekranında (caption + Send/Cancel) bekler.
+    @State private var showCameraPicker = false
+    /// Kamera kapatılırken (`onDismiss`) okunur — aynı anda iki fullScreenCover
+    /// geçişi (kamera kapan + review aç) SwiftUI'de siyah ekran/donma yaratıyordu,
+    /// bu yüzden review SADECE kamera tam kapandıktan SONRA açılır.
+    @State private var pendingCameraImage: UIImage?
+    @State private var showLibraryPicker = false
+    @State private var pickerItem: PhotosPickerItem?
+    @State private var capturedImage: UIImage?
+    @State private var showPhotoReview = false
+    @State private var photoCaption = ""
 
     /// Tab içinde gösterilince alttaki tab bar'ın üstünde kalması için boşluk.
     var bottomInset: CGFloat = 0
@@ -64,8 +85,19 @@ struct ChatView: View {
                         .padding(.horizontal).padding(.top, 4)
                 }
 
-                quickReplyRow
-                inputBar
+                if isBlocked {
+                    blockedBar
+                } else if recognizer.isRecording || isReviewingVoice {
+                    VoiceRecordingOverlay(
+                        isRecording: recognizer.isRecording,
+                        onCancel: cancelRecording,
+                        onSend: sendRecordedVoice
+                    )
+                    .padding(.bottom, bottomInset)
+                } else {
+                    quickReplyRow
+                    inputBar
+                }
             }
         }
         .navigationBarBackButtonHidden(true)
@@ -74,6 +106,7 @@ struct ChatView: View {
         .onDisappear { viewModel.isVisible = false }
         .task {
             viewModel.store = store
+            viewModel.tokenStore = tokenStore
             viewModel.isVisible = true
             await viewModel.loadHistory()
             if !didPrefill, let prefillText, !prefillText.isEmpty {
@@ -84,12 +117,10 @@ struct ChatView: View {
         .task {
             await viewModel.startActivityRefreshLoop()
         }
-        .fullScreenCover(isPresented: $showGallery) {
-            GalleryView(character: viewModel.character)
-        }
         .fullScreenCover(isPresented: $showProfile) {
             CharacterProfileView(character: viewModel.character)
         }
+        .sheet(isPresented: $viewModel.showPaywall) { PaywallHostView() }
         .fullScreenCover(isPresented: Binding(
             get: { fullscreenImageURL != nil },
             set: { if !$0 { fullscreenImageURL = nil } }
@@ -102,6 +133,66 @@ struct ChatView: View {
         }
         .sheet(item: $addSheetKind) { kind in
             AddCharacterNoteSheet(character: viewModel.character, kind: kind)
+        }
+        .fullScreenCover(isPresented: Binding(
+            get: { fullscreenLocalImage != nil },
+            set: { if !$0 { fullscreenLocalImage = nil } }
+        )) {
+            if let image = fullscreenLocalImage {
+                LocalImageFullscreenView(image: image, onDismiss: { fullscreenLocalImage = nil })
+            }
+        }
+        .fullScreenCover(isPresented: $showCameraPicker, onDismiss: {
+            // Kamera TAM kapandıktan sonra review'i aç — bkz. pendingCameraImage yorumu.
+            if let image = pendingCameraImage {
+                capturedImage = image
+                showPhotoReview = true
+                pendingCameraImage = nil
+            }
+        }) {
+            CameraPicker(
+                onImage: { image in
+                    pendingCameraImage = image
+                    showCameraPicker = false
+                },
+                onCancel: { showCameraPicker = false }
+            )
+            .ignoresSafeArea()
+        }
+        .photosPicker(isPresented: $showLibraryPicker, selection: $pickerItem, matching: .images)
+        .fullScreenCover(isPresented: $showPhotoReview) {
+            if let image = capturedImage {
+                PhotoReviewView(
+                    image: image,
+                    caption: $photoCaption,
+                    onCancel: {
+                        showPhotoReview = false
+                        capturedImage = nil
+                        photoCaption = ""
+                    },
+                    onSend: {
+                        showPhotoReview = false
+                        viewModel.sendUserPhoto(image: image, caption: photoCaption)
+                        capturedImage = nil
+                        photoCaption = ""
+                    }
+                )
+            }
+        }
+        .onChange(of: pickerItem) { _, newItem in
+            guard let newItem else { return }
+            Task {
+                let data = try? await newItem.loadTransferable(type: Data.self)
+                pickerItem = nil
+                // Kütüphane picker'ının kendi kapanma animasyonu bitsin diye kısa
+                // bekleme — aynı kamera-review çakışması burada da olabilir
+                // (bkz. showCameraPicker onDismiss yorumu).
+                try? await Task.sleep(nanoseconds: 300_000_000)
+                if let data, let image = UIImage(data: data) {
+                    capturedImage = image
+                    showPhotoReview = true
+                }
+            }
         }
         .alert("Block this character?", isPresented: $showBlockConfirm) {
             Button("Cancel", role: .cancel) {}
@@ -131,6 +222,19 @@ struct ChatView: View {
 
     // MARK: Header
 
+    /// Availability text next to the online dot — shows "Typing…" while the
+    /// typing bubble is up, reverting to the real activity/"Online" the
+    /// instant it clears (bubble hides right when the reply is appended, see
+    /// `ChatViewModel.send()`). Voice replies are excluded on purpose — they
+    /// show their own waveform bubble (`VoicePendingIndicator`), not the
+    /// 3-dot typing one, so the header shouldn't claim "Typing…" either.
+    private var headerStatusLabel: String {
+        if viewModel.showsTypingBubble && !viewModel.isSendingVoiceReply {
+            return String(localized: "Typing…")
+        }
+        return viewModel.currentActivity?.label ?? String(localized: "Online")
+    }
+
     private var header: some View {
         ZStack {
             HStack(spacing: 10) {
@@ -150,11 +254,17 @@ struct ChatView: View {
                             Text(viewModel.character.name)
                                 .font(.system(size: 17, weight: .bold))
                                 .foregroundStyle(.white)
-                            HStack(spacing: 5) {
-                                Circle().fill(Color(hex: 0x4ADE80)).frame(width: 7, height: 7)
-                                Text(viewModel.currentActivity?.label ?? String(localized: "Online"))
-                                    .font(.system(size: 12, weight: .medium))
-                                    .foregroundStyle(.white.opacity(0.6))
+                            // Engellenmişse durum/aktivite HİÇ gösterilmez — çevrimiçi
+                            // noktası dahil, tamamen sessiz kalır.
+                            if !isBlocked {
+                                HStack(spacing: 5) {
+                                    Circle().fill(Color(hex: 0x4ADE80)).frame(width: 7, height: 7)
+                                    Text(headerStatusLabel)
+                                        .font(.system(size: 12, weight: .medium))
+                                        .foregroundStyle(.white.opacity(0.6))
+                                        .lineLimit(1)
+                                        .truncationMode(.tail)
+                                }
                             }
                             Text("Level \(viewModel.relationshipLevel) · \(viewModel.relationshipStage)")
                                 .font(.system(size: 11, weight: .semibold))
@@ -166,7 +276,6 @@ struct ChatView: View {
 
                 Spacer()
 
-                headerButton("photo.fill") { showGallery = true }
                 headerButton("gearshape.fill", menu: true)
             }
             .opacity(levelUpBanner == nil ? 1 : 0)
@@ -176,7 +285,11 @@ struct ChatView: View {
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
-        .padding(.horizontal, 14)
+        .padding(.leading, 14)
+        // Sağda MainTabView'ın NavigationStack seviyesindeki TokenBadge
+        // overlay'ı için yer bırakılıyor (o rozet ChatView'e de ulaşıyor —
+        // burada AYRICA bir tane koymak çift rozet gösteriyordu).
+        .padding(.trailing, 96)
         .padding(.vertical, 8)
     }
 
@@ -277,7 +390,14 @@ struct ChatView: View {
     private var messagesList: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(spacing: 10) {
+                // VStack (NOT LazyVStack) — kasıtlı. Lazy çizim, görünmeyen
+                // satırları ölçmeden bırakıyor, bu da scrollTo/defaultScrollAnchor'ın
+                // en alt konumunu TAHMİN etmesine yol açıyordu — foto ağırlıklı/
+                // uzun sohbetlerde (bkz. Jasmine, 4-5 foto) tahmin yanlış çıkıp
+                // mesajlar görünmez kalıyordu, sadece yukarı kaydırınca ortaya
+                // çıkıyordu. Sohbet geçmişi telefon ekranı için zaten sınırlı
+                // boyutta (bkz. LocalConversationStore) — hepsini baştan ölçmek ucuz.
+                VStack(spacing: 10) {
                     ForEach(viewModel.messages) { message in
                         ChatBubble(message: message,
                                    isSpeaking: voice.speakingMessageID == message.id,
@@ -300,8 +420,21 @@ struct ChatView: View {
                             }
                         }, onTapImage: { url in
                             fullscreenImageURL = url
-                        })
+                        }, onTapLocalImage: { image in
+                            fullscreenLocalImage = image
+                        }, isGeneratingImage: viewModel.generatingImageMessageIDs.contains(message.id),
+                           isGeneratingVoice: viewModel.generatingVoiceMessageIDs.contains(message.id),
+                           onGenerateImage: { viewModel.generatePendingImage(for: message.id) },
+                           onGenerateVoice: { viewModel.generatePendingVoice(for: message.id) },
+                           characterPhotoURL: viewModel.character.photoURL)
                         .id(message.id)
+                        // "Whoosh" girişi — pending foto balonu botun az önce
+                        // kendi kararıyla gönderdiği bir şey gibi kaysın/belirsin
+                        // (bkz. ChatViewModel.sendImageRequest'teki withAnimation).
+                        .transition(.asymmetric(
+                            insertion: .move(edge: .leading).combined(with: .opacity),
+                            removal: .opacity
+                        ))
                     }
                     if viewModel.showsTypingBubble {
                         Group {
@@ -326,6 +459,23 @@ struct ChatView: View {
             .onChange(of: viewModel.isLoadingHistory) {
                 if !viewModel.isLoadingHistory { scrollToBottom(proxy) }
             }
+            .onAppear {
+                // LazyVStack ilk çizimde tüm satırları ölçmediği için
+                // `.defaultScrollAnchor(.bottom)` tek başına güvenilir değil —
+                // mesajlar görünmez kalıp sadece yukarı kaydırınca ortaya
+                // çıkıyordu. Animasyonsuz zorla kaydır, sonra layout oturunca tekrar dene.
+                scrollToBottomInstant(proxy)
+                Task {
+                    try? await Task.sleep(nanoseconds: 200_000_000)
+                    scrollToBottomInstant(proxy)
+                }
+            }
+        }
+    }
+
+    private func scrollToBottomInstant(_ proxy: ScrollViewProxy) {
+        if let last = viewModel.messages.last {
+            proxy.scrollTo(last.id, anchor: .bottom)
         }
     }
 
@@ -372,14 +522,48 @@ struct ChatView: View {
                 Image(systemName: icon).font(.system(size: 18))
                 Text(label).font(.system(size: 13, weight: .semibold))
             }
-            .foregroundStyle(isArmed ? AppColor.pink : .white.opacity(0.85))
+            .foregroundStyle(isArmed ? AppColor.amber : .white.opacity(0.85))
             .padding(.horizontal, 14).frame(height: 34)
             .frame(maxWidth: .infinity)
-            .background(isArmed ? AppColor.pink.opacity(0.15) : .white.opacity(0.08), in: Capsule())
-            .overlay(Capsule().strokeBorder(isArmed ? AppColor.pink.opacity(0.5) : .white.opacity(0.12), lineWidth: 1))
+            .background(isArmed ? AppColor.amber.opacity(0.15) : .white.opacity(0.08), in: Capsule())
+            .overlay(Capsule().strokeBorder(isArmed ? AppColor.amber.opacity(0.5) : .white.opacity(0.12), lineWidth: 1))
         }
         .buttonStyle(.plain)
         .disabled(viewModel.isSending || viewModel.isLoadingHistory)
+    }
+
+    // MARK: Engellendi barı — mesajlaşma tamamen kapalı, sadece kaldır düğmesi var.
+
+    private var blockedBar: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "nosign")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.7))
+            Text(String(localized: "You've blocked this character. Unblock to send messages."))
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(.white.opacity(0.7))
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 8)
+            Button {
+                BlockedCharactersStore.unblock(viewModel.character.id)
+                isBlocked = false
+            } label: {
+                Text(String(localized: "Unblock"))
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 14).frame(height: 34)
+                    .background(
+                        LinearGradient(colors: [AppColor.pink, AppColor.amber],
+                                       startPoint: .topLeading, endPoint: .bottomTrailing),
+                        in: Capsule()
+                    )
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 14)
+        .padding(.top, 10)
+        .padding(.bottom, 10 + bottomInset)
+        .background(AppColor.card.opacity(0.9))
     }
 
     // MARK: Input
@@ -401,8 +585,17 @@ struct ChatView: View {
                     .foregroundStyle(.white)
                     .lineLimit(1...4)
                     .tint(AppColor.pink)
-                Image(systemName: "camera")
-                    .font(.system(size: 20)).foregroundStyle(.white.opacity(0.5))
+                Menu {
+                    Button { showCameraPicker = true } label: {
+                        Label(String(localized: "Take Photo"), systemImage: "camera")
+                    }
+                    Button { showLibraryPicker = true } label: {
+                        Label(String(localized: "Choose from Library"), systemImage: "photo.on.rectangle")
+                    }
+                } label: {
+                    Image(systemName: "camera")
+                        .font(.system(size: 20)).foregroundStyle(.white.opacity(0.5))
+                }
                 Button { toggleRecording() } label: {
                     Image(systemName: recognizer.isRecording ? "stop.circle.fill" : "mic.fill")
                         .font(.system(size: 20))
@@ -445,18 +638,39 @@ struct ChatView: View {
         .background(AppColor.card.opacity(0.9))
     }
 
-    /// Mikrofon: kaydı başlat/durdur. Durunca metni gönderir (sesli mesaj → metin).
+    /// Mikrofon: kaydı başlat/durdur. ARTIK OTOMATIK GÖNDERMEZ — durunca
+    /// review aşamasına geçer (bkz. VoiceRecordingOverlay Cancel/Send).
     private func toggleRecording() {
         if recognizer.isRecording {
             recognizer.stop()
-            let text = recognizer.transcript.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !text.isEmpty { viewModel.send(text) }
+            isReviewingVoice = true
         } else {
             Task {
                 if !recognizer.authorized { await recognizer.requestAuthorization() }
-                if recognizer.authorized { recognizer.start() }
+                guard recognizer.authorized else {
+                    viewModel.errorMessage = String(localized: "Microphone & speech recognition access needed.")
+                    return
+                }
+                if !recognizer.start() {
+                    viewModel.errorMessage = String(localized: "Couldn't start recording.")
+                }
             }
         }
+    }
+
+    /// Overlay'in Cancel düğmesi — kaydı at, gönderme.
+    private func cancelRecording() {
+        recognizer.cancel()
+        isReviewingVoice = false
+    }
+
+    /// Overlay'in Send düğmesi — kayıt hâlâ sürüyorsa önce durdurur, sonra
+    /// transkript + ses dosyasını `sendUserVoice`e verir (bkz. ChatViewModel).
+    private func sendRecordedVoice() {
+        if recognizer.isRecording { recognizer.stop() }
+        isReviewingVoice = false
+        guard let url = recognizer.recordedFileURL else { return }
+        viewModel.sendUserVoice(transcript: recognizer.transcript, audioURL: url)
     }
 }
 
@@ -471,6 +685,22 @@ private struct ChatBubble: View {
     var isVoicePlaying: Bool = false
     var onPlayVoice: (() -> Void)? = nil
     var onTapImage: ((URL) -> Void)? = nil
+    var onTapLocalImage: ((UIImage) -> Void)? = nil
+    var isGeneratingImage: Bool = false
+    var isGeneratingVoice: Bool = false
+    var onGenerateImage: (() -> Void)? = nil
+    var onGenerateVoice: (() -> Void)? = nil
+    /// Ödeme bekleyen foto balonunun bulanık arka planı — karakterin KENDİ
+    /// profil fotoğrafı (bkz. PendingImageBubble), henüz gerçek foto yok.
+    var characterPhotoURL: URL? = nil
+
+    /// Her fotoğraf balonu ilk halde bulanık gelir + "Tap to view" ister —
+    /// bu ilk dokunuş sadece bulanıklığı açar (tam ekrana gitmez); balon zaten
+    /// açıkken tekrar dokunmak eskisi gibi tam ekranı açar (`onTapImage`).
+    /// Az önce ödeyip ÜRETTİRDİĞİMİZ bir foto burada zaten `true` başlar —
+    /// tekrar bulanıklaştırmak (çifte bulanıklık) kötü UX olurdu (bkz.
+    /// ChatViewModel.generatePendingImage'ın hemen sonrası).
+    @State private var imageRevealed = false
 
     var body: some View {
         HStack(alignment: .bottom, spacing: 6) {
@@ -480,30 +710,82 @@ private struct ChatBubble: View {
                 timestampLabel
             }
 
-            if message.isVoice {
+            if message.isPendingImage {
+                PendingImageBubble(backdropURL: characterPhotoURL,
+                                    isGenerating: isGeneratingImage,
+                                    onTap: { onGenerateImage?() })
+            } else if message.isPendingVoice {
+                PendingVoiceBubble(isGenerating: isGeneratingVoice,
+                                    onTap: { onGenerateVoice?() })
+            } else if message.isVoice {
                 VoiceMessageBubble(message: message, isUser: message.isUser, isPlaying: isVoicePlaying, onTap: { onPlayVoice?() })
-            } else if let imageURL = message.imageURL {
-                // Foto mesajı (kızın gönderdiği fotoğraf)
-                // 9:16 üretilen fotoğrafla EŞLEŞEN kutu oranı — farklı bir oranda
-                // kutu kullanmak scaledToFill ile görüntünün kırpılmasına yol açar.
-                CachedImage(url: imageURL) { img in
-                    img.resizable().scaledToFill()
-                } placeholder: { AppColor.card }
-                .frame(width: 180, height: 320)
+            } else if let localPath = message.localImagePath,
+                      let localImage = UserPhotoStore.loadUserPhoto(relativePath: localPath) {
+                // Kullanıcının BOTA gönderdiği kendi fotoğrafı — hiç yüklenmedi,
+                // sadece cihazda (bkz. UserPhotoStore). CachedImage/ImageCache KULLANILMAZ.
+                ZStack(alignment: .bottomLeading) {
+                    Image(uiImage: localImage)
+                        .resizable().scaledToFill()
+                        .frame(width: 220, height: 260)
+                        .clipped()
+                    if !message.content.isEmpty {
+                        Text(message.content)
+                            .font(.system(size: 13))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 10).padding(.vertical, 6)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(.black.opacity(0.45))
+                    }
+                }
+                .frame(width: 220, height: 260)
                 .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                 .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(.white.opacity(0.1), lineWidth: 1))
-                .onTapGesture { onTapImage?(imageURL) }
+                .onTapGesture { onTapLocalImage?(localImage) }
+            } else if let imageURL = message.imageURL {
+                // Foto mesajı (kızın gönderdiği fotoğraf) — WhatsApp tarzı KÜÇÜK
+                // önizleme kutusu: 9:16 üretilen fotoğrafın tamamı burada
+                // gösterilmiyor (kırpılıyor, ASLA gerilmiyor — scaledToFill +
+                // clipped), tam hâli sadece tam ekran görünümde (onTapImage).
+                // İlk gelişte bulanık + "Tap to view" — ilk dokunuş sadece
+                // bulanıklığı açar, sonraki dokunuş tam ekranı açar.
+                ZStack {
+                    CachedImage(url: imageURL) { img in
+                        img.resizable().scaledToFill()
+                    } placeholder: { AppColor.card }
+                    .frame(width: 220, height: 260)
+                    .clipped()
+                    .blur(radius: imageRevealed ? 0 : 26)
+
+                    if !imageRevealed {
+                        Color.black.opacity(0.25)
+                        VStack(spacing: 6) {
+                            Text("👀").font(.system(size: 30))
+                            Text("Tap to view")
+                                .font(.system(size: 13, weight: .bold))
+                                .foregroundStyle(.white)
+                        }
+                    }
+                }
+                .frame(width: 220, height: 260)
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(.white.opacity(0.1), lineWidth: 1))
+                .onTapGesture {
+                    if imageRevealed {
+                        onTapImage?(imageURL)
+                    } else {
+                        withAnimation(.easeOut(duration: 0.3)) { imageRevealed = true }
+                    }
+                }
             } else {
                 Text(message.content)
                     .font(.system(size: 15))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(message.isUser ? AppColor.bg : .white)
                     .padding(.horizontal, 14).padding(.vertical, 10)
                     .background {
                         if message.isUser {
-                            LinearGradient(colors: [AppColor.pink, AppColor.amber],
-                                           startPoint: .topLeading, endPoint: .bottomTrailing)
+                            AppColor.amber
                         } else {
-                            Color.white.opacity(0.1)
+                            AppColor.card
                         }
                     }
                     .clipShape(.rect(topLeadingRadius: 16, bottomLeadingRadius: message.isUser ? 16 : 4,
@@ -516,7 +798,8 @@ private struct ChatBubble: View {
             }
 
             // Kızın mesajını seslendir (oynat/durdur)
-            if !message.isUser, message.imageURL == nil, !message.isVoice, let onSpeak {
+            if !message.isUser, message.imageURL == nil, !message.isVoice,
+               !message.isPendingImage, !message.isPendingVoice, let onSpeak {
                 Button(action: onSpeak) {
                     Image(systemName: isSpeaking ? "stop.circle.fill" : "speaker.wave.2.fill")
                         .font(.system(size: 16))
@@ -530,6 +813,14 @@ private struct ChatBubble: View {
             if !message.isUser { Spacer(minLength: 50) }
         }
         .padding(.horizontal, 16)
+        // Az önce (bu oturumda) pending'den üretilmiş bir foto otomatik açık
+        // gelsin — kullanıcı zaten ödeyip dokunarak üretti, hemen ardından
+        // İKİNCİ bir "tap to view" bulanıklığı görmesi kötü UX olur. Geçmişten
+        // yüklenen (hiç pending olmamış) fotolar bu satırı hiç tetiklemez,
+        // eski "tap to view" gizlilik bulanıklığını korurlar.
+        .onChange(of: message.pendingImagePrompt) { old, new in
+            if old != nil && new == nil { imageRevealed = true }
+        }
     }
 
     private var timestampLabel: some View {
@@ -559,7 +850,7 @@ private struct TypingIndicator: View {
             }
         }
         .padding(.horizontal, 16).padding(.vertical, 13)
-        .background(Color.white.opacity(0.1))
+        .background(AppColor.card)
         .clipShape(.rect(topLeadingRadius: 16, bottomLeadingRadius: 4,
                          bottomTrailingRadius: 16, topTrailingRadius: 16))
         .onAppear { animating = true }
@@ -595,25 +886,119 @@ private struct VoicePendingIndicator: View {
     }
 }
 
-private struct ImagePendingIndicator: View {
-    @State private var pulse = false
+/// Just a loading bar — no icon, no "Generating photo…" text (product
+/// decision: the photo itself arrives blurred behind a "Tap to view" prompt,
+/// see `ChatBubble`'s `imageURL` case, so this indicator doesn't need to
+/// announce anything either).
+// MARK: - Ödeme bekleyen foto/ses balonları
+
+/// Botun fotoğrafı — ilk halde HİÇ üretilmemiş, sadece tarif metni saklı
+/// (bkz. Message.pendingImagePrompt). Bulanık kutu + token maliyeti; dokununca
+/// `onTap` (ChatViewModel.generatePendingImage) tetiklenir. Üretim sürerken
+/// (`isGenerating`) yükleme çubuğu gösterilir, dokunma devre dışı kalır —
+/// bulanıklık görsel CİHAZA TAM İNENE kadar kalkmaz (bkz. ChatViewModel).
+/// Aynı bulanıklık/"Tap to view" tasarımı zaten üretilmiş fotoğraflarda
+/// kullanılıyor (bkz. ChatBubble'ın imageURL dalı) — burada AYNI görsel dil,
+/// arkada gerçek foto yerine karakterin KENDİ profil fotoğrafı bulanık
+/// gösteriliyor (henüz üretilmiş bir şey yok). Tek fark: token maliyeti
+/// SADECE burada (ödeme bekleyen istek) gösterilir, zaten-üretilmiş foto
+/// balonunda hiç yok.
+private struct PendingImageBubble: View {
+    let backdropURL: URL?
+    let isGenerating: Bool
+    let onTap: () -> Void
 
     var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "camera.fill")
-                .font(.system(size: 14))
-                .foregroundStyle(AppColor.pink)
-                .opacity(pulse ? 1 : 0.4)
-            Text("Generating photo…")
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(.white.opacity(0.7))
+        ZStack {
+            CachedImage(url: backdropURL) { img in
+                img.resizable().scaledToFill()
+            } placeholder: { AppColor.card }
+            .frame(width: 220, height: 260)
+            .clipped()
+            .blur(radius: 26)
+
+            Color.black.opacity(0.25)
+
+            if isGenerating {
+                ImagePendingIndicator()
+            } else {
+                VStack(spacing: 6) {
+                    Text("👀").font(.system(size: 30))
+                    Text("Tap to view")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(.white)
+                    Text("25 💠")
+                        .font(.system(size: 13, weight: .heavy))
+                        .foregroundStyle(AppColor.amber)
+                }
+            }
         }
-        .padding(.horizontal, 14).frame(height: 34)
-        .background(AppColor.card, in: Capsule())
+        .frame(width: 220, height: 260)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(.white.opacity(0.1), lineWidth: 1))
+        .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .onTapGesture { if !isGenerating { onTap() } }
+    }
+}
+
+/// Botun sesli mesajı — ilk halde HİÇ üretilmemiş, süresi belirsiz (henüz
+/// sentezlenmedi, bkz. Message.pendingVoiceRequest). Dokununca `onTap`
+/// (ChatViewModel.generatePendingVoice) tetiklenir.
+private struct PendingVoiceBubble: View {
+    let isGenerating: Bool
+    let onTap: () -> Void
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: isGenerating ? "waveform" : "lock.fill")
+                .font(.system(size: 16))
+                .foregroundStyle(isGenerating ? AppColor.pink : AppColor.amber)
+
+            if isGenerating {
+                ImagePendingIndicator()
+            } else {
+                HStack(spacing: 3) {
+                    ForEach(0..<10, id: \.self) { _ in
+                        Capsule().fill(.white.opacity(0.25)).frame(width: 2.5, height: 10)
+                    }
+                }
+                Text("0:––")
+                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.5))
+            }
+
+            if !isGenerating {
+                Text("12 💠")
+                    .font(.system(size: 13, weight: .heavy))
+                    .foregroundStyle(AppColor.amber)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(AppColor.card, in: RoundedRectangle(cornerRadius: 18))
+        .contentShape(RoundedRectangle(cornerRadius: 18))
+        .onTapGesture { if !isGenerating { onTap() } }
+    }
+}
+
+private struct ImagePendingIndicator: View {
+    @State private var sweep = false
+
+    var body: some View {
+        GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                Capsule().fill(AppColor.card)
+                Capsule().fill(AppColor.pink)
+                    .frame(width: geo.size.width * 0.4)
+                    .offset(x: sweep ? geo.size.width * 0.6 : -geo.size.width * 0.4)
+            }
+        }
+        .frame(width: 160, height: 6)
+        .clipShape(Capsule())
         .overlay(Capsule().strokeBorder(.white.opacity(0.1), lineWidth: 1))
         .onAppear {
-            withAnimation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true)) {
-                pulse = true
+            withAnimation(.easeInOut(duration: 1.1).repeatForever(autoreverses: false)) {
+                sweep = true
             }
         }
     }
@@ -701,5 +1086,193 @@ private struct FullscreenImageView: View {
             try? await Task.sleep(nanoseconds: 1_800_000_000)
             saveMessage = nil
         }
+    }
+}
+
+// MARK: - Kullanıcının kendi fotoğrafı için tam ekran (yerel, indirme yok — zaten cihazda)
+
+private struct LocalImageFullscreenView: View {
+    let image: UIImage
+    let onDismiss: () -> Void
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            Color.black.ignoresSafeArea()
+            Image(uiImage: image)
+                .resizable().scaledToFit()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .onTapGesture { onDismiss() }
+            Button(action: onDismiss) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 36, height: 36)
+                    .background(.black.opacity(0.5), in: Circle())
+            }
+            .padding(16)
+        }
+    }
+}
+
+// MARK: - Kamera yakalama (UIImagePickerController sarmalayıcı — SwiftUI'de yerli canlı kamera view yok)
+
+private struct CameraPicker: UIViewControllerRepresentable {
+    let onImage: (UIImage) -> Void
+    let onCancel: () -> Void
+
+    func makeUIViewController(context: Context) -> UIImagePickerController {
+        let picker = UIImagePickerController()
+        picker.sourceType = .camera
+        picker.delegate = context.coordinator
+        return picker
+    }
+
+    func updateUIViewController(_ uiViewController: UIImagePickerController, context: Context) {}
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    final class Coordinator: NSObject, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
+        let parent: CameraPicker
+        init(_ parent: CameraPicker) { self.parent = parent }
+
+        func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]) {
+            if let image = info[.originalImage] as? UIImage {
+                parent.onImage(image)
+            } else {
+                parent.onCancel()
+            }
+        }
+
+        func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
+            parent.onCancel()
+        }
+    }
+}
+
+// MARK: - Fotoğraf gönderme öncesi tam ekran review (fotoğraf + opsiyonel caption + Send/Cancel)
+
+private struct PhotoReviewView: View {
+    let image: UIImage
+    @Binding var caption: String
+    let onCancel: () -> Void
+    let onSend: () -> Void
+
+    var body: some View {
+        ZStack(alignment: .bottom) {
+            Color.black.ignoresSafeArea()
+
+            Image(uiImage: image)
+                .resizable().scaledToFit()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            VStack(spacing: 12) {
+                HStack(spacing: 10) {
+                    Image(systemName: "face.smiling")
+                        .font(.system(size: 20)).foregroundStyle(.white.opacity(0.5))
+                    TextField("", text: $caption,
+                              prompt: Text(String(localized: "Add a caption…")).foregroundColor(.white.opacity(0.4)),
+                              axis: .vertical)
+                        .foregroundStyle(.white)
+                        .lineLimit(1...3)
+                        .tint(AppColor.pink)
+                }
+                .padding(.horizontal, 14).frame(minHeight: 46)
+                .background(.white.opacity(0.12), in: Capsule())
+                .padding(.horizontal, 16)
+
+                HStack {
+                    Button(action: onCancel) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 18, weight: .bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 46, height: 46)
+                            .background(.white.opacity(0.15), in: Circle())
+                    }
+                    .buttonStyle(.plain)
+
+                    Spacer()
+
+                    Button(action: onSend) {
+                        Image(systemName: "paperplane.fill")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .frame(width: 46, height: 46)
+                            .background(
+                                LinearGradient(colors: [AppColor.pink, AppColor.amber],
+                                               startPoint: .topLeading, endPoint: .bottomTrailing),
+                                in: Circle()
+                            )
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.horizontal, 16)
+            }
+            .padding(.bottom, 24)
+        }
+    }
+}
+
+// MARK: - Sesli mesaj kaydı overlay'i ("wavy imitator" + timer + Cancel/Send)
+
+private struct VoiceRecordingOverlay: View {
+    let isRecording: Bool
+    let onCancel: () -> Void
+    let onSend: () -> Void
+
+    @State private var elapsed = 0
+    @State private var animating = false
+
+    private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+
+    var body: some View {
+        HStack(spacing: 14) {
+            Button(action: onCancel) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.8))
+                    .frame(width: 40, height: 40)
+                    .background(.white.opacity(0.1), in: Circle())
+            }
+            .buttonStyle(.plain)
+
+            HStack(spacing: 3) {
+                ForEach(0..<24, id: \.self) { i in
+                    Capsule()
+                        .fill(AppColor.pink.opacity(isRecording ? 0.9 : 0.5))
+                        .frame(width: 3, height: animating ? barHeight(i) : 6)
+                        .animation(
+                            .easeInOut(duration: 0.4).repeatForever().delay(Double(i % 6) * 0.06),
+                            value: animating
+                        )
+                }
+            }
+            .frame(maxWidth: .infinity)
+
+            Text(String(format: "%d:%02d", elapsed / 60, elapsed % 60))
+                .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.7))
+
+            Button(action: onSend) {
+                Image(systemName: "paperplane.fill")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 40, height: 40)
+                    .background(
+                        LinearGradient(colors: [AppColor.pink, AppColor.amber],
+                                       startPoint: .topLeading, endPoint: .bottomTrailing),
+                        in: Circle()
+                    )
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(AppColor.card.opacity(0.9))
+        .onAppear { animating = true }
+        .onReceive(timer) { _ in if isRecording { elapsed += 1 } }
+    }
+
+    private func barHeight(_ i: Int) -> CGFloat {
+        [8, 16, 22, 12, 18, 10][i % 6]
     }
 }

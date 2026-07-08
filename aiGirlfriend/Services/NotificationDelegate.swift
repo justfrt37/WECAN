@@ -108,6 +108,15 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
             injectMessage(line, for: characterID)
         }
 
+        // Ghosted gönderildi → kullanıcı tekrar yazana kadar bu karakter için
+        // TÜM proaktif bildirimler (jealousy/bedtime/level-up) susar — bkz.
+        // NotificationScheduler eligibility check'leri + noteUserSent (temizler).
+        if kind == .ghosted {
+            var stored = LocalConversationStore.shared.load(for: characterID)
+            stored?.ghostedAt = Date()
+            if let stored { LocalConversationStore.shared.save(stored, for: characterID) }
+        }
+
         // .sleepyGoodbye reverts the character to genuinely asleep — clear the
         // wake-override so CharacterSleepState.isEffectivelyAsleep is true again.
         if kind == .sleepyGoodbye {

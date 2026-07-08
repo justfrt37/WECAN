@@ -18,6 +18,7 @@ struct aiGirlfriendApp: App {
     @State private var navigationCenter = NavigationCenter()
     @State private var auth = AuthService()
     @State private var store = CharacterStore()
+    @State private var tokenStore = TokenStore()
     @Environment(\.scenePhase) private var scenePhase
     @State private var notificationDelegate: NotificationDelegate?
 
@@ -33,6 +34,7 @@ struct aiGirlfriendApp: App {
             .environment(navigationCenter)
             .environment(auth)
             .environment(store)
+            .environment(tokenStore)
             .preferredColorScheme(.dark)
             .task {
                 PurchaseService.shared.configure()
@@ -42,6 +44,7 @@ struct aiGirlfriendApp: App {
                 // Uygulama bildirime dokunulmadan (ör. ana ekran ikonuyla) açılmış
                 // olabilir — zaten teslim edilmiş bildirimlerin mesajını işle.
                 delegate.catchUpOnDeliveredNotifications()
+                await tokenStore.refresh()
             }
         }
         .onChange(of: scenePhase) { _, newPhase in

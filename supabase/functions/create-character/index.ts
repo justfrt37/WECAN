@@ -43,6 +43,33 @@ const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
 const db = createClient(SUPABASE_URL, SERVICE_ROLE, { auth: { persistSession: false } });
 
+const WEEKLY_CHARACTER_LIMIT: Record<string, number> = {
+  pro: 1,
+  pro_plus: 3,
+  max: 10,
+};
+
+async function checkCreationAllowance(uid: string): Promise<{ ok: true } | { ok: false; error: string; limit?: number }> {
+  const { data: sub } = await db
+    .from("subscriptions")
+    .select("tier, current_period_start")
+    .eq("user_id", uid)
+    .gte("current_period_end", new Date().toISOString())
+    .maybeSingle();
+
+  if (!sub) return { ok: false, error: "subscription_required" };
+
+  const limit = WEEKLY_CHARACTER_LIMIT[sub.tier] ?? 0;
+  const { count } = await db
+    .from("characters")
+    .select("id", { count: "exact", head: true })
+    .eq("created_by", uid)
+    .gte("created_at", sub.current_period_start);
+
+  if ((count ?? 0) >= limit) return { ok: false, error: "weekly_limit_reached", limit };
+  return { ok: true };
+}
+
 async function grok(prompt: string, maxTokens: number): Promise<string> {
   const r = await fetch(XAI_URL, {
     method: "POST",
@@ -67,6 +94,15 @@ function userIdFromJWT(authHeader: string | null): string | null {
 }
 
 function pickAgeFromRange(range: string): number {
+  // Open-ended range ("65+") has no "-", so the split below always failed
+  // length===2 and silently fell through to the hardcoded 23 fallback —
+  // every "65+" character was generated as a 23-year-old. Handle it first.
+  if (range.endsWith("+")) {
+    const base = Number(range.slice(0, -1));
+    if (!isNaN(base)) {
+      return base + Math.floor(Math.random() * 16); // 65-80
+    }
+  }
   const parts = range.split("-").map(Number);
   if (parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
     return Math.floor(Math.random() * (parts[1] - parts[0] + 1)) + parts[0];
@@ -79,7 +115,7 @@ function pickAgeFromRange(range: string): number {
 function buildImagePrompt(opts: {
   gender: string; age: number; category: string; vibe: string; profession: string;
   hairstyle: string; hairColor: string; eyeShape: string; eyeColor: string;
-  noseShape: string; skinTone: string; ethnicity?: string;
+  noseShape: string; skinTone: string; bodyType?: string; ethnicity?: string;
 }): string {
   const styleCue: Record<string, string> = {
     Realistic: "photorealistic portrait photo, natural lighting, high detail, DSLR quality",
@@ -90,10 +126,11 @@ function buildImagePrompt(opts: {
   const style = styleCue[opts.category] ?? styleCue.Realistic;
 
   const ethnicity = opts.ethnicity ? `${opts.ethnicity.toLowerCase()} ` : "";
+  const bodyType = opts.bodyType ? `, ${opts.bodyType.toLowerCase()} body type` : "";
   return `${style} of a ${opts.age}-year-old ${ethnicity}${opts.gender.toLowerCase()}, ` +
     `${opts.hairstyle.toLowerCase()} ${opts.hairColor.toLowerCase()} hair, ` +
     `${opts.eyeShape.toLowerCase()} ${opts.eyeColor.toLowerCase()} eyes, ` +
-    `${opts.noseShape.toLowerCase()} nose, ${opts.skinTone.toLowerCase()} skin tone, ` +
+    `${opts.noseShape.toLowerCase()} nose, ${opts.skinTone.toLowerCase()} skin tone${bodyType}, ` +
     `${opts.vibe.toLowerCase()} vibe, works as a ${opts.profession.toLowerCase()}, ` +
     `close-up portrait, upper body, looking at camera, warm friendly expression`;
 }
@@ -163,6 +200,7 @@ Deno.serve(async (req: Request) => {
           eyeColor: b.eye_color ?? "Brown",
           noseShape: b.nose_shape ?? "Straight",
           skinTone: b.skin_tone ?? "Medium",
+          bodyType: b.body_type ?? "",
           ethnicity: b.ethnicity ?? "",
         });
         const bytes = await fetchGeneratedImageBytes(prompt);
@@ -175,6 +213,10 @@ Deno.serve(async (req: Request) => {
     }
 
     const uid = userIdFromJWT(req.headers.get("Authorization"));
+    if (!uid) return json({ error: "unauthorized" }, 401);
+    const allowance = await checkCreationAllowance(uid);
+    if (!allowance.ok) return json({ error: allowance.error, limit: allowance.limit }, 403);
+
     const interests: string[] = Array.isArray(b.interests) ? b.interests : [];
     const personality = b.personality ?? "romantik";
     const gender = b.gender ?? "Kadın";
@@ -193,6 +235,7 @@ Deno.serve(async (req: Request) => {
       eye_color: b.eye_color ?? null,
       nose_shape: b.nose_shape ?? null,
       skin_tone: b.skin_tone ?? null,
+      body_type: b.body_type ?? null,
     };
     const exHistoryRaw: string | null = b.ex_history ?? null;
 

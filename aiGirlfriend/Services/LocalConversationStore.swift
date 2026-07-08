@@ -36,16 +36,23 @@ final class LocalConversationStore {
         /// kabul etti — bkz. chat/index.ts wentToSleep. `nil` = erken-uyuma
         /// geçersiz.
         var manualSleepAt: Date?
+        /// Ghosted bildirimi bu karaktere enjekte edildiği an — bkz.
+        /// NotificationDelegate.injectMessage(kind: .ghosted). Doluyken bu
+        /// karakter hiçbir proaktif bildirim göndermez (jealousy/bedtime/
+        /// level-up) — kullanıcı tekrar yazana kadar sessiz kalır (bkz.
+        /// NotificationScheduler.noteUserSent, orada `nil`lenir).
+        var ghostedAt: Date?
 
         enum CodingKeys: String, CodingKey {
             case messages, xp, level, summary, summarizedCount, msgCounter, levelProgress,
-                 detectedLanguage, schedule, wokenUpAt, manualSleepAt
+                 detectedLanguage, schedule, wokenUpAt, manualSleepAt, ghostedAt
         }
 
         init(
             messages: [Message], xp: Int, level: Int, summary: String, summarizedCount: Int,
             msgCounter: Int = 0, levelProgress: Double = 0, detectedLanguage: String? = nil,
-            schedule: CharacterSchedule? = nil, wokenUpAt: Date? = nil, manualSleepAt: Date? = nil
+            schedule: CharacterSchedule? = nil, wokenUpAt: Date? = nil, manualSleepAt: Date? = nil,
+            ghostedAt: Date? = nil
         ) {
             self.messages = messages
             self.xp = xp
@@ -58,6 +65,7 @@ final class LocalConversationStore {
             self.schedule = schedule
             self.wokenUpAt = wokenUpAt
             self.manualSleepAt = manualSleepAt
+            self.ghostedAt = ghostedAt
         }
 
         init(from decoder: Decoder) throws {
@@ -74,6 +82,7 @@ final class LocalConversationStore {
             schedule = try? c.decodeIfPresent(CharacterSchedule.self, forKey: .schedule)
             wokenUpAt = try? c.decodeIfPresent(Date.self, forKey: .wokenUpAt)
             manualSleepAt = try? c.decodeIfPresent(Date.self, forKey: .manualSleepAt)
+            ghostedAt = try? c.decodeIfPresent(Date.self, forKey: .ghostedAt)
         }
 
         func encode(to encoder: Encoder) throws {
@@ -88,6 +97,7 @@ final class LocalConversationStore {
             try c.encodeIfPresent(detectedLanguage, forKey: .detectedLanguage)
             try c.encodeIfPresent(schedule, forKey: .schedule)
             try c.encodeIfPresent(wokenUpAt, forKey: .wokenUpAt)
+            try c.encodeIfPresent(ghostedAt, forKey: .ghostedAt)
             try c.encodeIfPresent(manualSleepAt, forKey: .manualSleepAt)
         }
     }

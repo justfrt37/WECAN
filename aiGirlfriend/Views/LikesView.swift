@@ -42,7 +42,12 @@ struct LikesView: View {
     }
 
     var body: some View {
-        ZStack {
+        // .top alignment — without it the VStack (header + content) sizes to
+        // fit and gets vertically CENTERED by the ZStack whenever its content
+        // is shorter than the screen (most visibly the empty state, which is
+        // small — looked like it was floating mid-screen instead of pinned
+        // under the header).
+        ZStack(alignment: .top) {
             LinearGradient(colors: [AppColor.bg, AppColor.bg2, AppColor.bg],
                            startPoint: .top, endPoint: .bottom)
                 .ignoresSafeArea()
@@ -74,12 +79,11 @@ struct LikesView: View {
                 .font(.system(size: 22, weight: .bold))
                 .foregroundStyle(.white)
             Spacer()
-            Image(systemName: "heart.fill")
-                .foregroundStyle(AppColor.pink)
-                .frame(width: 38, height: 38)
-                .background(.white.opacity(0.08), in: Circle())
         }
-        .padding(.horizontal, 20)
+        // Sağda TokenBadge için yer bırakılıyor (bkz. MainTabView) — burada
+        // sadece dekoratif olan (işlevsiz) kalp ikonu kaldırıldı.
+        .padding(.leading, 20)
+        .padding(.trailing, 96)
         .padding(.vertical, 12)
     }
 

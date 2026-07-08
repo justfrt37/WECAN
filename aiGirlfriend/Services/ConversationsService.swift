@@ -65,15 +65,27 @@ struct ConversationsService {
         return await get(url) ?? []
     }
 
-    private func get<T: Decodable>(_ endpoint: String) async -> T? {
+    private func get<T: Decodable>(_ endpoint: String, retrying: Bool = true) async -> T? {
         guard let url = URL(string: endpoint) else { return nil }
         var request = URLRequest(url: url)
         let bearer = UserDefaultsManager.shared.accessToken ?? Config.supabaseAnonKey
         request.setValue(Config.supabaseAnonKey, forHTTPHeaderField: "apikey")
         request.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
         guard let (data, response) = try? await URLSession.shared.data(for: request),
-              let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode)
+              let http = response as? HTTPURLResponse
         else { return nil }
+        // Bir bildirimden SAATLER sonra (ör. Ghosted, 48 saate kadar) uygulama
+        // açılırsa erişim token'ı süresi dolmuş olabilir — PostgREST 401 döner,
+        // sessizce boş liste döndürmek yerine ChatService.call()'daki aynı
+        // desenle bir kere yenile+tekrar dene (bkz. sistematik hata ayıklama:
+        // "Chats sekmesi bildirimden sonra boş kalıyor, sadece yeniden başlatma
+        // düzeltiyor" raporu — kök neden buydu, diğer sekmeler karakterleri
+        // disk önbelleğinden gösterdiği için token'a bağımlı değildi).
+        if http.statusCode == 401, retrying {
+            _ = await SupabaseAuth.recover()
+            return await get(endpoint, retrying: false)
+        }
+        guard (200..<300).contains(http.statusCode) else { return nil }
         return try? JSONDecoder().decode(T.self, from: data)
     }
 }

@@ -23,6 +23,32 @@ import Observation
 import RevenueCat
 #endif
 
+/// Üç ödemeli seviye — entitlement kimlikleri RevenueCat dashboard'daki
+/// (henüz kurulmamış) "pro"/"pro_plus"/"max" entitlement'larıyla VE
+/// `subscriptions.tier` check constraint'iyle (bkz. 005_token_system.sql)
+/// AYNI kalmalı, biri değişirse diğeri de güncellenmeli.
+enum SubscriptionTier: String {
+    case none, pro, proPlus, max
+
+    var weeklyTokens: Int {
+        switch self {
+        case .none: return 0
+        case .pro: return 1000
+        case .proPlus: return 2500
+        case .max: return 6000
+        }
+    }
+
+    var weeklyCharacterSlots: Int {
+        switch self {
+        case .none: return 0
+        case .pro: return 1
+        case .proPlus: return 3
+        case .max: return 10
+        }
+    }
+}
+
 @MainActor
 @Observable
 final class PurchaseService {
@@ -31,10 +57,12 @@ final class PurchaseService {
 
     /// RevenueCat dashboard → Project Settings → API Keys (public SDK key).
     private let apiKey = ""
-    private let proEntitlementId = "pro"
 
     private(set) var isConfigured = false
-    var isPro: Bool = false
+    var tier: SubscriptionTier = .none
+    /// Eski `isPro` çağrı yerleri (CreateCharacterView, LikesView, GalleryView,
+    /// PaywallHostView) hiç değişmeden derlenmeye devam etsin diye korunuyor.
+    var isPro: Bool { tier != .none }
 
     func configure() {
         #if canImport(RevenueCat)
@@ -51,7 +79,10 @@ final class PurchaseService {
     func refreshEntitlement() async {
         #if canImport(RevenueCat)
         guard isConfigured, let info = try? await Purchases.shared.customerInfo() else { return }
-        isPro = info.entitlements[proEntitlementId]?.isActive == true
+        if info.entitlements["max"]?.isActive == true { tier = .max }
+        else if info.entitlements["pro_plus"]?.isActive == true { tier = .proPlus }
+        else if info.entitlements["pro"]?.isActive == true { tier = .pro }
+        else { tier = .none }
         #endif
     }
 
