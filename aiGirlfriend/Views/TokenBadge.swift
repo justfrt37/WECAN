@@ -13,7 +13,8 @@ struct TokenBadge: View {
     let onTap: () -> Void
 
     @State private var floatingDelta: Int?
-    @State private var floatingOffset: CGFloat = 0
+    @State private var floatingOffsetY: CGFloat = 0
+    @State private var floatingOffsetX: CGFloat = 0
     @State private var floatingOpacity: Double = 0
 
     var body: some View {
@@ -34,12 +35,12 @@ struct TokenBadge: View {
             .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(AppColor.amber.opacity(0.4), lineWidth: 1))
         }
         .buttonStyle(.plain)
-        .overlay(alignment: .top) {
+        .overlay(alignment: .topLeading) {
             if let floatingDelta {
                 Text(floatingDelta > 0 ? "+\(floatingDelta)" : "\(floatingDelta)")
                     .font(.system(size: 13, weight: .heavy, design: .rounded))
-                    .foregroundStyle(floatingDelta > 0 ? AppColor.amber : AppColor.pinkSoft)
-                    .offset(y: floatingOffset)
+                    .foregroundStyle(floatingDelta > 0 ? Color(hex: 0x34D399) : Color(hex: 0xFF4757))
+                    .offset(x: floatingOffsetX, y: floatingOffsetY)
                     .opacity(floatingOpacity)
                     .allowsHitTesting(false)
             }
@@ -47,13 +48,18 @@ struct TokenBadge: View {
         .onChange(of: tokenStore.lastDelta) { _, newValue in
             guard let newValue else { return }
             floatingDelta = newValue
-            floatingOffset = 0
+            // Rozetin sol-üst köşesinden başlar, biraz YANA (dışına) doğru
+            // kayarak yükselir — doğrudan sayının üstüne binmesin, kolayca
+            // görülsün diye (bkz. kullanıcı talebi).
+            floatingOffsetX = -14
+            floatingOffsetY = -4
             floatingOpacity = 1
-            withAnimation(.easeOut(duration: 0.9)) {
-                floatingOffset = -26
+            withAnimation(.easeOut(duration: 1.6)) {
+                floatingOffsetX = -22
+                floatingOffsetY = -34
                 floatingOpacity = 0
             }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.95) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.65) {
                 floatingDelta = nil
                 tokenStore.lastDelta = nil
             }
