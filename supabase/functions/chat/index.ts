@@ -499,11 +499,12 @@ Deno.serve(async (req: Request) => {
     // Fetch character personality role and ex_history
     const { data: character, error: charErr } = await db
       .from("characters")
-      .select("personality_role, ex_history")
+      .select("personality_role, ex_history, interests")
       .eq("id", characterId)
       .maybeSingle();
     if (charErr) console.error("char fetch err:", JSON.stringify(charErr));
     const personalityRole: string = character?.personality_role ?? "flirty";
+    const interests: string[] = Array.isArray(character?.interests) ? character.interests : [];
     const exHistory: string | null = character?.ex_history ?? null;
 
     // 1) Konuşmayı bul ya da oluştur (kullanıcı + karakter)
@@ -782,6 +783,22 @@ Deno.serve(async (req: Request) => {
         `up if the user explicitly asks what you're doing right now. Never ` +
         `mention it turn after turn just because it's in this context; ` +
         `that reads robotic and repetitive.`;
+    }
+    if (interests.length > 0) {
+      // currentActivity'nin AKSİNE tamamen susturulmuyor — kullanıcı bu
+      // ilgi alanlarını KARAKTER için bilerek seçti, hiç yüzeye çıkmazlarsa
+      // seçimin bir anlamı kalmıyor. Ama aynı "her turda tekrar" hatasına
+      // düşmesin diye: SADECE zamanlama gerçekten uyduğunda (hafta sonu +
+      // outdoor hobi, işte değilken + gaming vb.) VE çoğu turda hiç
+      // bahsetmeme talimatı net.
+      turnContext += `\n\n[YOUR INTERESTS — INTERNAL] You're into: ${interests.join(", ")}. ` +
+        `Most turns should not reference these at all — don't list them or ` +
+        `force them in. Only bring one up naturally when the moment actually ` +
+        `fits (e.g. it's the weekend and you have an outdoorsy one, it's your ` +
+        `free time in the evening and you have a gaming/hobby one, or the user ` +
+        `asks what you're up to) — as something you're doing or planning, not ` +
+        `a fact you're reciting. If none fit the current moment, ignore this ` +
+        `entirely this turn.`;
     }
     if (!voiceChat && !imageReactionChat) {
       turnContext += nearSleepTime

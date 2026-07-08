@@ -347,6 +347,7 @@ struct ChatService {
     private struct CharacterScheduleRequest: Codable {
         let characterId: String
         let systemPrompt: String
+        let interests: [String]
     }
 
     private struct CharacterScheduleResponse: Codable {
@@ -364,7 +365,11 @@ struct ChatService {
         request.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
         request.setValue(Config.supabaseAnonKey, forHTTPHeaderField: "apikey")
         request.httpBody = try JSONEncoder().encode(
-            CharacterScheduleRequest(characterId: character.id.uuidString.lowercased(), systemPrompt: character.systemPrompt)
+            CharacterScheduleRequest(
+                characterId: character.id.uuidString.lowercased(),
+                systemPrompt: character.systemPrompt,
+                interests: character.interests
+            )
         )
 
         let (data, response) = try await URLSession.shared.data(for: request)

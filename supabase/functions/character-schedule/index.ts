@@ -35,32 +35,52 @@ function userIdFromJWT(authHeader: string | null): string | null {
 // "having dinner" gösteriyor. Her üretimde RASTGELE bir "kronotip" seçip
 // promptun ZORUNLU bir çıpası yapıyoruz, böylece karakterler arasında
 // gerçek yapısal çeşitlilik oluşuyor (sadece LLM sıcaklığına güvenmek yetmedi).
+// Bu bir "geç saatlere kadar sohbet" uygulaması — HİÇBİR karakter gece 01:00'den
+// ÖNCE yatmamalı (kullanıcı talebi, 2026-07). Eskiden bazı kronotipler
+// 21:30/23:00 gibi erken uyku saatleri veriyordu, bu yüzden aktif sohbet
+// sırasında bile botlar "ben yatıyorum" diyordu. Tüm uyku saatleri 01:00
+// sonrasına çekildi; uyanma saatleri gerçekçilik için aynı kaldı (bkz.
+// buildScheduleInstructions'daki ek sabit taban çizgisi de).
 const CHRONOTYPES = [
-  "Sabahçı tip: 05:30-06:30 arası uyanır, akşam yemeğini erken (17:30-18:30 " +
-  "arası) yer, 21:30-22:30 arası uyur.",
+  "Sabahçı ama geç yatan tip: 05:30-06:30 arası uyanır, akşam yemeğini erken " +
+  "(17:30-18:30 arası) yer, gece 01:00-01:30 arası uyur.",
   "Standart mesai tipi: 07:00-07:30 arası uyanır, akşam yemeğini 19:00-20:00 " +
-  "arası yer, 23:00 civarı uyur.",
+  "arası yer, gece 01:30-02:00 arası uyur.",
   "Gece kuşu tip: 09:30-10:30 arası uyanır, akşam yemeğini geç (20:30-21:30 " +
-  "arası) yer, gece 01:00'den sonra uyur.",
+  "arası) yer, gece 02:30-03:30 arası uyur.",
   "Serbest/düzensiz çalışan tipi: gün gün değişen, kalıba uymayan yemek " +
   "saatleri var; geleneksel öğün saatlerini atlayıp ara sıra atıştırabilir, " +
-  "uyku saatleri de değişken.",
+  "uyku saati HİÇBİR ZAMAN 01:00'den önce olmaz, genelde 02:00-04:00 arası " +
+  "değişken.",
   "Vardiyalı/alışılmadık saatler tipi: akşam ya da gece çalışır, ana " +
-  "öğününü 15:00 veya 22:00 gibi sıra dışı bir saatte yer, günün bir " +
-  "bölümünde uyur.",
+  "öğününü 15:00 veya 22:00 gibi sıra dışı bir saatte yer, uyku saati " +
+  "HİÇBİR ZAMAN 01:00'den önce olmaz, iş bitimine göre 03:00-05:00 arası " +
+  "da olabilir.",
 ];
 
-function buildScheduleInstructions(): string {
+function buildScheduleInstructions(interests: string[]): string {
   const chronotype = CHRONOTYPES[Math.floor(Math.random() * CHRONOTYPES.length)];
+  const interestsNote = interests.length > 0
+    ? `Karakterin ilgi alanları: ${interests.join(", ")}. Uygun düşen boş ` +
+      `zaman/hafta sonu bloklarını bunlarla renklendir (ör. bir outdoor hobi ` +
+      "varsa hafta sonu bloklarından biri o olsun, bir gaming/ev hobisi varsa " +
+      "akşam boş zaman bloklarından biri o olsun) — ama HER blok değil, " +
+      "sadece mantıklı düşenler; işle/uykuyla çelişen bir ilgi alanını o " +
+      "bloğa zorlama. "
+    : "";
   return (
     "Bu karakter için gerçekçi bir günlük rutin (hafta içi + hafta sonu) " +
     "üret. Kişiliğine ve mesleğine uygun, somut zaman blokları yaz — uyku " +
     "dahil GÜNÜN TAMAMINI boşluksuz kapla. Hafta sonu hafta içinden FARKLI " +
-    "olmalı (çoğu meslek 7 gün çalışmaz). " +
+    "olmalı (çoğu meslek 7 gün çalışmaz). " + interestsNote +
     `UYANMA/YEMEK/UYKU SAATLERİNİ ŞU KALIBA GÖRE BELİRLE: ${chronotype} ` +
     "Bu kalıp karakterin gerçek mesleğiyle AÇIKÇA çelişmedikçe (ör. gece " +
     "vardiyasında çalışan biri sabahçı olamaz) uygula; çelişirse kalıbın " +
     "RUHUNU (ör. düzensiz/sıra dışı saatler) mesleğe uyarlayarak koru. " +
+    "SERT KURAL: uyku bloğu (isSleep:true) HİÇBİR ZAMAN gece 01:00'den ÖNCE " +
+    "başlayamaz — bu geç saatlere kadar sohbet edilen bir uygulama, hiçbir " +
+    "karakter 01:00'den önce yatmaz, kalıpta ne yazarsa yazsın bu kuralı " +
+    "asla ihlal etme. " +
     "`label` alanı KISA bir DURUM ifadesi olmalı — \"şu an ne yapıyor\" " +
     "sorusuna doğal bir cevap gibi oku (ör. \"Work\" değil \"At work\", " +
     "\"Dinner\" değil \"Having dinner\", \"Commute\" değil \"Commuting home\", " +
@@ -90,6 +110,7 @@ Deno.serve(async (req: Request) => {
     const b = await req.json();
     const characterId: string = b.characterId;
     const systemPrompt: string = (b.systemPrompt ?? "").toString().trim();
+    const interests: string[] = Array.isArray(b.interests) ? b.interests : [];
     if (!characterId) return json({ error: "characterId required" }, 400);
     if (!systemPrompt) return json({ error: "systemPrompt required" }, 400);
 
@@ -99,7 +120,7 @@ Deno.serve(async (req: Request) => {
       body: JSON.stringify({
         model: MODEL,
         messages: [
-          { role: "system", content: `${systemPrompt}\n\n${buildScheduleInstructions()}` },
+          { role: "system", content: `${systemPrompt}\n\n${buildScheduleInstructions(interests)}` },
           { role: "user", content: "Generate the schedule JSON now." },
         ],
         temperature: 0.8,
