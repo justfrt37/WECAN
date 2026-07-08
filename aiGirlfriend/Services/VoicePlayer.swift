@@ -87,16 +87,27 @@ struct TTSService {
     }
 }
 
+/// `synthesizeVoiceMessage`'ın sonucu — düz `Data?` yeterli değil çünkü
+/// "yetersiz token" (402) ile GERÇEK bir üretim hatasını ayırt etmemiz
+/// gerekiyor (bkz. ChatViewModel.sendVoiceRequest, farklı hata mesajları).
+enum TTSResult {
+    case success(Data, tokenBalance: Int?)
+    case insufficientTokens
+    case failure
+}
+
 extension TTSService {
     /// Sesli mesaj için tek seferlik sentez — role/vibe/lang'e göre 28 sesten
     /// birini seçer. Var olan `synthesize(text:)`'ten (yeniden-seslendirme,
     /// cihaz-içi fallback'li) FARKLI — burada fallback yok, başarısızlık gerçek hata.
     /// `voice-message-tts` Edge Function'ı çağırır — Google TTS anahtarı
-    /// sunucuda (Supabase secret), istemcide hiç bulunmaz.
-    func synthesizeVoiceMessage(text: String, role: String, vibe: String, lang: String, useElevenLabs: Bool = false) async -> Data? {
+    /// sunucuda (Supabase secret), istemcide hiç bulunmaz. Token bakiyesi
+    /// bir JSON alanı değil, `X-Token-Balance` cevap başlığından okunur —
+    /// başarı gövdesi ham ses baytları (bkz. voice-message-tts/index.ts).
+    func synthesizeVoiceMessage(text: String, role: String, vibe: String, lang: String, useElevenLabs: Bool = false) async -> TTSResult {
         guard let body = try? JSONSerialization.data(withJSONObject: [
             "text": text, "role": role, "vibe": vibe, "lang": lang, "useElevenLabs": useElevenLabs,
-        ]) else { return nil }
+        ]) else { return .failure }
         var req = URLRequest(url: Config.voiceMessageTTSFunctionURL)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -107,11 +118,17 @@ extension TTSService {
         req.timeoutInterval = 30
 
         guard let (data, resp) = try? await URLSession.shared.data(for: req),
-              let http = resp as? HTTPURLResponse, http.statusCode == 200,
+              let http = resp as? HTTPURLResponse
+        else { return .failure }
+
+        if http.statusCode == 402 { return .insufficientTokens }
+        guard http.statusCode == 200,
               http.value(forHTTPHeaderField: "Content-Type")?.contains("audio") == true,
               !data.isEmpty
-        else { return nil }
-        return data
+        else { return .failure }
+
+        let balance = http.value(forHTTPHeaderField: "X-Token-Balance").flatMap(Int.init)
+        return .success(data, tokenBalance: balance)
     }
 }
 

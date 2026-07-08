@@ -9,6 +9,7 @@
 import Foundation
 import Observation
 import AVFoundation
+import UIKit
 
 private let localKeepRecent = 20
 
@@ -42,8 +43,27 @@ final class ChatViewModel {
 
     private let service = ChatService()
     var store: CharacterStore?
+    var tokenStore: TokenStore?
+
+    /// Her başarılı ödemeli çağrıdan sonra çağrılır — TokenBadge'in bir
+    /// sonraki `TokenStore.refresh()`'i beklemeden anında güncellenmesi için.
+    private func handleTokenBalance(_ balance: Int?) {
+        if let balance { tokenStore?.setBalance(balance) }
+    }
+
+    /// 402 — bkz. chat/index.ts, chat-image/index.ts, voice-message-tts/index.ts
+    /// chargeOrReject. Genel ağ hatası mesajı yerine kullanıcıya net bir sebep
+    /// göstermek için ayırt edilir.
+    private func isInsufficientTokensError(_ error: Error) -> Bool {
+        if case ChatServiceError.badStatus(402, _) = error { return true }
+        return false
+    }
     var isVisible = false
     private var hasSyntheticOpening = false
+    /// PRO gerektiren bir gönderim denendiğinde açılır (bkz. PurchaseService.isPro) —
+    /// düğmelere basmak SERBEST (isVoiceArmed/isImageArmed, kamera/mikrofon açma),
+    /// sadece gerçek GÖNDERIM anında kontrol edilir.
+    var showPaywall = false
 
     init(character: Character) {
         self.character = character
@@ -226,6 +246,7 @@ final class ChatViewModel {
                 // sadece ilgili düğmeyle gönderilir (bkz. MEDIA_REQUEST_RULE,
                 // chat/index.ts). Grok bu turda düğmeyi kullanmasını önerir.
                 messages.append(Message(role: .assistant, content: result.reply))
+                handleTokenBalance(result.tokenBalance)
 
                 applyPostReplyEffects(gotPhoto: nil, stored: stored)
 
@@ -237,7 +258,9 @@ final class ChatViewModel {
                     NotificationScheduler.shared.cancelSleepyGoodnight(for: character.id)
                 }
             } catch {
-                errorMessage = error.localizedDescription
+                errorMessage = isInsufficientTokensError(error)
+                    ? String(localized: "Not enough tokens. Get more to keep chatting.")
+                    : error.localizedDescription
                 showsTypingBubble = false
                 store?.setTyping(character.id, false)
             }
@@ -253,6 +276,162 @@ final class ChatViewModel {
         if ScheduleLookup.currentBlock(schedule: schedule, date: now)?.isSleep == true { return true }
         guard let nextStart = ScheduleLookup.nextSleepBlockStart(schedule: schedule, from: now) else { return false }
         return nextStart.timeIntervalSince(now) <= 3600
+    }
+
+    /// Kullanıcının KENDİ kaydettiği sesli mesaj — botun sesli CEVAP vermesini
+    /// isteme (`sendVoiceRequest`) ile KARIŞTIRILMASIN, bu farklı bir şey:
+    /// kullanıcı konuştu, transkript metin olarak Grok'a gider (ücretsiz —
+    /// cihaz üstü konuşma tanıma), ses SADECE cihazda oynatılabilir bir
+    /// balon olarak kalır. `isVoiceArmed`/`isImageArmed` varsa temizlenir —
+    /// kullanıcının kendi girdisi öncelikli, botun ayrı bir medya üretmesini
+    /// İSTEMEZ (bkz. plan: "arm-system composition").
+    func sendUserVoice(transcript: String, audioURL: URL) {
+        let trimmed = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !isSending, !isLoadingHistory else { return }
+        guard PurchaseService.shared.isPro else { showPaywall = true; return }
+
+        let lastMessageAt = messages.last?.createdAt
+        let messageID = UUID()
+        let duration = (try? AVAudioPlayer(contentsOf: audioURL))?.duration ?? 0
+        let savedPath: String? = (try? Data(contentsOf: audioURL)).flatMap {
+            VoicePlayer.saveVoiceMessage($0, messageID: messageID)
+        }
+        messages.append(Message(
+            id: messageID, role: .user, content: trimmed,
+            voiceLocalPath: savedPath, voiceDuration: duration
+        ))
+        updateCache()
+        NotificationScheduler.shared.noteUserSent(character: character)
+        isVoiceArmed = false
+        isImageArmed = false
+        isSending = true
+        errorMessage = nil
+
+        Task {
+            await handleWakeUpIfAsleep()
+            try? await Task.sleep(nanoseconds: UInt64(TypingTiming.randomStartDelay() * 1_000_000_000))
+            showsTypingBubble = true
+            store?.setTyping(character.id, true)
+            let bubbleStartedAt = Date()
+
+            do {
+                let stored = LocalConversationStore.shared.load(for: character.id)
+                let result = try await service.sendWithLocalHistory(
+                    character: character,
+                    localMessages: realMessages(),
+                    summary: stored?.summary ?? "",
+                    userMessage: trimmed,
+                    level: relationshipLevel,
+                    lastMessageAt: lastMessageAt,
+                    currentActivity: currentActivity?.detail,
+                    nearSleepTime: isNearSleepTime()
+                )
+
+                let elapsed = Date().timeIntervalSince(bubbleStartedAt)
+                let wanted = TypingTiming.duration(forReplyLength: result.reply.count)
+                let remaining = wanted - elapsed
+                if remaining > 0 {
+                    try? await Task.sleep(nanoseconds: UInt64(remaining * 1_000_000_000))
+                }
+                showsTypingBubble = false
+                store?.setTyping(character.id, false)
+
+                messages.append(Message(role: .assistant, content: result.reply))
+                handleTokenBalance(result.tokenBalance)
+                applyPostReplyEffects(gotPhoto: nil, stored: stored)
+
+                if result.wentToSleep {
+                    var updated = LocalConversationStore.shared.load(for: character.id) ?? stored
+                    updated?.manualSleepAt = Date()
+                    updated?.wokenUpAt = nil
+                    if let updated { LocalConversationStore.shared.save(updated, for: character.id) }
+                    NotificationScheduler.shared.cancelSleepyGoodnight(for: character.id)
+                }
+            } catch {
+                errorMessage = isInsufficientTokensError(error)
+                    ? String(localized: "Not enough tokens. Get more to keep chatting.")
+                    : error.localizedDescription
+                showsTypingBubble = false
+                store?.setTyping(character.id, false)
+            }
+            isSending = false
+        }
+    }
+
+    /// Kullanıcının BOTA gönderdiği kendi fotoğrafı (kamera/kütüphane) —
+    /// botun kendi ürettiği fotoğrafla (`sendImageRequest`) KARIŞTIRILMASIN,
+    /// ters yön: burada Grok'un vision GİRİŞİNE gerçek bir fotoğraf gidiyor,
+    /// karakter buna doğal bir tepki veriyor (bkz. chat/index.ts
+    /// USER_PHOTO_REACTION_RULE). Fotoğraf sadece cihazda saklanır, hiçbir
+    /// yere yüklenmez (bkz. UserPhotoStore).
+    func sendUserPhoto(image: UIImage, caption: String) {
+        guard !isSending, !isLoadingHistory else { return }
+        guard PurchaseService.shared.isPro else { showPaywall = true; return }
+        guard let base64 = UserPhotoStore.base64JPEG(from: image) else { return }
+
+        let lastMessageAt = messages.last?.createdAt
+        let messageID = UUID()
+        let savedPath = UserPhotoStore.saveUserPhoto(image, messageID: messageID)
+        messages.append(Message(id: messageID, role: .user, content: caption, localImagePath: savedPath))
+        updateCache()
+        NotificationScheduler.shared.noteUserSent(character: character)
+        isVoiceArmed = false
+        isImageArmed = false
+        isSending = true
+        errorMessage = nil
+
+        Task {
+            await handleWakeUpIfAsleep()
+            try? await Task.sleep(nanoseconds: UInt64(TypingTiming.randomStartDelay() * 1_000_000_000))
+            showsTypingBubble = true
+            store?.setTyping(character.id, true)
+            let bubbleStartedAt = Date()
+
+            do {
+                let stored = LocalConversationStore.shared.load(for: character.id)
+                let result = try await service.sendUserPhotoMessage(
+                    character: character,
+                    localMessages: realMessages(),
+                    summary: stored?.summary ?? "",
+                    userCaption: caption,
+                    base64Image: base64,
+                    level: relationshipLevel,
+                    lastMessageAt: lastMessageAt,
+                    currentActivity: currentActivity?.detail,
+                    nearSleepTime: isNearSleepTime()
+                )
+
+                let elapsed = Date().timeIntervalSince(bubbleStartedAt)
+                let wanted = TypingTiming.duration(forReplyLength: result.reply.count)
+                let remaining = wanted - elapsed
+                if remaining > 0 {
+                    try? await Task.sleep(nanoseconds: UInt64(remaining * 1_000_000_000))
+                }
+                showsTypingBubble = false
+                store?.setTyping(character.id, false)
+
+                messages.append(Message(role: .assistant, content: result.reply))
+                handleTokenBalance(result.tokenBalance)
+                // `gotPhoto: nil` — bu bir GELEN fotoğraf, botun kendi ürettiği
+                // fotoğraf XP olayı (RelationshipXP.photoGainFraction) DEĞİL.
+                applyPostReplyEffects(gotPhoto: nil, stored: stored)
+
+                if result.wentToSleep {
+                    var updated = LocalConversationStore.shared.load(for: character.id) ?? stored
+                    updated?.manualSleepAt = Date()
+                    updated?.wokenUpAt = nil
+                    if let updated { LocalConversationStore.shared.save(updated, for: character.id) }
+                    NotificationScheduler.shared.cancelSleepyGoodnight(for: character.id)
+                }
+            } catch {
+                errorMessage = isInsufficientTokensError(error)
+                    ? String(localized: "Not enough tokens. Get more to keep chatting.")
+                    : error.localizedDescription
+                showsTypingBubble = false
+                store?.setTyping(character.id, false)
+            }
+            isSending = false
+        }
     }
 
     /// Sesli mesaj isteği bayrağı — `quickReplyRow`'daki dalga formu düğmesiyle
@@ -285,6 +464,7 @@ final class ChatViewModel {
     func sendVoiceRequest() {
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !isSending, !isLoadingHistory else { return }
+        guard PurchaseService.shared.isPro else { showPaywall = true; return }
 
         let lastMessageAt = messages.last?.createdAt
         messages.append(Message(role: .user, content: text))
@@ -333,10 +513,31 @@ final class ChatViewModel {
                 let cleanedReply = Self.stripVoiceTags(result.reply)
                 let lang = VoiceLanguage.detect(from: cleanedReply)
                 let messageID = UUID()
-                guard let audioData = await TTSService().synthesizeVoiceMessage(
+                let ttsResult = await TTSService().synthesizeVoiceMessage(
                     text: result.reply, role: character.personalityRole, vibe: character.vibe, lang: lang,
                     useElevenLabs: true
-                ), let savedPath = VoicePlayer.saveVoiceMessage(audioData, messageID: messageID) else {
+                )
+                let audioData: Data
+                switch ttsResult {
+                case .success(let data, let tokenBalance):
+                    audioData = data
+                    handleTokenBalance(tokenBalance)
+                case .insufficientTokens:
+                    showsTypingBubble = false
+                    isSendingVoiceReply = false
+                    store?.setTyping(character.id, false)
+                    errorMessage = String(localized: "Not enough tokens. Get more to keep chatting.")
+                    isSending = false
+                    return
+                case .failure:
+                    showsTypingBubble = false
+                    isSendingVoiceReply = false
+                    store?.setTyping(character.id, false)
+                    errorMessage = String(localized: "Voice message failed to generate.")
+                    isSending = false
+                    return
+                }
+                guard let savedPath = VoicePlayer.saveVoiceMessage(audioData, messageID: messageID) else {
                     showsTypingBubble = false
                     isSendingVoiceReply = false
                     store?.setTyping(character.id, false)
@@ -357,7 +558,9 @@ final class ChatViewModel {
 
                 applyPostReplyEffects(gotPhoto: nil, stored: stored)
             } catch {
-                errorMessage = error.localizedDescription
+                errorMessage = isInsufficientTokensError(error)
+                    ? String(localized: "Not enough tokens. Get more to keep chatting.")
+                    : error.localizedDescription
                 showsTypingBubble = false
                 isSendingVoiceReply = false
                 store?.setTyping(character.id, false)
@@ -375,6 +578,7 @@ final class ChatViewModel {
     func sendImageRequest() {
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !isSending, !isLoadingHistory else { return }
+        guard PurchaseService.shared.isPro else { showPaywall = true; return }
 
         let lastMessageAt = messages.last?.createdAt
         messages.append(Message(role: .user, content: text))
@@ -394,7 +598,7 @@ final class ChatViewModel {
 
             do {
                 let stored = LocalConversationStore.shared.load(for: character.id)
-                let photoURL = try await service.generateChatImage(
+                let imageResult = try await service.generateChatImage(
                     character: character, prompt: text,
                     localMessages: realMessages(), summary: stored?.summary ?? "",
                     currentActivity: currentActivity?.detail
@@ -402,9 +606,13 @@ final class ChatViewModel {
 
                 showsTypingBubble = false
                 isSendingImageReply = false
-                messages.append(Message(role: .assistant, content: "", imageURL: photoURL))
+                messages.append(Message(role: .assistant, content: "", imageURL: imageResult.url))
+                handleTokenBalance(imageResult.tokenBalance)
 
                 // İsteğe bağlı metin tepkisi — sırayla, fotoğraftan SONRA gelir.
+                // `imageResult.redirected` true ise (orijinal istek reddedilip
+                // yumuşatılmış bir fotoğrafla değiştirildi) normal tepki yerine
+                // doğal bir yönlendirme cevabı istenir (bkz. IMAGE_REDIRECT_RULE).
                 showsTypingBubble = true
                 let bubbleStartedAt = Date()
                 let realMsgs = realMessages()
@@ -416,7 +624,8 @@ final class ChatViewModel {
                     level: relationshipLevel,
                     lastMessageAt: lastMessageAt,
                     imageReactionChat: true,
-                    currentActivity: currentActivity?.detail
+                    currentActivity: currentActivity?.detail,
+                    imageRedirected: imageResult.redirected
                 )
 
                 let elapsed = Date().timeIntervalSince(bubbleStartedAt)
@@ -433,9 +642,11 @@ final class ChatViewModel {
                     messages.append(Message(role: .assistant, content: caption))
                 }
 
-                applyPostReplyEffects(gotPhoto: photoURL, stored: stored)
+                applyPostReplyEffects(gotPhoto: imageResult.url, stored: stored)
             } catch {
-                errorMessage = error.localizedDescription
+                errorMessage = isInsufficientTokensError(error)
+                    ? String(localized: "Not enough tokens. Get more to keep chatting.")
+                    : error.localizedDescription
                 showsTypingBubble = false
                 isSendingImageReply = false
                 store?.setTyping(character.id, false)
@@ -534,7 +745,7 @@ final class ChatViewModel {
     /// Arka planda çalışır; kullanıcıyı bloklamaz.
     private func triggerSummarizationIfNeeded() {
         guard let stored = LocalConversationStore.shared.load(for: character.id) else { return }
-        let real = stored.messages.filter { $0.imageURL == nil }
+        let real = stored.messages.filter { $0.imageURL == nil && $0.localImagePath == nil }
         let windowStart = max(0, real.count - localKeepRecent)
         guard windowStart > stored.summarizedCount else { return }
 
