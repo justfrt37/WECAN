@@ -288,7 +288,6 @@ final class ChatViewModel {
     func sendUserVoice(transcript: String, audioURL: URL) {
         let trimmed = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, !isSending, !isLoadingHistory else { return }
-        guard PurchaseService.shared.isPro else { showPaywall = true; return }
 
         let lastMessageAt = messages.last?.createdAt
         let messageID = UUID()
@@ -366,7 +365,6 @@ final class ChatViewModel {
     /// yere yüklenmez (bkz. UserPhotoStore).
     func sendUserPhoto(image: UIImage, caption: String) {
         guard !isSending, !isLoadingHistory else { return }
-        guard PurchaseService.shared.isPro else { showPaywall = true; return }
         guard let base64 = UserPhotoStore.base64JPEG(from: image) else { return }
 
         let lastMessageAt = messages.last?.createdAt
@@ -474,7 +472,6 @@ final class ChatViewModel {
     func sendVoiceRequest() {
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !isSending, !isLoadingHistory else { return }
-        guard PurchaseService.shared.isPro else { showPaywall = true; return }
 
         messages.append(Message(role: .user, content: text))
         messages.append(Message(role: .assistant, content: "", pendingVoiceRequest: true))
@@ -614,7 +611,6 @@ final class ChatViewModel {
     func sendImageRequest() {
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !isSending, !isLoadingHistory else { return }
-        guard PurchaseService.shared.isPro else { showPaywall = true; return }
 
         messages.append(Message(role: .user, content: text))
         messages.append(Message(role: .assistant, content: "", pendingImagePrompt: text))

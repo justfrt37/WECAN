@@ -276,7 +276,6 @@ struct ChatView: View {
 
                 Spacer()
 
-                TokenBadge(tokenStore: tokenStore) { viewModel.showPaywall = true }
                 headerButton("gearshape.fill", menu: true)
             }
             .opacity(levelUpBanner == nil ? 1 : 0)
@@ -286,7 +285,11 @@ struct ChatView: View {
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
-        .padding(.horizontal, 14)
+        .padding(.leading, 14)
+        // Sağda MainTabView'ın NavigationStack seviyesindeki TokenBadge
+        // overlay'ı için yer bırakılıyor (o rozet ChatView'e de ulaşıyor —
+        // burada AYRICA bir tane koymak çift rozet gösteriyordu).
+        .padding(.trailing, 96)
         .padding(.vertical, 8)
     }
 
