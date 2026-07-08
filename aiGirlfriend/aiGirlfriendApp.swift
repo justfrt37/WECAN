@@ -19,6 +19,7 @@ struct aiGirlfriendApp: App {
     @State private var auth = AuthService()
     @State private var store = CharacterStore()
     @State private var tokenStore = TokenStore()
+    @State private var onboarding = OnboardingStore()
     @Environment(\.scenePhase) private var scenePhase
     @State private var notificationDelegate: NotificationDelegate?
 
@@ -26,7 +27,11 @@ struct aiGirlfriendApp: App {
         WindowGroup {
             Group {
                 if auth.isAuthenticated && store.isLoaded {
-                    MainTabView()
+                    if onboarding.isCompleted {
+                        MainTabView()
+                    } else {
+                        OnboardingFlowView()
+                    }
                 } else {
                     SplashView()
                 }
@@ -35,6 +40,7 @@ struct aiGirlfriendApp: App {
             .environment(auth)
             .environment(store)
             .environment(tokenStore)
+            .environment(onboarding)
             .preferredColorScheme(.dark)
             .task {
                 PurchaseService.shared.configure()
