@@ -14,7 +14,6 @@ struct ChatView: View {
     @Environment(CharacterStore.self) private var store
     @Environment(TokenStore.self) private var tokenStore
 
-    @State private var showGallery = false
     @State private var showProfile = false
     @State private var addSheetKind: NoteKind?
     @State private var showBlockConfirm = false
@@ -117,9 +116,6 @@ struct ChatView: View {
         }
         .task {
             await viewModel.startActivityRefreshLoop()
-        }
-        .fullScreenCover(isPresented: $showGallery) {
-            GalleryView(character: viewModel.character)
         }
         .fullScreenCover(isPresented: $showProfile) {
             CharacterProfileView(character: viewModel.character)
@@ -266,6 +262,8 @@ struct ChatView: View {
                                     Text(headerStatusLabel)
                                         .font(.system(size: 12, weight: .medium))
                                         .foregroundStyle(.white.opacity(0.6))
+                                        .lineLimit(1)
+                                        .truncationMode(.tail)
                                 }
                             }
                             Text("Level \(viewModel.relationshipLevel) · \(viewModel.relationshipStage)")
@@ -278,7 +276,7 @@ struct ChatView: View {
 
                 Spacer()
 
-                headerButton("photo.fill") { showGallery = true }
+                TokenBadge(tokenStore: tokenStore) { viewModel.showPaywall = true }
                 headerButton("gearshape.fill", menu: true)
             }
             .opacity(levelUpBanner == nil ? 1 : 0)
@@ -288,10 +286,7 @@ struct ChatView: View {
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
-        .padding(.leading, 14)
-        // Sağda TokenBadge için yer bırakılıyor — bkz. MainTabView, ChatView
-        // aynı NavigationStack'e push edildiği için rozet burada da görünür.
-        .padding(.trailing, 96)
+        .padding(.horizontal, 14)
         .padding(.vertical, 8)
     }
 
