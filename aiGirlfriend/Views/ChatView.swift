@@ -288,7 +288,10 @@ struct ChatView: View {
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
-        .padding(.horizontal, 14)
+        .padding(.leading, 14)
+        // Sağda TokenBadge için yer bırakılıyor — bkz. MainTabView, ChatView
+        // aynı NavigationStack'e push edildiği için rozet burada da görünür.
+        .padding(.trailing, 96)
         .padding(.vertical, 8)
     }
 

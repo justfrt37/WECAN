@@ -68,11 +68,6 @@ struct MainTabView: View {
                 CustomTabBar(selection: $selection)
             }
             .toolbar(.hidden, for: .navigationBar)
-            .overlay(alignment: .topTrailing) {
-                TokenBadge(balance: tokenStore.balance) { showTokenStore = true }
-                    .padding(.top, 8)
-                    .padding(.trailing, 16)
-            }
             .navigationDestination(for: Character.self) { character in
                 ChatView(character: character)
             }
@@ -93,6 +88,14 @@ struct MainTabView: View {
             }
         }
         .tint(AppColor.pink)
+        // NavigationStack'in KENDİSİNE bindirilmiş overlay — kök içeriğe değil,
+        // böylece ChatView push edilince (kök yerini alınca) rozet KAYBOLMAZ,
+        // her zaman en üstte kalır (bkz. tasarım: "chat içinde de görünmeli").
+        .overlay(alignment: .topTrailing) {
+            TokenBadge(balance: tokenStore.balance) { showTokenStore = true }
+                .padding(.top, 8)
+                .padding(.trailing, 16)
+        }
         .fullScreenCover(isPresented: $showTokenStore) {
             TokenStoreView()
         }
