@@ -9,17 +9,7 @@ import SwiftUI
 struct GalleryView: View {
     let character: Character
     @Environment(\.dismiss) private var dismiss
-    @State private var showPaywall = false
     @State private var yourPhotos: [URL] = []
-
-    // Kilitli grid için galeri resimleri (şimdilik feed fotosu tekrar eder).
-    private var lockedImages: [URL] {
-        let base = character.galleryURLs.isEmpty
-            ? [character.photoURL].compactMap { $0 }
-            : character.galleryURLs
-        guard !base.isEmpty else { return [] }
-        return (0..<8).map { base[$0 % base.count] }
-    }
 
     private let columns = [GridItem(.flexible(), spacing: 13),
                            GridItem(.flexible(), spacing: 13)]
@@ -30,20 +20,21 @@ struct GalleryView: View {
                            startPoint: .top, endPoint: .bottom)
                 .ignoresSafeArea()
 
+            // Hazır (pre-made) galeri fotoğrafları BURADA gösterilmiyor —
+            // SADECE karakter profilinin ("about me") hero carousel'inde,
+            // PRO olmayanlar için bulanık/kilitli olarak (bkz.
+            // CharacterProfileView.hero). Burası tamamen kullanıcının
+            // KENDİ ürettiği fotoğraflar için — hepsi açık gösterilir.
             ScrollView {
                 VStack(spacing: 24) {
                     heroCard
                     yourPhotosSection
-                    section
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 12)
-                .padding(.bottom, 110)
+                .padding(.bottom, 24)
             }
-
-            proCTA
         }
-        .sheet(isPresented: $showPaywall) { PaywallHostView() }
         .task {
             yourPhotos = (try? await GeneratedPhotoService().fetch(characterId: character.id)) ?? []
         }
@@ -119,23 +110,26 @@ struct GalleryView: View {
 
     // MARK: Senin Fotoğrafların
 
-    @ViewBuilder
     private var yourPhotosSection: some View {
-        if !yourPhotos.isEmpty {
-            VStack(alignment: .leading, spacing: 16) {
-                HStack(spacing: 8) {
-                    Image(systemName: "sparkles")
-                        .font(.system(size: 15))
-                        .foregroundStyle(AppColor.pink)
-                    Text("Your Photos")
-                        .font(.system(size: 15, weight: .bold))
-                        .foregroundStyle(.white)
-                    Spacer()
-                    Text("\(yourPhotos.count) photos")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.5))
-                }
+        // Header always shows (even with zero photos) — only the body below
+        // switches between the grid and the empty state, per product ask.
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(spacing: 8) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 15))
+                    .foregroundStyle(AppColor.pink)
+                Text("Your Photos")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(.white)
+                Spacer()
+                Text("\(yourPhotos.count) photos")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.5))
+            }
 
+            if yourPhotos.isEmpty {
+                noPhotosYetState
+            } else {
                 LazyVGrid(columns: columns, spacing: 13) {
                     ForEach(yourPhotos, id: \.self) { url in
                         CachedImage(url: url) { image in
@@ -153,86 +147,23 @@ struct GalleryView: View {
         }
     }
 
-    // MARK: Kilitli foto grid
-
-    private var section: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack {
-                HStack(spacing: 8) {
-                    Image(systemName: "lock.fill")
-                        .font(.system(size: 15))
-                        .foregroundStyle(Color(hex: 0xFFA726))
-                    Text("More Photos")
-                        .font(.system(size: 15, weight: .bold))
-                        .foregroundStyle(.white)
-                }
-                Spacer()
-                Text("\(lockedImages.count) photos")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.5))
-            }
-
-            LazyVGrid(columns: columns, spacing: 13) {
-                ForEach(Array(lockedImages.enumerated()), id: \.offset) { _, url in
-                    lockedTile(url)
-                }
-            }
-        }
-    }
-
-    private func lockedTile(_ url: URL) -> some View {
-        ZStack {
-            CachedImage(url: url) { image in
-                image.resizable().scaledToFill()
-            } placeholder: {
-                AppColor.card
-            }
-            .frame(height: 200)
-            .frame(maxWidth: .infinity)
-            .clipped()
-            .blur(radius: 18)
-
-            Color.black.opacity(0.25)
-
-            Image(systemName: "lock.fill")
+    private var noPhotosYetState: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "photo.on.rectangle.angled")
                 .font(.system(size: 34))
-                .foregroundStyle(.white)
-                .shadow(color: .black.opacity(0.5), radius: 8, y: 4)
+                .foregroundStyle(.white.opacity(0.3))
+            Text("No photos yet")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.6))
+            Text("Ask them to send you a photo in chat")
+                .font(.system(size: 12))
+                .foregroundStyle(.white.opacity(0.4))
         }
-        .frame(height: 200)
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 40)
+        .background(AppColor.card.opacity(0.4), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
-    // MARK: PRO CTA
-
-    private var proCTA: some View {
-        Button { showPaywall = true } label: {
-            HStack(spacing: 8) {
-                Image(systemName: "crown.fill").font(.system(size: 16))
-                Text("Upgrade to PRO · See All Photos")
-                    .font(.system(size: 15, weight: .heavy))
-            }
-            .foregroundStyle(Color(hex: 0x1A0826))
-            .frame(maxWidth: .infinity)
-            .frame(height: 56)
-            .background(
-                LinearGradient(colors: [Color(hex: 0xFFC76B), Color(hex: 0xFFA726), Color(hex: 0xFF8A00)],
-                               startPoint: .top, endPoint: .bottom),
-                in: Capsule()
-            )
-            .shadow(color: Color(hex: 0xFFA726).opacity(0.5), radius: 16, y: 8)
-        }
-        .padding(.horizontal, 16)
-        .padding(.bottom, 8)
-        .background(
-            LinearGradient(colors: [.clear, AppColor.bg.opacity(0.9), AppColor.bg],
-                           startPoint: .top, endPoint: .bottom)
-                .frame(height: 120)
-                .frame(maxHeight: .infinity, alignment: .bottom)
-                .allowsHitTesting(false)
-                .ignoresSafeArea()
-        )
-    }
 }
 
 #Preview {
