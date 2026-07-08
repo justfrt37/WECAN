@@ -39,14 +39,24 @@ final class AuthService {
     }
 
     private func signInRetrySupabaseAuth() async -> Bool {
-        // Mevcut oturum varsa: token'ı yenile (expired olabilir).
+        // Mevcut oturum varsa: token'ı yenile (expired olabilir). Bir kerelik
+        // ağ hatası YÜZÜNDEN yeni anonim kimliğe düşülmesin — bu, kullanıcının
+        // TÜM daha önce oluşturduğu karakterleri/sohbetleri (RLS: created_by =
+        // auth.uid()) kalıcı olarak görünmez yapar, veri DB'de dursa bile.
+        // O yüzden yeni kimliğe geçmeden önce refresh'i birkaç kez dene.
         if UserDefaultsManager.shared.userId != nil,
            UserDefaultsManager.shared.refreshToken != nil {
             print("Mevcut oturum bulundu — token yenileniyor")
-            if await SupabaseAuth.refresh() {
-                return true
+            for attempt in 1...3 {
+                if await SupabaseAuth.refresh() {
+                    return true
+                }
+                if attempt < 3 {
+                    let seconds = pow(2.0, Double(attempt - 1)) // 1s, 2s
+                    try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+                }
             }
-            print("Token yenilenemedi — yeni anonim giriş denenecek")
+            print("Token yenilenemedi (3 deneme) — yeni anonim giriş denenecek")
         }
 
         // Yeni anonim giriş + retry

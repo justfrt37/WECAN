@@ -67,18 +67,27 @@ final class CharacterStore {
             isLoaded = true
         }
 
-        // 2) Sunucudan taze veriyi çek, güncelle + önbelleğe yaz.
-        do {
-            let fetched = try await service.fetchAll()
-            if !fetched.isEmpty {
-                characters = fetched
-                saveCachedCharacters(fetched)
-            } else if characters.isEmpty {
-                characters = Character.samples
+        // 2) Sunucudan taze veriyi çek, güncelle + önbelleğe yaz. Tek seferlik
+        // bir ağ hatası yüzünden BAYAT önbellek sessizce kalıcı gösterilmesin
+        // (ör. yeni oluşturulmuş/yeniden atanmış karakterler asla görünmez)
+        // — birkaç kez dene, sonra pes et.
+        var fetched: [Character]?
+        for attempt in 1...3 {
+            do {
+                fetched = try await service.fetchAll()
+                break
+            } catch {
+                errorMessage = error.localizedDescription
+                if attempt < 3 {
+                    try? await Task.sleep(nanoseconds: UInt64(pow(2.0, Double(attempt - 1)) * 1_000_000_000))
+                }
             }
-        } catch {
-            errorMessage = error.localizedDescription
-            if characters.isEmpty { characters = Character.samples }
+        }
+        if let fetched, !fetched.isEmpty {
+            characters = fetched
+            saveCachedCharacters(fetched)
+        } else if characters.isEmpty {
+            characters = Character.samples
         }
 
         // Tüm görselleri splash'te önceden indir ve cache'le; feed'de
