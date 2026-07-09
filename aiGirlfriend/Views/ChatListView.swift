@@ -40,20 +40,33 @@ struct ChatListView: View {
                            startPoint: .top, endPoint: .bottom)
                 .ignoresSafeArea()
 
-            ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    header
-                    searchBar
-                    if isLoading {
-                        ProgressView().tint(.white)
-                            .frame(maxWidth: .infinity).padding(.top, 60)
-                    } else if items.isEmpty {
-                        emptyState
-                    } else {
-                        messagesSection
+            // Başlık + arama + "ALL MESSAGES" SABİT kalır; yalnızca mesaj
+            // listesi (ALL MESSAGES'ın altındaki kısım) kayar.
+            VStack(alignment: .leading, spacing: 0) {
+                header
+                searchBar
+                if isLoading {
+                    ProgressView().tint(.white)
+                        .frame(maxWidth: .infinity).padding(.top, 60)
+                    Spacer()
+                } else if items.isEmpty {
+                    emptyState
+                    Spacer()
+                } else {
+                    allMessagesLabel
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 0) {
+                            ForEach(filtered) { item in
+                                NavigationLink(value: item.character) {
+                                    ChatHistoryRow(item: item,
+                                                   isTyping: store.typingCharacterIDs.contains(item.character.id))
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .padding(.bottom, 100) // tab bar boşluğu
                     }
                 }
-                .padding(.bottom, 100) // tab bar boşluğu
             }
         }
         .task { await load() }
@@ -171,23 +184,13 @@ struct ChatListView: View {
 
     // MARK: Mesajlar
 
-    private var messagesSection: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text("ALL MESSAGES")
-                .font(.system(size: 11, weight: .bold))
-                .tracking(1.2)
-                .foregroundStyle(.white.opacity(0.5))
-                .padding(.horizontal, 20)
-                .padding(.vertical, 8)
-
-            ForEach(filtered) { item in
-                NavigationLink(value: item.character) {
-                    ChatHistoryRow(item: item,
-                                   isTyping: store.typingCharacterIDs.contains(item.character.id))
-                }
-                .buttonStyle(.plain)
-            }
-        }
+    private var allMessagesLabel: some View {
+        Text("ALL MESSAGES")
+            .font(.system(size: 11, weight: .bold))
+            .tracking(1.2)
+            .foregroundStyle(.white.opacity(0.5))
+            .padding(.horizontal, 20)
+            .padding(.vertical, 8)
     }
 
     // MARK: Boş durum

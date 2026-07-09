@@ -154,8 +154,8 @@ struct ProfileView: View {
             }
 
             HStack(spacing: 10) {
-                devActionButton("+1000 💠") { await DevTokenTools.addTokens(into: tokenStore) }
-                devActionButton("-1000 💠") { await DevTokenTools.removeTokens(from: tokenStore) }
+                devActionButton("+1000 🪙") { await DevTokenTools.addTokens(into: tokenStore) }
+                devActionButton("-1000 🪙") { await DevTokenTools.removeTokens(from: tokenStore) }
             }
 
             Text("Subscription tier")

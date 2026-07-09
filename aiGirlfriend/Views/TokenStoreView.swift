@@ -167,7 +167,10 @@ struct TokenStoreView: View {
         VStack(spacing: 6) {
             Text(pack.name).font(.system(size: 11, weight: .bold)).foregroundStyle(.white)
             Text(pack.price).font(.system(size: 14, weight: .heavy)).foregroundStyle(AppColor.amber)
-            Text("💠 \(pack.tokens)").font(.system(size: 10)).foregroundStyle(.white.opacity(0.6))
+            HStack(spacing: 4) {
+                CoinIcon(size: 11)
+                Text("\(pack.tokens)").font(.system(size: 10)).foregroundStyle(.white.opacity(0.6))
+            }
             Button {
                 // TODO once RevenueCat is wired (see design doc "Dependencies"):
                 // trigger the real StoreKit/RevenueCat purchase for this pack.

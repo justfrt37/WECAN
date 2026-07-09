@@ -8,6 +8,24 @@
 
 import SwiftUI
 
+/// Altın/sarı token parası — bronz görünen 🪙 emojisi yerine kullanılır.
+struct CoinIcon: View {
+    var size: CGFloat = 16
+    private var coinGradient: LinearGradient {
+        LinearGradient(colors: [Color(hex: 0xFFE489), Color(hex: 0xF5C13A), Color(hex: 0xE0A21E)],
+                       startPoint: .topLeading, endPoint: .bottomTrailing)
+    }
+    var body: some View {
+        let rim = max(CGFloat(1), size * 0.08)
+        let inner = max(CGFloat(1), size * 0.06)
+        return Circle()
+            .fill(coinGradient)
+            .overlay(Circle().strokeBorder(Color(hex: 0xC98A16), lineWidth: rim))
+            .overlay(Circle().strokeBorder(Color.white.opacity(0.55), lineWidth: inner).padding(size * 0.2))
+            .frame(width: size, height: size)
+    }
+}
+
 struct TokenBadge: View {
     let tokenStore: TokenStore
     let onTap: () -> Void
@@ -20,7 +38,8 @@ struct TokenBadge: View {
     var body: some View {
         Button(action: onTap) {
             HStack(spacing: 6) {
-                Text("💠 \(tokenStore.balance)")
+                CoinIcon(size: 16)
+                Text("\(tokenStore.balance)")
                     .font(.system(size: 13, weight: .bold, design: .rounded))
                     .foregroundStyle(AppColor.amber)
                     .monospacedDigit()
