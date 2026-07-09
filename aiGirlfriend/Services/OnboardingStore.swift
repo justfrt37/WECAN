@@ -21,6 +21,7 @@ enum OnboardingStep: Equatable {
     case characterSelect // ONB3 — karakter seçimi ("Birini seçin")
     case questions       // ONB4 — seçilen video üstünde 2 soru (4 sn timer)
     case finalTease      // ONB5 — "O bekliyor..." dokun-gör ekranı
+    case paywall         // ONB6 — abonelik paywall'ı (seçilen kızın videosu arkada)
 }
 
 /// ONB3'te seçilebilen tanıtım karakterleri.
@@ -90,6 +91,7 @@ final class OnboardingStore {
             case "characterSelect": step = .characterSelect
             case "questions":       step = .questions
             case "finalTease":      step = .finalTease
+            case "paywall":         step = .paywall
             default:                break
             }
         }

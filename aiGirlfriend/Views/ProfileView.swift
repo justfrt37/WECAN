@@ -12,10 +12,11 @@ import UserNotifications
 
 struct ProfileView: View {
     @Environment(TokenStore.self) private var tokenStore
-    @State private var notificationsOn = false
     @State private var showPaywall = false
-    @State private var showHelp = false
     @State private var devTier: SubscriptionTier = PurchaseService.shared.tier
+    #if DEBUG
+    @State private var dbgSettings = ProcessInfo.processInfo.environment["PROFILE_ROUTE"] == "settings"
+    #endif
 
     var body: some View {
         VStack(spacing: 0) {
@@ -39,8 +40,9 @@ struct ProfileView: View {
                 .ignoresSafeArea()
         )
         .sheet(isPresented: $showPaywall) { PaywallHostView() }
-        .sheet(isPresented: $showHelp) { HelpSupportView() }
-        .task { notificationsOn = await currentNotificationStatus() }
+        #if DEBUG
+        .sheet(isPresented: $dbgSettings) { NavigationStack { SettingsView() } }
+        #endif
     }
 
     // MARK: Başlık
@@ -125,9 +127,7 @@ struct ProfileView: View {
 
     private var settingsMenu: some View {
         VStack(spacing: 0) {
-            notificationRow
-            divider
-            Button { showHelp = true } label: { menuRow("questionmark.circle.fill", "Help & Support", tint: Color(hex: 0x5B8DEF)) }
+            NavigationLink { SettingsView() } label: { menuRow("gearshape.fill", "Settings", tint: Color(hex: 0x8E8E93)) }
         }
         .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 20))
         .overlay(
@@ -135,9 +135,6 @@ struct ProfileView: View {
         )
     }
 
-    private var divider: some View {
-        Rectangle().fill(.white.opacity(0.06)).frame(height: 1)
-    }
 
     /// GEÇİCİ DEV PANELİ — RevenueCat/gerçek IAP kurulunca KALDIRILACAK (bkz.
     /// DevTokenTools, dev-token-tools edge function). Token mekaniklerini
@@ -207,62 +204,12 @@ struct ProfileView: View {
         .contentShape(Rectangle())
     }
 
-    private var notificationRow: some View {
-        HStack(spacing: 14) {
-            rowIcon("bell.fill", tint: AppColor.amber)
-            Text("Notifications")
-                .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(.white)
-            Spacer()
-            Toggle("", isOn: $notificationsOn)
-                .labelsHidden()
-                .tint(AppColor.pink)
-                .onChange(of: notificationsOn) { _, wantsOn in
-                    Task { await handleNotificationToggle(wantsOn) }
-                }
-            // Master toggle stays independently tappable; this chevron is the only
-            // navigation trigger to the per-bot cap menu (see NotificationSettingsView).
-            NavigationLink {
-                NotificationSettingsView()
-            } label: {
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.4))
-            }
-            .frame(width: 24, height: 24)
-        }
-        .padding(.horizontal, 18)
-        .frame(height: 54)
-    }
-
     private func rowIcon(_ icon: String, tint: Color) -> some View {
         Image(systemName: icon)
             .font(.system(size: 15))
             .foregroundStyle(tint)
             .frame(width: 32, height: 32)
             .background(tint.opacity(0.15), in: RoundedRectangle(cornerRadius: 10))
-    }
-
-    // MARK: Bildirim izni
-
-    private func currentNotificationStatus() async -> Bool {
-        let settings = await UNUserNotificationCenter.current().notificationSettings()
-        return settings.authorizationStatus == .authorized
-    }
-
-    /// Açmaya çalışırsa gerçek iOS izni ister; kapatmaya çalışırsa (iOS uygulama
-    /// içinden izni geri alamadığı için) Ayarlar'a yönlendirir.
-    private func handleNotificationToggle(_ wantsOn: Bool) async {
-        if wantsOn {
-            let center = UNUserNotificationCenter.current()
-            let granted = (try? await center.requestAuthorization(options: [.alert, .sound, .badge])) ?? false
-            notificationsOn = granted
-        } else {
-            notificationsOn = false
-            if let url = URL(string: UIApplication.openSettingsURLString) {
-                await UIApplication.shared.open(url)
-            }
-        }
     }
 }
 

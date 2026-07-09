@@ -34,6 +34,9 @@ struct OnboardingFlowView: View {
             case .finalTease:
                 OnboardingReadyView()
                     .transition(.opacity)
+            case .paywall:
+                OnboardingPaywallView()
+                    .transition(.opacity)
             }
         }
     }

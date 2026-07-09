@@ -122,8 +122,29 @@ struct CreateCharacterView: View {
     @Environment(CharacterStore.self) private var store
 
     // ── Step state ──
-    @State private var stepIndex = 0
-    @State private var phase: Phase = .steps
+    @State private var stepIndex = CreateCharacterView.initialStep()
+    @State private var phase: Phase = CreateCharacterView.initialPhase()
+
+    /// DEBUG: CC_PHASE=preview|loading ile doğrudan fotoğraf önizleme/"hazırlanıyor"
+    /// ekranını aç (SS almak için).
+    private static func initialPhase() -> Phase {
+        #if DEBUG
+        switch ProcessInfo.processInfo.environment["CC_PHASE"] {
+        case "preview", "loading": return .photoPreview
+        default: return .steps
+        }
+        #else
+        return .steps
+        #endif
+    }
+
+    /// DEBUG: CC_STEP env ile sihirbazı belirli adımda aç (SS almak için).
+    private static func initialStep() -> Int {
+        #if DEBUG
+        if let s = ProcessInfo.processInfo.environment["CC_STEP"], let i = Int(s) { return i }
+        #endif
+        return 0
+    }
 
     // ── Selections ──
     @State private var characterName = ""
@@ -203,6 +224,15 @@ struct CreateCharacterView: View {
             }
         }
         .tint(AppColor.pink)
+        #if DEBUG
+        .onAppear {
+            let env = ProcessInfo.processInfo.environment["CC_PHASE"]
+            if env == "loading" || env == "preview" {
+                if characterName.isEmpty { characterName = "Sena" }
+                if env == "loading" { generating = true }   // nabız/hazırlanıyor
+            }
+        }
+        #endif
         .sheet(isPresented: $showPaywall, onDismiss: {
             // Paywall kapandı — PRO oldularsa fotoğrafı hemen üret ve devam et.
             if PurchaseService.shared.isPro { reveal() }

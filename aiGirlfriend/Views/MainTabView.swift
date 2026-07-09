@@ -42,10 +42,25 @@ enum MainTab: Int, CaseIterable, Identifiable {
 struct MainTabView: View {
     @Environment(CharacterStore.self) private var store
     @Environment(TokenStore.self) private var tokenStore
-    @State private var selection: MainTab = .discover
+    @State private var selection: MainTab = MainTabView.initialTab()
     @State private var path = NavigationPath()
     @State private var showTokenStore = false
     @State private var streakResult: StreakClaimResult?
+
+    /// DEBUG: SIMCTL_CHILD_MAIN_TAB ile başlangıç sekmesini seç (SS almak için).
+    private static func initialTab() -> MainTab {
+        #if DEBUG
+        switch ProcessInfo.processInfo.environment["MAIN_TAB"] {
+        case "chat":    return .chat
+        case "explore": return .explore
+        case "likes":   return .likes
+        case "profile": return .profile
+        default:        return .discover
+        }
+        #else
+        return .discover
+        #endif
+    }
 
     var body: some View {
         // Tek NavigationStack: ChatView'a push edilince kök (tab bar dahil) yerini

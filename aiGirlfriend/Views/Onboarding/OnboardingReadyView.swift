@@ -66,6 +66,9 @@ struct OnboardingReadyView: View {
     }
 
     private func finish() {
-        onboarding.complete()
+        // "O bekliyor"dan sonra paywall gelir (uygulamaya giriş paywall'dan).
+        withAnimation(.easeInOut(duration: 0.35)) {
+            onboarding.step = .paywall
+        }
     }
 }
