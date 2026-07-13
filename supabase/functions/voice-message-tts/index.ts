@@ -63,6 +63,10 @@ Deno.serve(async (req) => {
     const vibe: string | undefined = body.vibe;
     const lang: string | undefined = body.lang;
     const useElevenLabs: boolean = body.useElevenLabs === true;
+    // Per-character override (characters.voice_id, set by DEV-curated
+    // character creation — see dev-create-character). Null/absent keeps the
+    // existing role+vibe auto-map below (elevenVoiceIdFor).
+    const voiceIdOverride: string | undefined = typeof body.voiceId === "string" && body.voiceId.trim() ? body.voiceId.trim() : undefined;
 
     if (!text || !text.trim() || !role || !vibe || !lang) {
       return new Response(
@@ -94,7 +98,7 @@ Deno.serve(async (req) => {
           { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
         );
       }
-      const voiceId = elevenVoiceIdFor(role, vibe);
+      const voiceId = voiceIdOverride ?? elevenVoiceIdFor(role, vibe);
       const elevenResp = await fetch(`${ELEVENLABS_TTS_URL}/${voiceId}`, {
         method: "POST",
         headers: {

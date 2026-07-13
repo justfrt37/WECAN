@@ -47,6 +47,15 @@ enum SubscriptionTier: String {
         case .max: return 10
         }
     }
+
+    var displayName: String {
+        switch self {
+        case .none: return "Free"
+        case .pro: return "Pro"
+        case .proPlus: return "Pro+"
+        case .max: return "Max"
+        }
+    }
 }
 
 @MainActor

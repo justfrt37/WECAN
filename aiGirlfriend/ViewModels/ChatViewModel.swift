@@ -10,6 +10,7 @@ import Foundation
 import Observation
 import AVFoundation
 import UIKit
+import SwiftUI
 
 private let localKeepRecent = 20
 
@@ -537,7 +538,7 @@ final class ChatViewModel {
                 let lang = VoiceLanguage.detect(from: cleanedReply)
                 let ttsResult = await TTSService().synthesizeVoiceMessage(
                     text: result.reply, role: character.personalityRole, vibe: character.vibe, lang: lang,
-                    useElevenLabs: true
+                    useElevenLabs: true, voiceId: character.voiceId
                 )
                 let audioData: Data
                 switch ttsResult {

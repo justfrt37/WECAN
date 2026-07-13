@@ -290,6 +290,12 @@ struct ChatService {
     func generateChatImage(character: Character, prompt: String, localMessages: [Message], summary: String, currentActivity: String? = nil) async throws -> ChatImageResult {
         var request = URLRequest(url: Config.chatImageFunctionURL)
         request.httpMethod = "POST"
+        // Default URLSession timeout (60s) isn't enough — the backend's prompt
+        // composer + image generation (plus occasional server-side polling on
+        // slower jobs) can run well past that, causing spurious client-side
+        // timeouts even when the server would've succeeded. 150s covers the
+        // observed worst case with margin.
+        request.timeoutInterval = 150
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         let bearer = UserDefaultsManager.shared.accessToken ?? Config.supabaseAnonKey
         request.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")

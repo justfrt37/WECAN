@@ -107,6 +107,20 @@ final class CharacterStore {
         }
     }
 
+    /// Foreground refresh — NOT the initial `load()` (no cache-first flash,
+    /// no image prefetch, no schedule prewarm, no splash). Called every time
+    /// the app becomes active (cold launch AND resuming from background) so
+    /// newly-added characters (bkz. DEV curated-character creation) show up
+    /// in Discover/Explore without needing a reinstall or full relaunch —
+    /// `store.characters` is `@Observable`, so both views update the moment
+    /// this replaces it, no per-view refresh code needed.
+    func refreshCharacters() async {
+        guard isLoaded else { return } // avoid racing the initial load()
+        guard let fetched = try? await service.fetchAll(), !fetched.isEmpty else { return }
+        characters = fetched
+        saveCachedCharacters(fetched)
+    }
+
     private func loadCachedCharacters() -> [Character]? {
         guard let data = try? Data(contentsOf: cacheURL) else { return nil }
         return try? JSONDecoder().decode([Character].self, from: data)

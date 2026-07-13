@@ -288,8 +288,12 @@ struct ChatView: View {
         .padding(.leading, 14)
         // Sağda MainTabView'ın NavigationStack seviyesindeki TokenBadge
         // overlay'ı için yer bırakılıyor (o rozet ChatView'e de ulaşıyor —
-        // burada AYRICA bir tane koymak çift rozet gösteriyordu).
-        .padding(.trailing, 96)
+        // burada AYRICA bir tane koymak çift rozet gösteriyordu). Sabit bir
+        // sayı yerine rozetin GERÇEK genişliği okunuyor (bkz.
+        // TokenStore.badgeWidth) — rozet bakiyenin basamak sayısına göre
+        // genişliyor, sabit "96" büyük bakiyelerde ayarlar butonuyla
+        // çakışıyordu (bkz. kullanıcı raporu).
+        .padding(.trailing, tokenStore.badgeWidth + 16 + 8)
         .padding(.vertical, 8)
     }
 
@@ -866,7 +870,7 @@ private struct VoicePendingIndicator: View {
         HStack(spacing: 3) {
             ForEach(0..<5, id: \.self) { i in
                 Capsule()
-                    .fill(AppColor.pink.opacity(0.9))
+                    .fill(AppColor.amber.opacity(0.9))
                     .frame(width: 3, height: animating ? barHeight(i) : 6)
                     .animation(
                         .easeInOut(duration: 0.5).repeatForever().delay(Double(i) * 0.12),
@@ -875,9 +879,9 @@ private struct VoicePendingIndicator: View {
             }
         }
         .padding(.horizontal, 16).padding(.vertical, 13)
-        .background(AppColor.pink.opacity(0.12))
+        .background(AppColor.amber.opacity(0.14))
         .clipShape(Capsule())
-        .overlay(Capsule().strokeBorder(AppColor.pink.opacity(0.3), lineWidth: 1))
+        .overlay(Capsule().strokeBorder(AppColor.amber.opacity(0.35), lineWidth: 1))
         .onAppear { animating = true }
     }
 
@@ -952,10 +956,10 @@ private struct PendingVoiceBubble: View {
         HStack(spacing: 10) {
             Image(systemName: isGenerating ? "waveform" : "lock.fill")
                 .font(.system(size: 16))
-                .foregroundStyle(isGenerating ? AppColor.pink : AppColor.amber)
+                .foregroundStyle(AppColor.amber)
 
             if isGenerating {
-                ImagePendingIndicator()
+                VoicePendingIndicator()
             } else {
                 HStack(spacing: 3) {
                     ForEach(0..<10, id: \.self) { _ in

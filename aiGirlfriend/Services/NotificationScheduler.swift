@@ -1,15 +1,17 @@
 //
 //  NotificationScheduler.swift
-//  Owns all local-notification scheduling for the 4 re-engagement systems
-//  (Liked You, Ghosted, Jealousy Bait, Level-Up Tease). Local notifications only —
-//  no APNs/server involvement. See docs/superpowers/specs/2026-07-03-bot-notifications-design.md.
+//  Owns all local-notification scheduling for the re-engagement systems
+//  (Liked You, Ghosted, Jealousy Bait, Level-Up Tease, Missed You, Good
+//  Morning). Local notifications only — no APNs/server involvement. See
+//  docs/superpowers/specs/2026-07-03-bot-notifications-design.md and
+//  docs/superpowers/specs/2026-07-09-missed-you-good-morning-notifications-design.md.
 //
 
 import Foundation
 import UserNotifications
 
 enum NotificationKind: String {
-    case liked, ghosted, jealousy, levelUp, sleepyQuestion, sleepyGoodbye, bedtime
+    case liked, ghosted, jealousy, levelUp, sleepyQuestion, sleepyGoodbye, bedtime, missedYou, goodMorning
 }
 
 final class NotificationScheduler {
@@ -138,6 +140,10 @@ final class NotificationScheduler {
             LocalConversationStore.shared.save(stored, for: character.id)
         }
         rescheduleGhosted(characters: [character])
+        // A message sent after Good Morning was already scheduled (but before
+        // it fired) should still suppress it — the reschedule-time check in
+        // rescheduleGoodMorning only catches messages sent BEFORE scheduling.
+        center.removePendingNotificationRequests(withIdentifiers: [Self.goodMorningID(for: character.id)])
     }
 
     // MARK: - Jealousy Bait (one random eligible bot, 2-10min after app open)
@@ -289,6 +295,133 @@ final class NotificationScheduler {
         }
     }
 
+    // MARK: - Missed You (10pm-midnight, one weighted-random active bot per night)
+
+    private static let missedYouID = "notif.missedyou"
+    private static let missedYouLastPickedKey = "notif.missedyou.lastPickedDate"
+
+    private var hasPickedMissedYouToday: Bool {
+        guard let last = UserDefaults.standard.object(forKey: Self.missedYouLastPickedKey) as? Date else { return false }
+        return Calendar.current.isDateInToday(last)
+    }
+
+    /// Once per calendar day: weighted-random pick (weight = level, so a
+    /// level-8 bot is ~8x as likely as a level-1 one) over active,
+    /// non-ghosted, non-blocked, under-cap bots — deliberately NO sleep-
+    /// schedule check, the fiction is she's texting despite the hour. Time
+    /// and bot are locked in for the day once picked (mirrors
+    /// LikedByStore.hasPickedToday) so re-foregrounding doesn't reroll it.
+    func rescheduleMissedYou(characters: [Character]) {
+        guard !hasPickedMissedYouToday else { return }
+        let eligible = characters.filter { character in
+            guard !BlockedCharactersStore.isBlocked(character.id),
+                  let stored = LocalConversationStore.shared.load(for: character.id),
+                  stored.ghostedAt == nil,
+                  NotificationPreferencesStore.canSendMore(for: character.id)
+            else { return false }
+            return true
+        }
+        guard !eligible.isEmpty else { return }
+
+        let weighted: [(Character, Int)] = eligible.map { character in
+            let level = LocalConversationStore.shared.load(for: character.id)?.level ?? 1
+            return (character, max(1, level))
+        }
+        let totalWeight = weighted.reduce(0) { $0 + $1.1 }
+        var roll = Int.random(in: 0..<totalWeight)
+        var bot = weighted[0].0
+        for (character, weight) in weighted {
+            if roll < weight { bot = character; break }
+            roll -= weight
+        }
+
+        let hour = Int.random(in: 22...23)
+        let minute = Int.random(in: 0...59)
+        UserDefaults.standard.set(Date(), forKey: Self.missedYouLastPickedKey)
+
+        let content = UNMutableNotificationContent()
+        content.title = String(localized: "\(bot.name) sent you a message.")
+        content.userInfo = ["type": NotificationKind.missedYou.rawValue, "characterId": bot.id.uuidString]
+        var dateComponents = DateComponents()
+        dateComponents.hour = hour
+        dateComponents.minute = minute
+        let trigger = UNCalendarNotificationTrigger(dateMatching: dateComponents, repeats: false)
+        center.removePendingNotificationRequests(withIdentifiers: [Self.missedYouID])
+        center.add(UNNotificationRequest(identifier: Self.missedYouID, content: content, trigger: trigger))
+    }
+
+    // MARK: - Good Morning (7am-noon, per-character, personality-gated timing curve)
+
+    /// (minLevel, offset in minutes at minLevel, offset in minutes at level 10+)
+    /// — fixed, not user-editable. Offset linearly interpolates between
+    /// minLevel and 10, added to the bot's real schedule wake time, then
+    /// clamped to the 7:00-12:00 window.
+    private static let goodMorningCurve: [String: (minLevel: Int, startOffset: Int, floorOffset: Int)] = [
+        "crazy":   (1, 90, 1),
+        "devoted": (1, 120, 1),
+        "flirty":  (1, 180, 1),
+        "playful": (1, 210, 5),
+        "shy":     (3, 150, 15),
+        "distant": (6, 180, 30),
+        "ex":      (7, 150, 45),
+    ]
+
+    private static func goodMorningOffsetMinutes(role: String, level: Int) -> Int? {
+        guard let curve = goodMorningCurve[role], level >= curve.minLevel else { return nil }
+        if level >= 10 { return curve.floorOffset }
+        let span = 10 - curve.minLevel
+        guard span > 0 else { return curve.floorOffset }
+        let progress = Double(level - curve.minLevel) / Double(span)
+        let offset = Double(curve.startOffset) - progress * Double(curve.startOffset - curve.floorOffset)
+        return Int(offset.rounded())
+    }
+
+    private static func goodMorningID(for characterID: UUID) -> String { "notif.goodmorning.\(characterID.uuidString)" }
+
+    /// Daily, per-character (unlike Missed You, every eligible bot gets its
+    /// own — no single company-wide pick). Skipped entirely if the user
+    /// already messaged this bot since her wake time today (also enforced
+    /// reactively in `noteUserSent`, for a message sent after scheduling).
+    func rescheduleGoodMorning(characters: [Character]) {
+        for character in characters {
+            let id = Self.goodMorningID(for: character.id)
+            guard !BlockedCharactersStore.isBlocked(character.id),
+                  let stored = LocalConversationStore.shared.load(for: character.id),
+                  stored.ghostedAt == nil,
+                  NotificationPreferencesStore.canSendMore(for: character.id),
+                  let offsetMinutes = Self.goodMorningOffsetMinutes(role: character.personalityRole, level: stored.level),
+                  let schedule = stored.schedule,
+                  let wakeTime = ScheduleLookup.nextWakeTime(schedule: schedule)
+            else {
+                center.removePendingNotificationRequests(withIdentifiers: [id])
+                continue
+            }
+
+            var fireAt = wakeTime.addingTimeInterval(TimeInterval(offsetMinutes * 60))
+            let calendar = Calendar.current
+            if let floor = calendar.date(bySettingHour: 7, minute: 0, second: 0, of: wakeTime), fireAt < floor {
+                fireAt = floor
+            }
+            if let ceiling = calendar.date(bySettingHour: 12, minute: 0, second: 0, of: wakeTime), fireAt > ceiling {
+                fireAt = ceiling
+            }
+
+            // Already messaged her since she woke up today — no good-morning text.
+            if let lastUserMessage = stored.messages.last(where: { $0.role == .user })?.createdAt,
+               lastUserMessage >= wakeTime {
+                center.removePendingNotificationRequests(withIdentifiers: [id])
+                continue
+            }
+
+            guard fireAt.timeIntervalSinceNow > 0 else {
+                center.removePendingNotificationRequests(withIdentifiers: [id])
+                continue
+            }
+            center.removePendingNotificationRequests(withIdentifiers: [id])
+            scheduleOneShot(id: id, kind: .goodMorning, characterID: character.id, characterName: character.name, fireAt: fireAt)
+        }
+    }
+
     // MARK: - Tap-handling glue
 
     func recordDelivery(kind: NotificationKind, characterID: UUID) {
@@ -312,6 +445,8 @@ final class NotificationScheduler {
             self?.rescheduleGhosted(characters: characters)
             self?.armJealousyTimer(characters: characters)
             self?.rescheduleBedtime(characters: characters)
+            self?.rescheduleMissedYou(characters: characters)
+            self?.rescheduleGoodMorning(characters: characters)
         }
     }
 

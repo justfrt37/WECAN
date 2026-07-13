@@ -35,6 +35,18 @@ struct TokenBadge: View {
             .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(AppColor.amber.opacity(0.4), lineWidth: 1))
         }
         .buttonStyle(.plain)
+        // Reports the badge's REAL width back to TokenStore — its width isn't
+        // fixed (grows with the balance's digit count), so screens that need
+        // to reserve space for it (bkz. ChatView.header) read the actual
+        // current value instead of guessing a fixed number and getting
+        // overlapped once the balance grows past a couple digits.
+        .background {
+            GeometryReader { geo in
+                Color.clear
+                    .onAppear { tokenStore.badgeWidth = geo.size.width }
+                    .onChange(of: geo.size.width) { _, newWidth in tokenStore.badgeWidth = newWidth }
+            }
+        }
         .overlay(alignment: .topLeading) {
             if let floatingDelta {
                 Text(floatingDelta > 0 ? "+\(floatingDelta)" : "\(floatingDelta)")

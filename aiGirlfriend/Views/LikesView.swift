@@ -94,7 +94,7 @@ struct LikesView: View {
                 .foregroundStyle(AppColor.pink)
             Group {
                 if isPro {
-                    Label("Lumi PRO active", systemImage: "crown.fill")
+                    Label("Plumm PRO active", systemImage: "crown.fill")
                 } else {
                     Label("Not PRO", systemImage: "crown.fill")
                 }

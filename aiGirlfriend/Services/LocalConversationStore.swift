@@ -104,10 +104,17 @@ final class LocalConversationStore {
 
     // MARK: - Dosya yolu
 
+    // Namespaced by the current Supabase userId — without this, a silent
+    // re-anonymization (expired refresh token → brand-new anonymous userId)
+    // left the NEW account reading the PREVIOUS account's local chat files
+    // (character UUIDs are stable/shared, so every character looked like it
+    // already had a chat, emptying Discover and faking the matches list).
     private func storeURL(for id: UUID) -> URL {
+        let userId = UserDefaultsManager.shared.userId ?? "anonymous"
         let support = FileManager.default
             .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("LocalConversations", isDirectory: true)
+            .appendingPathComponent(userId, isDirectory: true)
         try? FileManager.default.createDirectory(at: support, withIntermediateDirectories: true)
         return support.appendingPathComponent("\(id.uuidString).json")
     }
