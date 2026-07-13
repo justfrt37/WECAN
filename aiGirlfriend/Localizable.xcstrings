@@ -1716,6 +1716,9 @@
         }
       }
     },
+    "Ayarlar" : {
+
+    },
     "Back Together" : {
       "localizations" : {
         "de" : {
@@ -1795,6 +1798,9 @@
           }
         }
       }
+    },
+    "Bildirimler" : {
+
     },
     "Birini seçin" : {
 
@@ -5083,6 +5089,9 @@
         }
       }
     },
+    "Face ID veya parmak izi ile uygulamayı kilitle" : {
+
+    },
     "Fair" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -7940,6 +7949,9 @@
           }
         }
       }
+    },
+    "İptal" : {
+
     },
     "It's been a while. I'm not chasing, just... noting it." : {
 
@@ -10881,6 +10893,9 @@
         }
       }
     },
+    "PHOTOS" : {
+
+    },
     "Pick a personality" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -12436,6 +12451,9 @@
     "Seriously? You show up and just LEAVE again? Same old you." : {
 
     },
+    "Settings" : {
+
+    },
     "Shy" : {
       "localizations" : {
         "de" : {
@@ -12515,6 +12533,9 @@
           }
         }
       }
+    },
+    "Sil" : {
+
     },
     "Silence again. Expected, honestly." : {
 
@@ -14238,6 +14259,15 @@
         }
       }
     },
+    "Tüm sohbetlerin ve verilerin kalıcı olarak silinecek. Bu işlem geri alınamaz." : {
+
+    },
+    "Tüm Verileri Sil" : {
+
+    },
+    "Tüm verileri sil?" : {
+
+    },
     "Turquoise" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -14490,6 +14520,7 @@
       }
     },
     "Upgrade to PRO" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -14610,6 +14641,9 @@
           }
         }
       }
+    },
+    "Uygulama Kilidi" : {
+
     },
     "Uygulamaya gir" : {
 
