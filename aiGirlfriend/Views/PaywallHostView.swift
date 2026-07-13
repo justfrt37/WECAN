@@ -9,6 +9,6 @@ import SwiftUI
 
 struct PaywallHostView: View {
     var body: some View {
-        TokenStoreView()
+        SubscriptionPaywallView()
     }
 }

@@ -137,6 +137,23 @@ final class LocalConversationStore {
         try? FileManager.default.removeItem(at: storeURL(for: id))
     }
 
+    /// Mevcut kullanıcının yerel konuşması olan TÜM karakter ID'leri — sohbet
+    /// listesi, sunucuda konuşması olmayan (ör. onboarding sonrası açılan ya da
+    /// bildirimle enjekte edilen) sohbetleri de göstersin diye.
+    func allCharacterIDs() -> [UUID] {
+        let userId = UserDefaultsManager.shared.userId ?? "anonymous"
+        let dir = FileManager.default
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("LocalConversations", isDirectory: true)
+            .appendingPathComponent(userId, isDirectory: true)
+        guard let files = try? FileManager.default.contentsOfDirectory(
+            at: dir, includingPropertiesForKeys: nil
+        ) else { return [] }
+        return files.compactMap {
+            $0.pathExtension == "json" ? UUID(uuidString: $0.deletingPathExtension().lastPathComponent) : nil
+        }
+    }
+
     /// Tüm yerel konuşmaları siler (Ayarlar → "Tüm Verileri Sil").
     func clearAll() {
         let dir = FileManager.default

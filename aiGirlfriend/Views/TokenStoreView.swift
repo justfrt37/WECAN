@@ -1,213 +1,202 @@
 //
 //  TokenStoreView.swift
-//  Token/abonelik sayfası — TokenBadge'in açtığı ve her `showPaywall = true`
-//  çağrısının gösterdiği tek ekran (bkz. design doc mockup review).
+//  Coin "Mağaza" — token rozetine dokununca ana sayfada full sheet olarak
+//  açılır. Coin paketleri satılır (bkz. Pencil "coinPaywall (Plumm)").
+//  Kullanıcı PRO değilse üstte bir PRO yükseltme butonu gösterilir; o buton
+//  abonelik paywall'unu (SubscriptionPaywallView) açar.
+//
+//  NOT: Gerçek satın alma (StoreKit/RevenueCat) henüz bağlı değil — paket
+//  butonları TODO (bkz. PurchaseService iskeleti).
 //
 
 import SwiftUI
 
-private struct TierOption: Identifiable {
-    let id: String
-    let name: String
-    let weeklyPrice: String
-    let annualPrice: String
-    let tokens: String
-    let characterLine: String
-    let featured: Bool
-}
+private enum CoinBadgeStyle { case popular, discount }
 
-private let tierOptions: [TierOption] = [
-    .init(id: "pro", name: "Pro", weeklyPrice: "$6.99", annualPrice: "$59.99",
-          tokens: "1,000", characterLine: String(localized: "Create 1 new character per week"), featured: false),
-    .init(id: "pro_plus", name: "Pro+", weeklyPrice: "$14.99", annualPrice: "$119.99",
-          tokens: "2,500", characterLine: String(localized: "Create 3 new characters per week"), featured: true),
-    .init(id: "max", name: "Max", weeklyPrice: "$29.99", annualPrice: "$239.99",
-          tokens: "6,000", characterLine: String(localized: "Create 10 new characters per week"), featured: false),
-]
-
-private struct TokenPack: Identifiable {
+private struct CoinPack: Identifiable {
     let id: String
-    let name: String
+    let coins: String
     let price: String
-    let tokens: String
+    var badge: String? = nil
+    var badgeStyle: CoinBadgeStyle? = nil
 }
 
-private let tokenPacks: [TokenPack] = [
-    .init(id: "small", name: "Small", price: "$5.99", tokens: "300"),
-    .init(id: "medium", name: "Medium", price: "$19.99", tokens: "1,000"),
-    .init(id: "large", name: "Large", price: "$59.99", tokens: "3,000"),
+private let coinPacks: [CoinPack] = [
+    .init(id: "100",   coins: "100",   price: "₺399,99"),
+    .init(id: "250",   coins: "250",   price: "₺899,99"),
+    .init(id: "500",   coins: "500",   price: "₺1.599,99"),
+    .init(id: "1000",  coins: "1000",  price: "₺2.499,99", badge: "EN POPÜLER  %40", badgeStyle: .popular),
+    .init(id: "5000",  coins: "5000",  price: "₺8.999,99"),
+    .init(id: "10000", coins: "10000", price: "₺14.999,99", badge: "EN İNDİRİMLİ  %70", badgeStyle: .discount),
 ]
 
 struct TokenStoreView: View {
-    @Environment(\.dismiss) private var dismiss
-    @State private var isAnnual = false
-    @State private var selectedTierID = "pro_plus"
+    let tokenStore: TokenStore
 
-    private var selectedTier: TierOption { tierOptions.first { $0.id == selectedTierID } ?? tierOptions[1] }
+    @Environment(\.dismiss) private var dismiss
+
+    private let columns = [
+        GridItem(.flexible(), spacing: 14),
+        GridItem(.flexible(), spacing: 14),
+    ]
 
     var body: some View {
-        NavigationStack {
-            ZStack {
-                LinearGradient(colors: [AppColor.bg2, AppColor.bg], startPoint: .top, endPoint: .bottom)
-                    .ignoresSafeArea()
-                VStack(spacing: 0) {
-                    ScrollView {
-                        VStack(spacing: 18) {
-                            Text("Get more tokens")
-                                .font(.system(size: 20, weight: .bold))
-                                .foregroundStyle(.white)
-                                .padding(.top, 12)
+        ZStack {
+            LinearGradient(
+                stops: [
+                    .init(color: Color(hex: 0x20121A), location: 0.0),
+                    .init(color: Color(hex: 0x140810), location: 0.5),
+                    .init(color: Color(hex: 0x0F0710), location: 1.0),
+                ],
+                startPoint: .top, endPoint: .bottom
+            )
+            .ignoresSafeArea()
 
-                            periodToggle
+            VStack(spacing: 0) {
+                header
+                    .padding(.horizontal, 20)
+                    .padding(.top, 8)
+                    .padding(.bottom, 12)
 
-                            VStack(spacing: 10) {
-                                ForEach(tierOptions) { tier in
-                                    tierCard(tier)
-                                }
-                            }
-
-                            Text("— or buy tokens outright, no subscription —")
-                                .font(.system(size: 11))
-                                .foregroundStyle(.white.opacity(0.45))
-                                .padding(.top, 6)
-
-                            HStack(spacing: 8) {
-                                ForEach(tokenPacks) { pack in packCard(pack) }
-                            }
-                        }
-                        .padding(.horizontal, 16)
-                        .padding(.bottom, 20)
+                ScrollView {
+                    LazyVGrid(columns: columns, spacing: 14) {
+                        ForEach(coinPacks) { pack in coinCard(pack) }
                     }
-                    stickyFooter
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 30)
                 }
-            }
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button { dismiss() } label: {
-                        Image(systemName: "xmark").foregroundStyle(.white)
-                    }
-                }
+                .scrollIndicators(.hidden)
             }
         }
     }
 
-    private var periodToggle: some View {
-        HStack(spacing: 2) {
-            periodButton(label: String(localized: "Weekly"), isSelected: !isAnnual) { isAnnual = false }
-            periodButton(label: String(localized: "Annual"), isSelected: isAnnual, sub: String(localized: "save ~83%")) { isAnnual = true }
-        }
-        .padding(3)
-        .background(AppColor.card, in: Capsule())
-    }
+    // MARK: Header
 
-    private func periodButton(label: String, isSelected: Bool, sub: String? = nil, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            VStack(spacing: 1) {
-                Text(label).font(.system(size: 12, weight: .bold))
-                if let sub {
-                    Text(sub).font(.system(size: 8, weight: .bold))
+    private var header: some View {
+        ZStack {
+            Text("Mağaza")
+                .font(.system(size: 20, weight: .heavy))
+                .foregroundStyle(.white)
+
+            HStack {
+                Button { dismiss() } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 17, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 40, height: 40)
+                        .background(.white.opacity(0.10), in: Circle())
                 }
+                .buttonStyle(.plain)
+
+                Spacer()
+
+                HStack(spacing: 6) {
+                    CoinIcon(size: 16)
+                    Text("\(tokenStore.balance)")
+                        .font(.system(size: 15, weight: .heavy, design: .rounded))
+                        .foregroundStyle(.white)
+                        .monospacedDigit()
+                }
+                .padding(.horizontal, 12)
+                .frame(height: 36)
+                .background(.white.opacity(0.10), in: Capsule())
             }
-            .foregroundStyle(isSelected ? AppColor.bg : .white.opacity(0.6))
-            .padding(.horizontal, 16).padding(.vertical, 7)
-            .background(isSelected ? AppColor.amber : .clear, in: Capsule())
         }
-        .buttonStyle(.plain)
     }
 
-    private func tierCard(_ tier: TierOption) -> some View {
-        let selected = tier.id == selectedTierID
-        return Button {
-            selectedTierID = tier.id
+    // MARK: Coin paketi kartı
+
+    private func coinCard(_ pack: CoinPack) -> some View {
+        Button {
+            // TODO: StoreKit/RevenueCat bağlanınca bu paketin gerçek satın
+            // alma akışını tetikle (bkz. PurchaseService).
         } label: {
-            VStack(alignment: .leading, spacing: 6) {
-                if tier.featured {
-                    Text("Most Popular")
-                        .font(.system(size: 9, weight: .heavy))
-                        .foregroundStyle(AppColor.bg)
-                        .padding(.horizontal, 8).padding(.vertical, 2)
-                        .background(AppColor.amber, in: Capsule())
-                }
-                HStack {
-                    HStack(spacing: 7) {
-                        Circle()
-                            .strokeBorder(selected ? AppColor.amber : .white.opacity(0.3), lineWidth: 2)
-                            .background(Circle().fill(selected ? AppColor.amber : .clear).padding(3))
-                            .frame(width: 16, height: 16)
-                        Text(tier.name).font(.system(size: 15, weight: .bold)).foregroundStyle(.white)
-                    }
-                    Spacer()
-                    HStack(alignment: .lastTextBaseline, spacing: 2) {
-                        Text(isAnnual ? tier.annualPrice : tier.weeklyPrice)
-                            .font(.system(size: 15, weight: .heavy)).foregroundStyle(AppColor.amber)
-                        Text(isAnnual ? "/yr" : "/wk")
-                            .font(.system(size: 10, weight: .semibold)).foregroundStyle(.white.opacity(0.5))
+            VStack(spacing: 12) {
+                // Rozet satırı — rozet yoksa da coin diskleri hizalansın diye
+                // aynı yükseklikte boş yer tutar.
+                Group {
+                    if let badge = pack.badge {
+                        Text(badge)
+                            .font(.system(size: 10, weight: .heavy))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 10)
+                            .frame(height: 22)
+                            .background(badgeGradient(pack.badgeStyle), in: Capsule())
+                    } else {
+                        Color.clear.frame(height: 22)
                     }
                 }
-                VStack(alignment: .leading, spacing: 4) {
-                    benefitLine("\(tier.tokens) " + String(localized: "tokens every week"))
-                    benefitLine(tier.characterLine)
-                }
+
+                StoreCoin(size: 58)
+
+                Text(pack.coins)
+                    .font(.system(size: 22, weight: .heavy))
+                    .foregroundStyle(.white)
+
+                Spacer(minLength: 10)
+
+                Text(pack.price)
+                    .font(.system(size: 15, weight: .heavy))
+                    .foregroundStyle(Color(hex: 0xE0561C))
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 44)
+                    .background(.white, in: RoundedRectangle(cornerRadius: 16))
             }
-            .padding(14)
-            .background(selected ? AppColor.pink.opacity(0.35) : AppColor.card, in: RoundedRectangle(cornerRadius: 16))
-            .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(selected ? AppColor.amber : .white.opacity(0.08), lineWidth: selected ? 2 : 1))
+            .padding(.top, 14)
+            .padding(.horizontal, 12)
+            .padding(.bottom, 16)
+            .frame(maxWidth: .infinity)
+            .frame(minHeight: 196)
+            .background(cardFill(pack.badgeStyle), in: RoundedRectangle(cornerRadius: 22))
+            .overlay(
+                RoundedRectangle(cornerRadius: 22)
+                    .strokeBorder(cardBorder(pack.badgeStyle), lineWidth: pack.badgeStyle == nil ? 1 : 2)
+            )
         }
         .buttonStyle(.plain)
     }
 
-    private func benefitLine(_ text: String) -> some View {
-        HStack(spacing: 6) {
-            Text("✓").font(.system(size: 11, weight: .heavy)).foregroundStyle(AppColor.amber)
-            Text(text).font(.system(size: 11.5)).foregroundStyle(.white.opacity(0.8))
+    private func badgeGradient(_ style: CoinBadgeStyle?) -> LinearGradient {
+        switch style {
+        case .discount:
+            return LinearGradient(colors: [Color(hex: 0xFFD27A), Color(hex: 0xFF8A3C)],
+                                  startPoint: .top, endPoint: .bottom)
+        default:
+            return LinearGradient(colors: [Color(hex: 0xFFAF5C), Color(hex: 0xFF6F61)],
+                                  startPoint: .top, endPoint: .bottom)
         }
     }
 
-    private func packCard(_ pack: TokenPack) -> some View {
-        VStack(spacing: 6) {
-            Text(pack.name).font(.system(size: 11, weight: .bold)).foregroundStyle(.white)
-            Text(pack.price).font(.system(size: 14, weight: .heavy)).foregroundStyle(AppColor.amber)
-            HStack(spacing: 4) {
-                CoinIcon(size: 11)
-                Text("\(pack.tokens)").font(.system(size: 10)).foregroundStyle(.white.opacity(0.6))
-            }
-            Button {
-                // TODO once RevenueCat is wired (see design doc "Dependencies"):
-                // trigger the real StoreKit/RevenueCat purchase for this pack.
-            } label: {
-                Text("Buy")
-                    .font(.system(size: 11, weight: .bold)).foregroundStyle(.white)
-                    .frame(maxWidth: .infinity).padding(.vertical, 7)
-                    .background(AppColor.pink, in: RoundedRectangle(cornerRadius: 8))
-            }
-            .buttonStyle(.plain)
+    private func cardFill(_ style: CoinBadgeStyle?) -> Color {
+        switch style {
+        case .popular:  return Color(hex: 0xFF6F61).opacity(0.08)
+        case .discount: return Color(hex: 0xFFC24B).opacity(0.08)
+        case nil:       return Color.white.opacity(0.04)
         }
-        .padding(10)
-        .frame(maxWidth: .infinity)
-        .background(AppColor.card, in: RoundedRectangle(cornerRadius: 14))
     }
 
-    private var stickyFooter: some View {
-        VStack(spacing: 0) {
-            Divider().overlay(Color.white.opacity(0.08))
-            Button {
-                // TODO once RevenueCat is wired (see design doc "Dependencies"):
-                // trigger the real StoreKit/RevenueCat subscription purchase
-                // for `selectedTier`/`isAnnual`.
-            } label: {
-                Text("\(String(localized: "Continue")) — \(selectedTier.name) \(isAnnual ? selectedTier.annualPrice : selectedTier.weeklyPrice)\(isAnnual ? "/yr" : "/wk")")
-                    .font(.system(size: 15, weight: .bold))
-                    .foregroundStyle(AppColor.bg)
-                    .frame(maxWidth: .infinity).padding(.vertical, 14)
-                    .background(AppColor.amber, in: RoundedRectangle(cornerRadius: 14))
-            }
-            .buttonStyle(.plain)
-            .padding(.horizontal, 16).padding(.vertical, 10)
+    private func cardBorder(_ style: CoinBadgeStyle?) -> Color {
+        switch style {
+        case .popular:  return Color(hex: 0xFF6F61).opacity(0.67)
+        case .discount: return Color(hex: 0xFFC24B).opacity(0.67)
+        case nil:       return Color.white.opacity(0.09)
         }
-        .background(AppColor.bg.opacity(0.9))
+    }
+}
+
+/// Mağaza'daki büyük para ikonu — Plumm kalbi (Assets "heartCoin").
+/// Eskiden altın coin diski çiziliyordu.
+private struct StoreCoin: View {
+    var size: CGFloat = 58
+
+    var body: some View {
+        Image("heartCoin")
+            .resizable()
+            .scaledToFit()
+            .frame(width: size, height: size)
     }
 }
 
 #Preview {
-    TokenStoreView()
+    TokenStoreView(tokenStore: TokenStore())
 }

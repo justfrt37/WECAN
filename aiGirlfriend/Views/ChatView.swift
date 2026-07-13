@@ -262,8 +262,8 @@ struct ChatView: View {
                                     Text(headerStatusLabel)
                                         .font(.system(size: 12, weight: .medium))
                                         .foregroundStyle(.white.opacity(0.6))
-                                        .lineLimit(1)
-                                        .truncationMode(.tail)
+                                        // "…" ile KISA KESİLMESİN — tam görünsün (gerekirse alta sarar).
+                                        .fixedSize(horizontal: false, vertical: true)
                                 }
                             }
                             Text("Level \(viewModel.relationshipLevel) · \(viewModel.relationshipStage)")
@@ -286,14 +286,10 @@ struct ChatView: View {
             }
         }
         .padding(.leading, 14)
-        // Sağda MainTabView'ın NavigationStack seviyesindeki TokenBadge
-        // overlay'ı için yer bırakılıyor (o rozet ChatView'e de ulaşıyor —
-        // burada AYRICA bir tane koymak çift rozet gösteriyordu). Sabit bir
-        // sayı yerine rozetin GERÇEK genişliği okunuyor (bkz.
-        // TokenStore.badgeWidth) — rozet bakiyenin basamak sayısına göre
-        // genişliyor, sabit "96" büyük bakiyelerde ayarlar butonuyla
-        // çakışıyordu (bkz. kullanıcı raporu).
-        .padding(.trailing, tokenStore.badgeWidth + 16 + 8)
+        // Ayarlar (gear) butonu EN SAĞDA — coin rozetinin SAĞINDA, aynı hizada.
+        // Coin, MainTabView'ın overlay'ında sohbetteyken sola kaydırılır (gear'a
+        // yer açar, bkz. MainTabView coin overlay trailing padding).
+        .padding(.trailing, 14)
         .padding(.vertical, 8)
     }
 

@@ -44,6 +44,14 @@ enum OnboardingCharacter: String, Equatable {
         case .second: return "onb4Video"
         }
     }
+
+    /// Onboarding sonunda doğrudan chat'ine girilecek backend karakterinin adı.
+    var chatCharacterName: String {
+        switch self {
+        case .red: return "Scarlet"
+        case .second: return "Maya"
+        }
+    }
 }
 
 @Observable
@@ -70,6 +78,10 @@ final class OnboardingStore {
 
     /// Akışın mevcut adımı — kalıcı DEĞİL (her açılışta baştan).
     var step: OnboardingStep = .name
+
+    /// Onboarding biter bitmez doğrudan açılacak chat karakterinin adı
+    /// (ONB5'te set edilir, MainTabView görününce tüketilir). Kalıcı değil.
+    var pendingChatCharacterName: String?
 
     private let defaults: UserDefaults
 

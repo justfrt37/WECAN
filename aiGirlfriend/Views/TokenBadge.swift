@@ -8,20 +8,14 @@
 
 import SwiftUI
 
-/// Altın/sarı token parası — bronz görünen 🪙 emojisi yerine kullanılır.
+/// Uygulamanın para birimi ikonu — Plumm kalbi (bkz. Assets "heartCoin",
+/// heart.pdf vektörü). Eskiden altın coin çiziliyordu.
 struct CoinIcon: View {
     var size: CGFloat = 16
-    private var coinGradient: LinearGradient {
-        LinearGradient(colors: [Color(hex: 0xFFE489), Color(hex: 0xF5C13A), Color(hex: 0xE0A21E)],
-                       startPoint: .topLeading, endPoint: .bottomTrailing)
-    }
     var body: some View {
-        let rim = max(CGFloat(1), size * 0.08)
-        let inner = max(CGFloat(1), size * 0.06)
-        return Circle()
-            .fill(coinGradient)
-            .overlay(Circle().strokeBorder(Color(hex: 0xC98A16), lineWidth: rim))
-            .overlay(Circle().strokeBorder(Color.white.opacity(0.55), lineWidth: inner).padding(size * 0.2))
+        Image("heartCoin")
+            .resizable()
+            .scaledToFit()
             .frame(width: size, height: size)
     }
 }
@@ -50,8 +44,17 @@ struct TokenBadge: View {
                     .background(AppColor.amber, in: RoundedRectangle(cornerRadius: 6))
             }
             .padding(.leading, 10).padding(.trailing, 6).padding(.vertical, 5)
-            .background(AppColor.amber.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
-            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(AppColor.amber.opacity(0.4), lineWidth: 1))
+            // Rozet HER arka planın üstünde okunur olmalı. Keşfet'teki açık/parlak
+            // kız fotoğrafları üzerinde eski saydam amber dolgu (opacity 0.12)
+            // kayboluyordu — koyu taban + hafif amber ton + gölge ile artık her
+            // zeminde (koyu ekran ya da parlak foto) kontrast korunur.
+            .background(
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(.black.opacity(0.42))
+                    .overlay(RoundedRectangle(cornerRadius: 10).fill(AppColor.amber.opacity(0.14)))
+                    .shadow(color: .black.opacity(0.30), radius: 5, y: 1)
+            )
+            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(AppColor.amber.opacity(0.5), lineWidth: 1))
         }
         .buttonStyle(.plain)
         // Reports the badge's REAL width back to TokenStore — its width isn't

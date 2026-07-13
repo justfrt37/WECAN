@@ -16,11 +16,18 @@ struct FeedView: View {
     /// Discover'da tekrar gösterilmez — aynı tanım NotificationScheduler'ın
     /// Liked You uygunluk kontrolüyle birebir aynı (bkz. LikedByStore).
     private var characters: [Character] {
-        store.characters.filter {
+        let list = store.characters.filter {
             !BlockedCharactersStore.isBlocked($0.id) &&
             !PassedCharactersStore.isPassed($0.id) &&
             LocalConversationStore.shared.load(for: $0.id) == nil
         }
+        #if DEBUG
+        // Gerçek karakter kalmadıysa Discover'ı test edebilmek için sahte bir
+        // kız göster (bkz. Character.dummyGirl). Release'e etkisi yok.
+        if ProcessInfo.processInfo.environment["FORCE_DUMMY"] == "1" { return [Character.dummyGirl] }
+        if list.isEmpty { return [Character.dummyGirl] }
+        #endif
+        return list
     }
 
     var body: some View {
@@ -240,7 +247,9 @@ private struct FeedCard: View {
 
     var body: some View {
         Color.clear
-            .overlay {
+            // Üstten hizala: scaledToFill taşan kısmı ALTTAN kırpsın, böylece
+            // yüz (üst kısım) tam görünür, ortadan kırpıp yüzü kesmez.
+            .overlay(alignment: .top) {
                 CachedImage(url: character.photoURL) { image in
                     image.resizable().scaledToFill()
                 } placeholder: {
@@ -263,7 +272,7 @@ private struct FeedCard: View {
                     actionRow
                         .padding(.horizontal, 16)
                 }
-                .padding(.bottom, safeBottom + tabBarSpace + 28)
+                .padding(.bottom, safeBottom + tabBarSpace + 35)
             }
             .fullScreenCover(isPresented: $showGallery) {
                 GalleryView(character: character)

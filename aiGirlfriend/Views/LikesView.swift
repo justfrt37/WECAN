@@ -10,9 +10,12 @@ import SwiftUI
 struct LikesView: View {
     @Environment(CharacterStore.self) private var store
 
-    /// Şimdilik PRO açık kabul ediliyor (kızlar direkt görünür).
-    @State private var isPro = true
+    /// Gerçek PRO durumu (bkz. PurchaseService — RevenueCat bağlanana kadar
+    /// varsayılan false). Önceden test için sabit `true` idi; artık gerçek
+    /// duruma bağlı, böylece non-pro kilitli/blur görünümü de test edilebilir.
+    private var isPro: Bool { PurchaseService.shared.isPro }
     @State private var profileCharacter: Character?
+    @State private var showPaywall = false
 
     private let columns = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
 
@@ -26,11 +29,17 @@ struct LikesView: View {
         let visible: [Character] = candidates.filter { c in
             !hasUserReplied(to: c.id) && !BlockedCharactersStore.isBlocked(c.id)
         }
-        return visible.sorted { a, b in
+        let sorted = visible.sorted { a, b in
             let aDate: Date = LikedByStore.likedAt(a.id) ?? .distantPast
             let bDate: Date = LikedByStore.likedAt(b.id) ?? .distantPast
             return aDate > bDate
         }
+        #if DEBUG
+        // Gerçek beğenen yokken, backend'den gelince nasıl görüneceğini test
+        // etmek için sahte beğenenler (bkz. Character.dummyLikers).
+        if sorted.isEmpty { return Character.dummyLikers }
+        #endif
+        return sorted
     }
 
     private func hasUserReplied(to characterID: UUID) -> Bool {
@@ -71,6 +80,7 @@ struct LikesView: View {
             }
         }
         .fullScreenCover(item: $profileCharacter) { CharacterProfileView(character: $0) }
+        .sheet(isPresented: $showPaywall) { SubscriptionPaywallView() }
     }
 
     private var header: some View {
@@ -88,27 +98,18 @@ struct LikesView: View {
     }
 
     private var infoRow: some View {
-        HStack(spacing: 12) {
-            Label("\(likers.count) people liked you", systemImage: "heart.fill")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(AppColor.pink)
-            Group {
-                if isPro {
-                    Label("Plumm PRO active", systemImage: "crown.fill")
-                } else {
-                    Label("Not PRO", systemImage: "crown.fill")
-                }
-            }
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(Color(hex: 0xFFB938))
-        }
+        // "PRO değil" göstergesi kaldırıldı; sayı canlı/okunur bir kırmızıya
+        // alındı (eski AppColor.pink koyu bordo, koyu zeminde soluk kalıyordu).
+        Label("\(likers.count) people liked you", systemImage: "heart.fill")
+            .font(.system(size: 15, weight: .bold))
+            .foregroundStyle(Color(hex: 0xFF5A78))
     }
 
     private var grid: some View {
         LazyVGrid(columns: columns, spacing: 12) {
             ForEach(likers) { c in
                 Button {
-                    if isPro { profileCharacter = c }
+                    if isPro { profileCharacter = c } else { showPaywall = true }
                 } label: {
                     LikeCard(character: c, locked: !isPro,
                              badge: isNewToday(c.id) ? "NEW" : nil)
@@ -183,11 +184,12 @@ private struct LikeCard: View {
             }
         }
         .overlay(alignment: .bottomTrailing) {
+            // Beğeni işareti: sade KIRMIZI kalp (beyaz daire yok), okunması için gölge.
             Image(systemName: "heart.fill")
-                .font(.system(size: 16)).foregroundStyle(.white)
-                .frame(width: 36, height: 36)
-                .background(AppColor.pink, in: Circle())
-                .padding(10)
+                .font(.system(size: 24))
+                .foregroundStyle(Color(hex: 0xFF2D55))
+                .shadow(color: .black.opacity(0.55), radius: 4, y: 1)
+                .padding(14)
         }
     }
 }

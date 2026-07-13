@@ -42,10 +42,21 @@ enum MainTab: Int, CaseIterable, Identifiable {
 struct MainTabView: View {
     @Environment(CharacterStore.self) private var store
     @Environment(TokenStore.self) private var tokenStore
+    @Environment(OnboardingStore.self) private var onboarding
     @State private var selection: MainTab = MainTabView.initialTab()
     @State private var path = NavigationPath()
-    @State private var showTokenStore = false
+    @State private var showTokenStore = MainTabView.initialShowStore()
+    @State private var showPaywall = false
     @State private var streakResult: StreakClaimResult?
+
+    /// DEBUG: SIMCTL_CHILD_SHOW_STORE=1 ile coin Mağaza'yı açık başlat (SS için).
+    private static func initialShowStore() -> Bool {
+        #if DEBUG
+        return ProcessInfo.processInfo.environment["SHOW_STORE"] == "1"
+        #else
+        return false
+        #endif
+    }
 
     /// DEBUG: SIMCTL_CHILD_MAIN_TAB ile başlangıç sekmesini seç (SS almak için).
     private static func initialTab() -> MainTab {
@@ -60,6 +71,52 @@ struct MainTabView: View {
         #else
         return .discover
         #endif
+    }
+
+    /// Onboarding biterken seçilen karakterin (Scarlet/Maya) chat'ini, uygulama
+    /// açılır açılmaz DOĞRUDAN açar — paywall YOK (bkz. OnboardingReadyView).
+    private func openPendingOnboardingChat() {
+        guard let name = onboarding.pendingChatCharacterName else { return }
+        if let character = store.characters.first(where: {
+            $0.name.localizedCaseInsensitiveContains(name)
+        }) {
+            // Konuşmayı YEREL kaydet (botun ilk selamı) ki chat geçmişine gelsin —
+            // aksi halde mesaj gönderilene kadar sunucuda konuşma oluşmaz ve
+            // Sohbet sekmesinde görünmezdi (bkz. ChatListView yerel-birleşim).
+            if LocalConversationStore.shared.load(for: character.id) == nil {
+                let hello = Message(role: .assistant, content: FirstHelloContent.randomLine())
+                let stored = LocalConversationStore.Stored(
+                    messages: [hello], xp: 0, level: 0, summary: "", summarizedCount: 0
+                )
+                LocalConversationStore.shared.save(stored, for: character.id)
+                store.conversationsVersion &+= 1   // Sohbet listesi tazelensin
+            }
+            path.append(character)
+        }
+        // Chat göründü → onboarding'i şimdi tamamla (complete önce, sonra pending
+        // nil — böylece gate MainTabView'de kalır, OnboardingFlow'a dönmez).
+        onboarding.complete()
+        onboarding.pendingChatCharacterName = nil
+    }
+
+    /// PRO değilken, token rozetinin (kalp+sayı) yerinde tüm sekmelerde
+    /// gösterilen PRO butonu — onboarding paywall'unu (fullscreen) açar.
+    private var proButton: some View {
+        Button { showPaywall = true } label: {
+            HStack(spacing: 5) {
+                Image(systemName: "crown.fill").font(.system(size: 12, weight: .bold))
+                Text("PRO").font(.system(size: 13, weight: .heavy))
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 13).padding(.vertical, 7)
+            .background(
+                LinearGradient(colors: [Color(hex: 0xFFAF5C), Color(hex: 0xFF6F61)],
+                               startPoint: .leading, endPoint: .trailing),
+                in: Capsule()
+            )
+            .shadow(color: .black.opacity(0.30), radius: 4, y: 1)
+        }
+        .buttonStyle(.plain)
     }
 
     var body: some View {
@@ -101,19 +158,32 @@ struct MainTabView: View {
                     store.pendingTab = nil
                 }
             }
+            .onAppear { openPendingOnboardingChat() }
         }
         .tint(AppColor.pink)
         // NavigationStack'in KENDİSİNE bindirilmiş overlay — kök içeriğe değil,
         // böylece ChatView push edilince (kök yerini alınca) rozet KAYBOLMAZ,
         // her zaman en üstte kalır (bkz. tasarım: "chat içinde de görünmeli").
         .overlay(alignment: .topTrailing) {
-            TokenBadge(tokenStore: tokenStore) { showTokenStore = true }
-                .padding(.top, 8)
-                .padding(.trailing, 16)
+            Group {
+                // PRO değilken tüm sekme köklerinde: kalp+sayı rozeti yerine
+                // PRO butonu. Sohbet push edilince (path boş değil) token rozeti
+                // döner — sohbette bakiye görünür kalsın diye.
+                if path.isEmpty, !PurchaseService.shared.isPro {
+                    proButton
+                } else {
+                    TokenBadge(tokenStore: tokenStore) { showTokenStore = true }
+                }
+            }
+            .padding(.top, 8)
+            // Sohbette (path boş değil) coin sola kayar → sağ uçtaki Ayarlar
+            // (gear) butonuna yer açar; coin gear'ın SOLUNDA, aynı hizada durur.
+            .padding(.trailing, path.isEmpty ? 16 : 60)
         }
         .fullScreenCover(isPresented: $showTokenStore) {
-            TokenStoreView()
+            TokenStoreView(tokenStore: tokenStore)
         }
+        .fullScreenCover(isPresented: $showPaywall) { OnboardingPaywallView() }
         .task {
             if let result = await StreakService.claim(), result.granted {
                 streakResult = result

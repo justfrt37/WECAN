@@ -124,6 +124,26 @@ struct ChatListView: View {
             return ChatItem(character: ch, conversationID: conv.id,
                             last: last, unread: unread, updatedAt: conv.updatedAt)
         }
+        // Sunucuda konuşması olmayan ama YEREL geçmişi olan sohbetleri de ekle
+        // (ör. onboarding sonrası açılan chat, bildirimle enjekte edilenler) —
+        // liste yalnızca sunucu konuşmalarını gösterince bunlar hiç görünmüyordu.
+        let listedIDs = Set(items.map { $0.character.id })
+        for charID in LocalConversationStore.shared.allCharacterIDs() where !listedIDs.contains(charID) {
+            guard let ch = store.characters.first(where: { $0.id == charID }),
+                  let localStored = LocalConversationStore.shared.load(for: charID),
+                  !localStored.messages.isEmpty else { continue }
+            store.chatCache[charID] = localStored.messages
+            let assistantCount = localStored.messages.filter { $0.role == .assistant }.count
+            let unread = max(0, assistantCount - ReadTracker.seen(charID))
+            let last: LastMessage? = localStored.messages.last.map {
+                LastMessage(conversationID: charID, content: $0.content,
+                            role: $0.role.rawValue, createdAt: Self.iso8601.string(from: $0.createdAt),
+                            kind: $0.imageURL != nil ? "image" : "text")
+            }
+            items.append(ChatItem(character: ch, conversationID: charID,
+                                   last: last, unread: unread, updatedAt: nil))
+        }
+
         items.sort { lhs, rhs in
             let lhsDate = parseISO8601(lhs.last?.createdAt) ?? parseISO8601(lhs.updatedAt) ?? .distantPast
             let rhsDate = parseISO8601(rhs.last?.createdAt) ?? parseISO8601(rhs.updatedAt) ?? .distantPast
