@@ -12,42 +12,37 @@ struct SplashView: View {
 
     var body: some View {
         ZStack {
-            LinearGradient(
-                colors: [AppColor.bg, AppColor.bg2, AppColor.bg],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .ignoresSafeArea()
+            OBTheme.bg.ignoresSafeArea()
 
-            VStack(spacing: 20) {
-                Image(systemName: "heart.circle.fill")
-                    .font(.system(size: 80))
-                    .foregroundStyle(AppColor.pink)
+            // Ortada "❤ Plumm" logosu (Pencil splash mockup'ı).
+            OBBrandMark(size: 30)
 
-                Text("aiGirlfriend")
-                    .font(.largeTitle.bold())
-                    .foregroundStyle(.white)
-
+            // Yükleme / hata durumu altta, sabit — logoyu ortada tutar.
+            VStack {
+                Spacer()
                 if auth.failed {
-                    Text("Login failed.\nCheck your internet connection.")
-                        .multilineTextAlignment(.center)
-                        .font(.subheadline)
-                        .foregroundStyle(.white.opacity(0.9))
+                    VStack(spacing: 16) {
+                        Text("Login failed.\nCheck your internet connection.")
+                            .multilineTextAlignment(.center)
+                            .font(.subheadline)
+                            .foregroundStyle(.white.opacity(0.9))
 
-                    Button {
-                        Task { await loadAll() }
-                    } label: {
-                        Text("Try again")
-                            .font(.headline)
-                            .foregroundStyle(Color(hex: 0x0F0518))
-                            .padding(.horizontal, 28)
-                            .padding(.vertical, 12)
-                            .background(.white, in: Capsule())
+                        Button {
+                            Task { await loadAll() }
+                        } label: {
+                            Text("Try again")
+                                .font(.headline)
+                                .foregroundStyle(OBTheme.bg)
+                                .padding(.horizontal, 28)
+                                .padding(.vertical, 12)
+                                .background(.white, in: Capsule())
+                        }
                     }
+                    .padding(.bottom, 60)
                 } else {
                     ProgressView()
-                        .tint(.white)
-                        .scaleEffect(1.3)
+                        .tint(.white.opacity(0.7))
+                        .padding(.bottom, 72)
                 }
             }
         }

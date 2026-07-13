@@ -10,7 +10,6 @@ struct CharacterProfileView: View {
     let character: Character
     @Environment(\.dismiss) private var dismiss
     @State private var page = 0
-    @State private var showGallery = false
     @State private var showPaywall = false
     /// Bu kullanıcının bu karakterle olan gerçek seviyesi/ilerlemesi — `character.relationshipLevel`
     /// eski/global bir alan olduğu için (bkz. gotchas), cihazdaki yerel depodan okunur.
@@ -40,6 +39,9 @@ struct CharacterProfileView: View {
                         interestsSection
                             .padding(.horizontal, 24)
                             .padding(.top, 22)
+                        photosSection
+                            .padding(.horizontal, 24)
+                            .padding(.top, 22)
                             .padding(.bottom, 110) // bottom bar space
                     }
                 }
@@ -59,10 +61,7 @@ struct CharacterProfileView: View {
             .navigationDestination(for: Character.self) { ChatView(character: $0) }
             .toolbar(.hidden, for: .navigationBar)
         }
-        .fullScreenCover(isPresented: $showGallery) {
-            GalleryView(character: character)
-        }
-        .sheet(isPresented: $showPaywall) { PaywallHostView() }
+        .fullScreenCover(isPresented: $showPaywall) { PaywallHostView() }
         .task {
             if let stored = LocalConversationStore.shared.load(for: character.id) {
                 userLevel = stored.level
@@ -99,15 +98,10 @@ struct CharacterProfileView: View {
                         if locked {
                             Color.black.opacity(0.25)
                             Button { showPaywall = true } label: {
-                                VStack(spacing: 8) {
-                                    Image(systemName: "lock.fill")
-                                        .font(.system(size: 30))
-                                        .foregroundStyle(.white)
-                                        .shadow(color: .black.opacity(0.5), radius: 8, y: 4)
-                                    Text("Upgrade to PRO")
-                                        .font(.system(size: 13, weight: .bold))
-                                        .foregroundStyle(.white)
-                                }
+                                Image(systemName: "lock.fill")
+                                    .font(.system(size: 34))
+                                    .foregroundStyle(.white)
+                                    .shadow(color: .black.opacity(0.5), radius: 8, y: 4)
                             }
                             .buttonStyle(.plain)
                         }
@@ -137,14 +131,6 @@ struct CharacterProfileView: View {
         }
         .frame(height: 520)
         .clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
-        .overlay(alignment: .topLeading) {
-            // PRO olmayan kullanıcılara upsell rozeti — abone olanlara gösterilmez.
-            if !PurchaseService.shared.isPro {
-                Button { showPaywall = true } label: { proChip }
-                    .buttonStyle(.plain)
-                    .padding(.top, 60).padding(.leading, 24)
-            }
-        }
     }
 
     private var nameRow: some View {
@@ -205,19 +191,45 @@ struct CharacterProfileView: View {
         }
     }
 
-    private var proChip: some View {
-        HStack(spacing: 4) {
-            Image(systemName: "crown.fill").font(.system(size: 10))
-            Text("PRO").font(.system(size: 11, weight: .bold))
+    // MARK: Fotoğraflar (ilgi alanları altında, 2 sütun, aşağıya kadar)
+
+    private let photoColumns = [GridItem(.flexible(), spacing: 12),
+                                GridItem(.flexible(), spacing: 12)]
+
+    private var photosSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("PHOTOS")
+                .font(.system(size: 13, weight: .bold))
+                .tracking(0.5)
+                .foregroundStyle(.white.opacity(0.8))
+            LazyVGrid(columns: photoColumns, spacing: 12) {
+                ForEach(Array(images.enumerated()), id: \.offset) { idx, url in
+                    let locked = idx > 0 && !PurchaseService.shared.isPro
+                    ZStack {
+                        CachedImage(url: url) { image in
+                            image.resizable().scaledToFill()
+                        } placeholder: { AppColor.card }
+                        .frame(height: 240)
+                        .frame(maxWidth: .infinity)
+                        .clipped()
+                        .blur(radius: locked ? 18 : 0)
+
+                        if locked {
+                            Color.black.opacity(0.25)
+                            Image(systemName: "lock.fill")
+                                .font(.system(size: 26))
+                                .foregroundStyle(.white)
+                                .shadow(color: .black.opacity(0.5), radius: 6, y: 3)
+                        }
+                    }
+                    .frame(height: 240)
+                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .onTapGesture { if locked { showPaywall = true } }
+                }
+            }
         }
-        .foregroundStyle(.white)
-        .padding(.horizontal, 10)
-        .frame(height: 28)
-        .background(
-            LinearGradient(colors: [Color(hex: 0xFFB938), Color(hex: 0xFF8E3C)],
-                           startPoint: .topLeading, endPoint: .bottomTrailing),
-            in: Capsule()
-        )
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     // MARK: Hakkımda
@@ -288,21 +300,8 @@ struct CharacterProfileView: View {
 
     private var bottomBar: some View {
         HStack(spacing: 12) {
-            // Gallery
-            Button { showGallery = true } label: {
-                Label("Gallery", systemImage: "photo.fill")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity).frame(height: 52)
-                    .background(.white.opacity(0.10), in: RoundedRectangle(cornerRadius: 16))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 16)
-                            .strokeBorder(.white.opacity(0.15), lineWidth: 1)
-                    )
-            }
-            .buttonStyle(.plain)
-
-            // Chat — pushes inside this NavigationStack
+            // Chat — pushes inside this NavigationStack. Galeri butonu kaldırıldı:
+            // fotoğraflar artık profil içinde (ilgi alanları altında) inline grid.
             NavigationLink(value: character) {
                 Label("Chat", systemImage: "bubble.left.and.bubble.right.fill")
                     .font(.system(size: 15, weight: .bold))

@@ -52,6 +52,19 @@ struct ExploreView: View {
         .fullScreenCover(isPresented: $showCreate) {
             CreateCharacterView()
         }
+        #if DEBUG
+        // SS almak için: EXPLORE_PRESENT=create|profile ile açılışta ilgili
+        // ekranı otomatik sun (cliclick bu ortamda çalışmıyor).
+        .task {
+            switch ProcessInfo.processInfo.environment["EXPLORE_PRESENT"] {
+            case "create": showCreate = true
+            case "profile":
+                for _ in 0..<40 where filtered.isEmpty { try? await Task.sleep(nanoseconds: 100_000_000) }
+                profileCharacter = filtered.first
+            default: break
+            }
+        }
+        #endif
     }
 
     // MARK: Başlık

@@ -931,9 +931,12 @@ private struct PendingImageBubble: View {
                     Text("Tap to view")
                         .font(.system(size: 13, weight: .bold))
                         .foregroundStyle(.white)
-                    Text("25 💠")
-                        .font(.system(size: 13, weight: .heavy))
-                        .foregroundStyle(AppColor.amber)
+                    HStack(spacing: 4) {
+                        Text("25")
+                            .font(.system(size: 13, weight: .heavy))
+                            .foregroundStyle(AppColor.amber)
+                        CoinIcon(size: 14)
+                    }
                 }
             }
         }
@@ -972,9 +975,12 @@ private struct PendingVoiceBubble: View {
             }
 
             if !isGenerating {
-                Text("12 💠")
-                    .font(.system(size: 13, weight: .heavy))
-                    .foregroundStyle(AppColor.amber)
+                HStack(spacing: 4) {
+                    Text("12")
+                        .font(.system(size: 13, weight: .heavy))
+                        .foregroundStyle(AppColor.amber)
+                    CoinIcon(size: 14)
+                }
             }
         }
         .padding(.horizontal, 14)

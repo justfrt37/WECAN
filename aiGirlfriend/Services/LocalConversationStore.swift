@@ -137,6 +137,14 @@ final class LocalConversationStore {
         try? FileManager.default.removeItem(at: storeURL(for: id))
     }
 
+    /// Tüm yerel konuşmaları siler (Ayarlar → "Tüm Verileri Sil").
+    func clearAll() {
+        let dir = FileManager.default
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("LocalConversations", isDirectory: true)
+        try? FileManager.default.removeItem(at: dir)
+    }
+
     // MARK: - Özet güncelle (özetleme tamamlandığında çağrılır)
 
     func updateSummary(for id: UUID, summary: String, summarizedCount: Int, schedule: CharacterSchedule? = nil) {
