@@ -54,6 +54,32 @@ enum ScheduleLookup {
         return nil
     }
 
+    /// Karakterin GERÇEK programına göre uyanma anı — bugünkü sabah uyku
+    /// bloğunun bitişi (öğlenden önce biten ilk uyku bloğu), bugün geçmiş
+    /// olsa bile döner (Good Morning bildirimi bunu "bugünkü uyanma + offset"
+    /// hesabı için kullanır — bkz. NotificationScheduler.rescheduleGoodMorning).
+    /// Bugün uygun bir blok yoksa (nadir), nextSleepBlockStart'la aynı
+    /// güvenlik ağıyla ileriki günlere bakar.
+    static func nextWakeTime(
+        schedule: CharacterSchedule,
+        from: Date = Date(),
+        calendar: Calendar = .current
+    ) -> Date? {
+        for dayOffset in 0..<8 {
+            guard let candidateDay = calendar.date(byAdding: .day, value: dayOffset, to: from) else { continue }
+            let blocks = calendar.isDateInWeekend(candidateDay) ? schedule.weekend : schedule.weekday
+            let wakeTimes: [Date] = blocks.compactMap { block -> Date? in
+                guard block.isSleep, let endMinutes = minutesFromHHmm(block.end), endMinutes < 12 * 60 else { return nil }
+                return calendar.date(
+                    bySettingHour: endMinutes / 60, minute: endMinutes % 60, second: 0, of: candidateDay
+                )
+            }
+            let candidates = dayOffset == 0 ? wakeTimes : wakeTimes.filter { $0 > from }
+            if let earliest = candidates.min() { return earliest }
+        }
+        return nil
+    }
+
     private static func minutesFromHHmm(_ s: String) -> Int? {
         let parts = s.split(separator: ":")
         guard parts.count == 2, let h = Int(parts[0]), let m = Int(parts[1]) else { return nil }

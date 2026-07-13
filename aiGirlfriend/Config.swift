@@ -43,4 +43,24 @@ enum Config {
     static var characterScheduleFunctionURL: URL {
         URL(string: "\(supabaseURL)/functions/v1/character-schedule")!
     }
+
+    // MARK: DEV-only curated character creator (bkz. DevAccess, DevCharacterService)
+    // TEMPORARY — DELETE alongside these Edge Functions once curated-character
+    // creation is retired.
+
+    static var devUploadImageFunctionURL: URL {
+        URL(string: "\(supabaseURL)/functions/v1/dev-upload-image")!
+    }
+
+    static var devListVoicesFunctionURL: URL {
+        URL(string: "\(supabaseURL)/functions/v1/dev-list-voices")!
+    }
+
+    static var devCreateCharacterFunctionURL: URL {
+        URL(string: "\(supabaseURL)/functions/v1/dev-create-character")!
+    }
+
+    static var devUpdateCharacterFunctionURL: URL {
+        URL(string: "\(supabaseURL)/functions/v1/dev-update-character")!
+    }
 }

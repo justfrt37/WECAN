@@ -17,6 +17,11 @@ final class TokenStore {
     /// (bkz. TokenBadge.spendAnimation). `refresh()` bunu TETİKLEMEZ — sadece
     /// gerçek harcama/kazanma anlarında (setBalance) dolar.
     var lastDelta: Int?
+    /// Actual on-screen width of the TokenBadge overlay (bkz. TokenBadge,
+    /// reported via GeometryReader) — the badge's width isn't fixed, it grows
+    /// with the balance's digit count, so any screen reserving space for it
+    /// (bkz. ChatView.header) reads this instead of guessing a fixed number.
+    var badgeWidth: CGFloat = 80
     private let cacheKey = "tokens.cachedBalance"
 
     init() {

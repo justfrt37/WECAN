@@ -30,6 +30,10 @@ struct Character: Identifiable, Codable, Hashable {
     var personalityRole: String  // flirty | distant | shy | playful | devoted | crazy | ex
     var vibe: String             // Sweet | Mysterious | Energetic | Elegant — builder_selections.vibe
     var createdBy: String?       // kullanıcı tarafından oluşturulmuşsa kullanıcı ID'si
+    /// DEV-curated karakterlerde açıkça seçilmiş ElevenLabs sesi (bkz.
+    /// dev-create-character) — nil ise voice-message-tts eskisi gibi
+    /// role+vibe eşlemesine (elevenVoiceMap.ts) düşer.
+    var voiceId: String?
 
     var isUserCreated: Bool { createdBy != nil }
 
@@ -46,6 +50,7 @@ struct Character: Identifiable, Codable, Hashable {
         case chatPhotos = "chat_photos"
         case personalityRole = "personality_role"
         case createdBy = "created_by"
+        case voiceId = "voice_id"
         // Sunucu yanıtında YOK (orada builder_selections.vibe içinde gelir) — sadece
         // kendi disk önbelleğimize (CharacterStore/ChatListView cache) encode/decode
         // ederken kullanılır, aksi halde synthesized Encodable `vibe`'ı sessizce
@@ -79,7 +84,8 @@ struct Character: Identifiable, Codable, Hashable {
         chatPhotos: [URL] = [],
         personalityRole: String = "flirty",
         vibe: String = "Sweet",
-        createdBy: String? = nil
+        createdBy: String? = nil,
+        voiceId: String? = nil
     ) {
         self.id = id
         self.name = name
@@ -100,6 +106,7 @@ struct Character: Identifiable, Codable, Hashable {
         self.personalityRole = personalityRole
         self.vibe = vibe
         self.createdBy = createdBy
+        self.voiceId = voiceId
     }
 
     /// Decode sırasında eski/eksik alanlar için güvenli varsayılanlar.
@@ -134,6 +141,7 @@ struct Character: Identifiable, Codable, Hashable {
             vibe = "Sweet"
         }
         createdBy = try? c.decodeIfPresent(String.self, forKey: .createdBy)
+        voiceId = try? c.decodeIfPresent(String.self, forKey: .voiceId)
     }
 
     /// `builder_selections` jsonb payload — only `vibe` is needed client-side today.

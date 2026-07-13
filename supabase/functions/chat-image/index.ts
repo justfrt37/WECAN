@@ -32,6 +32,19 @@ const IMAGE_MODEL = "grok-imagine-image";
 const IMAGE_RESOLUTION = "2k";
 const IMAGE_ASPECT_RATIO = "9:16"; // docs.x.ai ile doğrulandı (2026-07): desteklenen değerlerden biri
 
+// TEMP TESTING — Civitai cost/quality comparison (2026-07-12). Swaps the
+// actual image-generation call (only) from Grok Imagine to Civitai's Flux2
+// Klein — prompt composition above still uses XAI_API_KEY/Grok text,
+// unchanged. Reads the real CIVITAI_API Supabase secret — DELETE this block
+// and flip USE_CIVITAI back to false (or remove entirely) if reverting to
+// the xAI image path, or revert straight from git history.
+const USE_CIVITAI_FOR_TESTING = true;
+const CIVITAI_API_TOKEN_TEMP = Deno.env.get("CIVITAI_API") ?? "";
+const CIVITAI_ORCHESTRATION_URL = "https://orchestration.civitai.com/v2/consumer/workflows?wait=60";
+const CIVITAI_MODEL_URN = "urn:air:sdxl:checkpoint:civitai:139562@798204"; // RealVisXL V5.0 Lightning
+const CIVITAI_WIDTH = 768;
+const CIVITAI_HEIGHT = 1344; // closest clean SDXL portrait resolution to 9:16
+
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
@@ -284,6 +297,45 @@ async function classifyPrivacy(imagePrompt: string): Promise<boolean> {
   return raw.trim().toUpperCase().startsWith("Y");
 }
 
+interface CuratedPhoto {
+  id: string;
+  url: string;
+  description: string | null;
+  mood: string | null;
+}
+
+// DEV-uploaded real photos (see supabase/functions/dev-create-character) —
+// "most of the time use images from their existing photos" — only when NONE
+// of them are even close to what was asked do we fall through to actually
+// generating a new image (bkz. Deno.serve handler below). No embedding/
+// similarity utility exists in this project, so this mirrors the existing
+// classifyPrivacy pattern: one cheap Grok text call, not a vision call.
+async function pickCuratedPhoto(userPrompt: string, photos: CuratedPhoto[]): Promise<CuratedPhoto | null> {
+  const described = photos.filter((p) => p.description && p.description.trim());
+  if (described.length === 0) return null;
+
+  const listing = described.map((p, i) => `${i + 1}. ${p.description}${p.mood ? ` (mood: ${p.mood})` : ""}`).join("\n");
+  const raw = await callGrokText(
+    [
+      {
+        role: "system",
+        content:
+          "You are picking which existing photo (from a fixed list) best satisfies a user's " +
+          "photo request in a chat app. Only pick one if it's a genuinely close match to what " +
+          "was asked (same rough scene/outfit/activity/angle) — err on the side of NOT matching " +
+          "if it's not close. Reply with ONLY the number of the best match, or the single word " +
+          "NONE if nothing is close enough. No other text.",
+      },
+      { role: "user", content: `Photos available:\n${listing}\n\nUser's request: "${userPrompt}"` },
+    ],
+    10
+  );
+  const trimmed = raw.trim();
+  const n = parseInt(trimmed, 10);
+  if (!isNaN(n) && n >= 1 && n <= described.length) return described[n - 1];
+  return null;
+}
+
 /// Grok'u "fotoğraf yönetmeni" gibi kullanarak kullanıcının isteğini + alan
 /// talimatlarını 6 etiketli alandan oluşan TEK bir görsel-üretim promptuna
 /// dönüştürür (CAMERA DETAILS / LIGHTING / SUBJECT / OUTFIT / POSE / LOCATION).
@@ -396,33 +448,45 @@ async function bytesFromImageResponse(r: Response): Promise<Uint8Array> {
 /// açı/ışık değişir. Bu, YÜZÜN aynı kalmasını sağlayan TEK mekanizma — metin
 /// açıklaması (appearanceContext) asla gerçek bir referans görsel kadar güvenilir
 /// değil. Bu yüzden edits başarısız olursa ÖNCE BİR KEZ DAHA denenir (çoğu hata
-/// geçici — ağ/5xx) — sadece İKİ deneme de başarısız olursa referanssız düz
-/// /v1/images/generations'a düşülür (o zaman yüz KESİNLİKLE tutmaz, bu yüzden
-/// son çare). ESKİDEN: tek hata → sessizce referanssız üretime düşüyordu, bu da
-/// kullanıcı raporlarındaki "bazen yüz tamamen farklı" hatasının kök nedeniydi.
-async function fetchGeneratedImageBytes(prompt: string, baselineImageUrl: string | null): Promise<Uint8Array> {
-  if (baselineImageUrl) {
-    for (let attempt = 1; attempt <= 2; attempt++) {
-      try {
-        const r = await fetch(XAI_IMAGE_EDITS_URL, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${XAI_API_KEY}` },
-          body: JSON.stringify({
-            model: IMAGE_MODEL,
-            prompt,
-            image: { url: baselineImageUrl, type: "image_url" },
-            aspect_ratio: IMAGE_ASPECT_RATIO,
-            resolution: IMAGE_RESOLUTION,
-          }),
-        });
-        return await bytesFromImageResponse(r);
-      } catch (e) {
-        console.error(`chat-image edits (baseline) attempt ${attempt} failed:`, String(e));
-      }
+/// geçici — ağ/5xx).
+///
+/// ÖNEMLİ: bu fonksiyon artık BASELINE'I ASLA SESSİZCE DÜŞÜRMEZ — iki deneme de
+/// başarısız olursa çağırana throw eder, referanssız üretime KENDİSİ geçmez.
+/// ESKİDEN: içeride sessizce /v1/images/generations'a (referanssız) düşüyordu —
+/// bu, xAI'nin img2img+NSFW isteklerini (gerçek yüzle içerik-politikası ihlali)
+/// reddedip SALT METİN NSFW üretimine izin verdiği durumlarda, dış katmandaki
+/// buildSafeFallbackPrompt/redirected mantığını HİÇ TETİKLEMEDEN "orijinal
+/// (uygunsuz) prompt'un referanssız hali"ni sessizce başarılı gibi
+/// döndürüyordu — kullanıcı raporundaki "NSFW istekte 'daha güvenli' foto
+/// geliyor ama yüz bozuk" hatasının kök nedeni buydu. Artık referanssız
+/// üretime düşüş kararı SADECE Deno.serve handler'ında, safe-fallback
+/// prompt'u da baseline'la deneyip o da başarısız olduktan SONRA veriliyor
+/// (bkz. aşağıdaki handler).
+async function editsWithBaseline(prompt: string, baselineImageUrl: string): Promise<Uint8Array> {
+  let lastErr: unknown;
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const r = await fetch(XAI_IMAGE_EDITS_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${XAI_API_KEY}` },
+        body: JSON.stringify({
+          model: IMAGE_MODEL,
+          prompt,
+          image: { url: baselineImageUrl, type: "image_url" },
+          aspect_ratio: IMAGE_ASPECT_RATIO,
+          resolution: IMAGE_RESOLUTION,
+        }),
+      });
+      return await bytesFromImageResponse(r);
+    } catch (e) {
+      lastErr = e;
+      console.error(`chat-image edits (baseline) attempt ${attempt} failed:`, String(e));
     }
-    console.error("chat-image edits (baseline) failed twice — falling back to referenceless generation, face will NOT match.");
   }
+  throw lastErr;
+}
 
+async function generateWithoutBaseline(prompt: string): Promise<Uint8Array> {
   const r = await fetch(XAI_IMAGE_GENERATIONS_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${XAI_API_KEY}` },
@@ -435,6 +499,75 @@ async function fetchGeneratedImageBytes(prompt: string, baselineImageUrl: string
     }),
   });
   return await bytesFromImageResponse(r);
+}
+
+// TEMP TESTING — see USE_CIVITAI_FOR_TESTING above. Polls the workflow if it
+// doesn't finish within the initial wait=60 window (createVariant/editImage
+// sometimes runs long) instead of assuming synchronous completion.
+async function civitaiPollUntilDone(workflowId: string): Promise<Record<string, unknown>> {
+  for (let i = 0; i < 10; i++) {
+    await new Promise((res) => setTimeout(res, 6000));
+    const r = await fetch(`https://orchestration.civitai.com/v2/consumer/workflows/${workflowId}`, {
+      headers: { Authorization: `Bearer ${CIVITAI_API_TOKEN_TEMP}` },
+    });
+    if (!r.ok) throw new Error(`Civitai poll ${r.status}: ${await r.text()}`);
+    const d = await r.json();
+    if (d.status === "succeeded" || d.status === "failed") return d;
+  }
+  throw new Error("Civitai poll timed out");
+}
+
+async function fetchCivitaiImageBytes(prompt: string, baselineImageUrl: string | null): Promise<Uint8Array> {
+  // REVERTED (2026-07-13) — SDXL createVariant's strength knob couldn't
+  // deliver both prompt-adherence and face-lock at any single value (0.55
+  // ignored the prompt, 0.8 ignored the baseline identity — proven via
+  // side-by-side test). Flux2 editImage held real face consistency across
+  // a full pose/outfit/location change in testing, so it's the backend
+  // staying live for now. SDXL code path left in place below (unused) in
+  // case a per-character LoRA approach gets tested later.
+  const input: Record<string, unknown> = baselineImageUrl
+    ? {
+        engine: "flux2",
+        model: "klein",
+        modelVersion: "4b",
+        operation: "editImage",
+        prompt,
+        width: CIVITAI_WIDTH,
+        height: CIVITAI_HEIGHT,
+        images: [baselineImageUrl],
+        quantity: 1,
+      }
+    : {
+        engine: "flux2",
+        model: "klein",
+        modelVersion: "4b",
+        operation: "createImage",
+        prompt,
+        width: CIVITAI_WIDTH,
+        height: CIVITAI_HEIGHT,
+        quantity: 1,
+      };
+
+  const r = await fetch(CIVITAI_ORCHESTRATION_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${CIVITAI_API_TOKEN_TEMP}` },
+    body: JSON.stringify({ steps: [{ $type: "imageGen", input }] }),
+  });
+  if (!r.ok) throw new Error(`Civitai ${r.status}: ${await r.text()}`);
+  let d = await r.json();
+  if (d.status === "processing" && d.id) d = await civitaiPollUntilDone(d.id);
+  if (d.status !== "succeeded") throw new Error(`Civitai job failed: ${JSON.stringify(d).slice(0, 500)}`);
+
+  const imgUrl = (d as any)?.steps?.[0]?.output?.images?.[0]?.url;
+  if (!imgUrl) throw new Error(`Civitai: no image url in response — ${JSON.stringify(d).slice(0, 500)}`);
+  const imgResp = await fetch(imgUrl);
+  if (!imgResp.ok) throw new Error(`Civitai image download ${imgResp.status}`);
+  return new Uint8Array(await imgResp.arrayBuffer());
+}
+
+async function fetchGeneratedImageBytes(prompt: string, baselineImageUrl: string | null): Promise<Uint8Array> {
+  if (USE_CIVITAI_FOR_TESTING) return fetchCivitaiImageBytes(prompt, baselineImageUrl);
+  return baselineImageUrl ? editsWithBaseline(prompt, baselineImageUrl) : generateWithoutBaseline(prompt);
 }
 
 async function uploadGeneratedImage(bytes: Uint8Array): Promise<string> {
@@ -475,7 +608,7 @@ Deno.serve(async (req: Request) => {
 
     const { data: character, error: charErr } = await db
       .from("characters")
-      .select("name, profession, tagline, category, builder_selections, photo_url, avatar_url")
+      .select("name, profession, tagline, category, builder_selections, photo_url, avatar_url, relationship_level")
       .eq("id", characterId)
       .maybeSingle();
     if (charErr || !character) return json({ error: "character not found" }, 400);
@@ -487,19 +620,6 @@ Deno.serve(async (req: Request) => {
     // yalnızca kullanıcı-yaratımı karakterlerde dolu) — bkz. architecture_db.
     const category: string = character.category ?? character.builder_selections?.category ?? "Realistic";
 
-    const imagePrompt = await composeImagePrompt({
-      appearance: appearanceContext({
-        name: character.name,
-        profession: character.profession,
-        tagline: character.tagline,
-        builderSelections: character.builder_selections ?? null,
-      }),
-      category,
-      userPrompt,
-      hasBaseline: baselineImageUrl !== null,
-      context: conversationContext(history, summary) + currentActivityContext(currentActivity),
-    });
-
     let photoUrl: string;
     let isPrivate = false;
     // `redirected` — the original ask got rejected (content policy) and we
@@ -508,24 +628,67 @@ Deno.serve(async (req: Request) => {
     // reply instead of the normal photo-reaction caption (bkz.
     // IMAGE_REDIRECT_RULE) — never just silently swap the photo.
     let redirected = false;
-    try {
-      const [bytes, privacyResult] = await Promise.all([
-        fetchGeneratedImageBytes(imagePrompt, baselineImageUrl),
-        classifyPrivacy(imagePrompt),
-      ]);
-      photoUrl = await uploadGeneratedImage(bytes);
-      isPrivate = privacyResult;
-    } catch (e) {
-      console.error("chat-image generation failed, trying safe fallback prompt:", String(e));
+
+    // DEV-curated characters (see dev-create-character) get a pre-uploaded
+    // in-chat photo pool (character_photos) — try that FIRST, only fall
+    // through to actual generation if nothing close enough exists. Every
+    // other (virtual/user-created) character has zero rows here and this is
+    // a no-op, so existing behavior is unchanged for them.
+    const { data: curatedPhotos } = await db
+      .from("character_photos")
+      .select("id, url, description, mood")
+      .eq("character_id", characterId)
+      .lte("min_relationship_level", character.relationship_level ?? 0);
+    const curatedMatch = curatedPhotos?.length
+      ? await pickCuratedPhoto(userPrompt, curatedPhotos as CuratedPhoto[])
+      : null;
+
+    if (curatedMatch) {
+      photoUrl = curatedMatch.url;
+      isPrivate = await classifyPrivacy(userPrompt);
+    } else {
+      const imagePrompt = await composeImagePrompt({
+        appearance: appearanceContext({
+          name: character.name,
+          profession: character.profession,
+          tagline: character.tagline,
+          builderSelections: character.builder_selections ?? null,
+        }),
+        category,
+        userPrompt,
+        hasBaseline: baselineImageUrl !== null,
+        context: conversationContext(history, summary) + currentActivityContext(currentActivity),
+      });
+
       try {
-        const safePrompt = await buildSafeFallbackPrompt(userPrompt, imagePrompt);
-        const bytes = await fetchGeneratedImageBytes(safePrompt, baselineImageUrl);
+        const [bytes, privacyResult] = await Promise.all([
+          fetchGeneratedImageBytes(imagePrompt, baselineImageUrl),
+          classifyPrivacy(imagePrompt),
+        ]);
         photoUrl = await uploadGeneratedImage(bytes);
-        isPrivate = false; // toned-down by construction
-        redirected = true;
-      } catch (e2) {
-        console.error("chat-image safe fallback also failed:", String(e2));
-        return json({ error: "image_generation_failed" }, 502);
+        isPrivate = privacyResult;
+      } catch (e) {
+        console.error("chat-image generation failed, trying safe fallback prompt:", String(e));
+        try {
+          const safePrompt = await buildSafeFallbackPrompt(userPrompt, imagePrompt);
+          // Keep trying WITH the baseline face on the toned-down prompt first —
+          // only drop it (face will NOT match) if the safe prompt also fails
+          // with the baseline attached. See fetchGeneratedImageBytes note above.
+          let bytes: Uint8Array;
+          try {
+            bytes = await fetchGeneratedImageBytes(safePrompt, baselineImageUrl);
+          } catch (baselineErr) {
+            if (!baselineImageUrl) throw baselineErr;
+            console.error("chat-image safe fallback (with baseline) also failed — falling back to referenceless generation, face will NOT match:", String(baselineErr));
+            bytes = await generateWithoutBaseline(safePrompt);
+          }
+          photoUrl = await uploadGeneratedImage(bytes);
+          isPrivate = false; // toned-down by construction
+          redirected = true;
+        } catch (e2) {
+          console.error("chat-image safe fallback also failed:", String(e2));
+          return json({ error: "image_generation_failed" }, 502);
+        }
       }
     }
 

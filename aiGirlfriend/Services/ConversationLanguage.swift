@@ -6,16 +6,20 @@
 //  yazdığı dile geçer, sabit değildir). Bildirim içeriği (JealousyContent vb.)
 //  hangi dil tablosunu kullanacağını buradan öğrenir.
 //
-//  Yalnızca elimizde el yazımı içerik tablosu olan diller (tr/en) arasında
-//  karar verir — cihaz üzerinde (ağ yok) Apple'ın NaturalLanguage çerçevesiyle.
+//  Yalnızca elimizde el yazımı içerik tablosu olan diller arasında karar
+//  verir — cihaz üzerinde (ağ yok) Apple'ın NaturalLanguage çerçevesiyle.
+//  Uygulamanın UI dil desteğiyle (Localizable.xcstrings: en/tr/de/es/fr/it/pt)
+//  eşleşecek şekilde 7 dile genişletildi (2026-07-09) — bkz. GhostedContent/
+//  JealousyContent/SleepyContent/RoleOnlyContent/MissedYouContent/
+//  GoodMorningContent, hepsi bu 7 dili kapsıyor.
 //
 
 import Foundation
 import NaturalLanguage
 
 enum ConversationLanguage {
-    /// Desteklenen içerik dilleri.
-    static let supported: Set<String> = ["tr", "en"]
+    /// Desteklenen içerik dilleri — uygulamanın UI dil desteğiyle birebir.
+    static let supported: Set<String> = ["tr", "en", "de", "es", "fr", "it", "pt"]
 
     /// Verilen metnin baskın dilini tahmin eder (ör. "tr", "en", "de"...).
     /// Metin çok kısaysa veya güvenilir bir sonuç yoksa nil döner.

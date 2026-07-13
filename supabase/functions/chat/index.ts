@@ -140,6 +140,16 @@ function detectReplyLanguage(
     .join(" ");
   const text = `${priorUserText} ${userMessage}`.trim();
   if (!text) return null;
+  // On a brand-new chat there's no priorUserText yet, so franc only sees the
+  // user's single first message — on short text (e.g. "merhaba ben Furkan")
+  // franc-min's trigram model is unreliable and can confidently misfire into
+  // the wrong language (reproduced: short Turkish → guessed German). Below
+  // ~15 chars with zero prior history, treat detection as untrustworthy and
+  // don't lock a language — languageDirective falls back to English, which
+  // still lets the model read the message correctly rather than being
+  // forced into a wrong hard "reply ONLY in X" lock. Once the user sends a
+  // second message, priorUserText is populated and detection self-corrects.
+  if (!priorUserText.trim() && userMessage.trim().length < 15) return null;
   // `only` restricts franc's candidate set to the 7 languages we actually
   // support — without it, franc-min lacks Italian entirely (misreads it as
   // unrelated languages) and the full franc package over-guesses among
@@ -150,7 +160,14 @@ function detectReplyLanguage(
 }
 
 function languageDirective(language: string | null): string {
-  const target = language ?? "English";
+  // `null` now specifically means "detection wasn't trustworthy" (e.g. a
+  // short first message with no prior history — see detectReplyLanguage) —
+  // forcing an English lock in that case just traded one wrong hard-coded
+  // language for another. Omit the directive entirely instead, so the model
+  // reads the user's actual message and replies in kind, same as it would
+  // for any language we don't explicitly detect.
+  if (!language) return "";
+  const target = language;
   return (
     `\n\nLANGUAGE RULE: Reply ONLY in ${target} — this was determined from the ` +
     "user's own messages, not a guess you need to make. Never mix in another " +

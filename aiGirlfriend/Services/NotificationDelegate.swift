@@ -102,6 +102,12 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
             line = SleepyContent.question(language: language)
         case .sleepyGoodbye, .bedtime:
             line = SleepyContent.goodbye(language: language)
+        case .missedYou:
+            let resolvedLevel = level ?? LocalConversationStore.shared.load(for: characterID)?.level ?? 1
+            line = MissedYouContent.randomLine(language: language, role: character.personalityRole, vibe: character.vibe, level: resolvedLevel)
+        case .goodMorning:
+            let resolvedLevel = level ?? LocalConversationStore.shared.load(for: characterID)?.level ?? 1
+            line = GoodMorningContent.randomLine(language: language, role: character.personalityRole, vibe: character.vibe, level: resolvedLevel)
         }
 
         if let line {
@@ -135,7 +141,7 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
             store.pendingMeetRequest = MeetRequest(character: character, prefillText: "")
         case .liked:
             store.pendingTab = .likes
-        case .ghosted, .jealousy, .sleepyQuestion, .sleepyGoodbye, .bedtime:
+        case .ghosted, .jealousy, .sleepyQuestion, .sleepyGoodbye, .bedtime, .missedYou, .goodMorning:
             store.pendingTab = .chat
         }
     }

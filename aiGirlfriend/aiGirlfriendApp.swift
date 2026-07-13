@@ -58,6 +58,9 @@ struct aiGirlfriendApp: App {
             case .active:
                 NotificationScheduler.shared.onForeground(characters: store.characters)
                 notificationDelegate?.catchUpOnDeliveredNotifications()
+                // Picks up newly-added characters (DEV curated creations, etc.)
+                // without requiring a reinstall — bkz. CharacterStore.refreshCharacters.
+                Task { await store.refreshCharacters() }
             case .background:
                 NotificationScheduler.shared.onBackground(characters: store.characters)
             default:

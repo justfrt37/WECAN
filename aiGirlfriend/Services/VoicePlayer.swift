@@ -104,10 +104,15 @@ extension TTSService {
     /// sunucuda (Supabase secret), istemcide hiç bulunmaz. Token bakiyesi
     /// bir JSON alanı değil, `X-Token-Balance` cevap başlığından okunur —
     /// başarı gövdesi ham ses baytları (bkz. voice-message-tts/index.ts).
-    func synthesizeVoiceMessage(text: String, role: String, vibe: String, lang: String, useElevenLabs: Bool = false) async -> TTSResult {
-        guard let body = try? JSONSerialization.data(withJSONObject: [
+    func synthesizeVoiceMessage(text: String, role: String, vibe: String, lang: String, useElevenLabs: Bool = false, voiceId: String? = nil) async -> TTSResult {
+        var payload: [String: Any] = [
             "text": text, "role": role, "vibe": vibe, "lang": lang, "useElevenLabs": useElevenLabs,
-        ]) else { return .failure }
+        ]
+        // DEV-curated characters (see dev-create-character) pin an exact
+        // ElevenLabs voice — server uses it directly when present, else
+        // falls back to the role+vibe map (bkz. voice-message-tts/index.ts).
+        if let voiceId, !voiceId.isEmpty { payload["voiceId"] = voiceId }
+        guard let body = try? JSONSerialization.data(withJSONObject: payload) else { return .failure }
         var req = URLRequest(url: Config.voiceMessageTTSFunctionURL)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")

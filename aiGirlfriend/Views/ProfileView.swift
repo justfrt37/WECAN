@@ -14,6 +14,8 @@ struct ProfileView: View {
     @Environment(TokenStore.self) private var tokenStore
     @State private var showPaywall = false
     @State private var devTier: SubscriptionTier = PurchaseService.shared.tier
+    @State private var showDevCreateCharacter = false
+    @State private var showDevEditCharacter = false
     #if DEBUG
     @State private var dbgSettings = ProcessInfo.processInfo.environment["PROFILE_ROUTE"] == "settings"
     #endif
@@ -26,7 +28,12 @@ struct ProfileView: View {
                     avatarCard
                     proBanner
                     settingsMenu
-                    devTokenTestPanel
+                    // DEV-only, gated to the two dev uids (bkz. DevAccess) —
+                    // was shown to EVERYONE before (no gating existed).
+                    if DevAccess.isDev {
+                        devTokenTestPanel
+                        devCuratedCharacterPanel
+                    }
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 4)
@@ -40,6 +47,12 @@ struct ProfileView: View {
                 .ignoresSafeArea()
         )
         .sheet(isPresented: $showPaywall) { PaywallHostView() }
+        .sheet(isPresented: $showHelp) { HelpSupportView() }
+        // CharacterStore is already injected ambiently at MainTabView's root —
+        // no need to re-inject it here, same as every other CreateCharacterView call site.
+        .sheet(isPresented: $showDevCreateCharacter) { CreateCharacterView(devMode: .create) }
+        .sheet(isPresented: $showDevEditCharacter) { DevEditCharacterPickerView() }
+        .task { notificationsOn = await currentNotificationStatus() }
         #if DEBUG
         .sheet(isPresented: $dbgSettings) { NavigationStack { SettingsView() } }
         #endif
@@ -76,6 +89,17 @@ struct ProfileView: View {
             Text("Guest User")
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(.white.opacity(0.7))
+            // TEMP TESTING (2026-07-12) — shows the Supabase auth UID so it
+            // can be cross-checked against DB rows while testing. Tap to
+            // copy. REVERT/remove once testing is done.
+            if let uid = UserDefaultsManager.shared.userId {
+                Text(uid)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.4))
+                    .onTapGesture {
+                        UIPasteboard.general.string = uid
+                    }
+            }
         }
         .padding(.vertical, 24)
         .frame(maxWidth: .infinity)
@@ -91,13 +115,41 @@ struct ProfileView: View {
 
     // MARK: PRO banner (RevenueCat iskeleti — bkz. PurchaseService)
 
+    @ViewBuilder
     private var proBanner: some View {
+        if PurchaseService.shared.isPro {
+            activeSubscriptionBanner
+        } else {
+            goProBanner
+        }
+    }
+
+    private var activeSubscriptionBanner: some View {
+        HStack {
+            HStack(spacing: 6) {
+                Image(systemName: "crown.fill").font(.system(size: 14))
+                Text("You are \(PurchaseService.shared.tier.displayName)!")
+                    .font(.system(size: 16, weight: .bold))
+            }
+            .foregroundStyle(.white)
+            Spacer()
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 16)
+        .background(
+            LinearGradient(colors: [Color(hex: 0xFFA726), Color(hex: 0xFF6F61)],
+                           startPoint: .top, endPoint: .bottom),
+            in: RoundedRectangle(cornerRadius: 20)
+        )
+    }
+
+    private var goProBanner: some View {
         Button { showPaywall = true } label: {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 6) {
                         Image(systemName: "crown.fill").font(.system(size: 14))
-                        Text("Lumi PRO").font(.system(size: 16, weight: .bold))
+                        Text("Plumm PRO").font(.system(size: 16, weight: .bold))
                     }
                     .foregroundStyle(.white)
                     Text("Unlimited chat, voice messages, and exclusive characters")
@@ -173,6 +225,41 @@ struct ProfileView: View {
         .padding(16)
         .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 20))
         .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(.white.opacity(0.08), lineWidth: 1))
+    }
+
+    /// DEV-only — opens CreateCharacterView's dev mode (bkz.
+    /// CreateCharacterView.DevWizardMode, dev-create-character/
+    /// dev-update-character edge functions). Unlike devTokenTestPanel this
+    /// doesn't get deleted with RevenueCat; it stays as a permanent dev
+    /// tool, but only ever visible to the two dev uids.
+    private var devCuratedCharacterPanel: some View {
+        VStack(spacing: 10) {
+            devCuratedCharacterRow(icon: "wand.and.stars", title: "DEV: Create Curated Character") {
+                showDevCreateCharacter = true
+            }
+            devCuratedCharacterRow(icon: "pencil.and.list.clipboard", title: "DEV: Edit Existing Character") {
+                showDevEditCharacter = true
+            }
+        }
+    }
+
+    private func devCuratedCharacterRow(icon: String, title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                Image(systemName: icon).foregroundStyle(Color(hex: 0x9B59B6))
+                Text(title)
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(.white)
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.4))
+            }
+            .padding(16)
+            .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 20))
+            .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(.white.opacity(0.08), lineWidth: 1))
+        }
+        .buttonStyle(.plain)
     }
 
     private func devActionButton(_ title: String, action: @escaping () async -> Void) -> some View {

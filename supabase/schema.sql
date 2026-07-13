@@ -40,7 +40,10 @@ alter table characters
   add column if not exists interests jsonb not null default '[]'::jsonb,
   add column if not exists relationship_level int not null default 0,
   add column if not exists gallery_urls jsonb not null default '[]'::jsonb,
-  add column if not exists chat_photos jsonb not null default '[]'::jsonb;
+  add column if not exists chat_photos jsonb not null default '[]'::jsonb,
+  -- DEV-curated characters only (bkz. dev-create-character) — per-character
+  -- ElevenLabs override; null keeps the default role+vibe map.
+  add column if not exists voice_id text;
 
 -- Karakter görselleri için public storage bucket'ı
 insert into storage.buckets (id, name, public)
@@ -65,6 +68,10 @@ create table if not exists character_photos (
   min_relationship_level int not null default 1,     -- bu seviyeden önce açılmaz
   is_pro       boolean not null default false,       -- yalnız PRO'ya açık mı
   sort         int not null default 0,
+  -- DEV-yazılan serbest metin açıklama — chat-image'ın Grok eşleşmesi bunu
+  -- kullanıcının fotoğraf isteğiyle karşılaştırır (bkz. dev-create-character,
+  -- chat-image/index.ts pickCuratedPhoto).
+  description  text,
   created_at   timestamptz not null default now()
 );
 create index if not exists character_photos_char_idx
