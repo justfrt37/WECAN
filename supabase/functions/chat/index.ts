@@ -81,13 +81,40 @@ function stripVoiceTags(text: string): string {
 }
 
 // ─────────────────────────── İlişki seviyesi ───────────────────────────
-// XP terfi hesabı (eskiden burada) artık istemcide — bkz. RelationshipXP.swift.
-// Sunucu SADECE `conversations.relationship_level` değerini saklar/döner:
-// bu turun direktifi/foto uygunluğu için OKUNUR, istemcinin hesapladığı
-// güncel değer bir sonraki turda YAZILIR (`body.level`). Sunucu terfi
-// mantığını bilmez, sadece 1..MAX_LEVEL aralığına klemplenmiş bir tamsayı
-// olarak kabul eder.
+// XP / ilişki seviyesi terfi hesabı SUNUCUDA yapılır (istemci sadece gösterir,
+// kurcalayamaz). Model: `level_progress` = güncel seviyenin ne kadarı doldu (0..1).
+// HER mesajda ilerleme artar; dolunca seviye atlar (applyGain). İstemcinin
+// gönderdiği `body.level` ARTIK GÜVENİLMEZ — sunucu DB'deki değerden hesaplar.
 const MAX_LEVEL = 10;
+const MESSAGE_BATCH_SIZE = 5;
+
+// Bu seviyedeyken bir "tam tık"ın kattığı yüzde (0..100). Lv1-3 hızlı, Lv4+
+// konveks azalan eğri (RelationshipXP.swift ile birebir aynı).
+function gainPercent(level: number): number {
+  if (level <= 1) return 33;
+  if (level === 2) return 25;
+  if (level === 3) return 18;
+  const x = level - 2;
+  return Math.max(1, -0.125 * x * x + 8.125);
+}
+
+// Mesaj BAŞINA ilerleme oranı — batch (5) yerine her mesajda artsın diye
+// tam tık /MESSAGE_BATCH_SIZE. Pacing aynı kalır, ilerleme pürüzsüz artar.
+function perMessageFraction(level: number): number {
+  return (gainPercent(level) / 100) / MESSAGE_BATCH_SIZE;
+}
+
+// İlerlemeyi uygula; dolunca seviye atla (aynı anda birden fazla da olabilir).
+function applyRelationshipGain(
+  fraction: number, level: number, progress: number,
+): { level: number; progress: number } {
+  if (level >= MAX_LEVEL) return { level: MAX_LEVEL, progress: 0 };
+  let lvl = level;
+  let prog = progress + fraction;
+  while (prog >= 1 && lvl < MAX_LEVEL) { prog -= 1; lvl += 1; }
+  if (lvl >= MAX_LEVEL) return { level: MAX_LEVEL, progress: 0 };
+  return { level: lvl, progress: prog };
+}
 
 // Fetch role-aware intimacy directive from DB.
 // Checks character_level_overrides first, falls back to role_level_scripts.
@@ -527,7 +554,7 @@ Deno.serve(async (req: Request) => {
     // 1) Konuşmayı bul ya da oluştur (kullanıcı + karakter)
     let { data: convo } = await db
       .from("conversations")
-      .select("id, summary, summarized_count, xp, relationship_level")
+      .select("id, summary, summarized_count, xp, relationship_level, level_progress")
       .eq("user_id", uid)
       .eq("character_id", characterId)
       .maybeSingle();
@@ -536,7 +563,7 @@ Deno.serve(async (req: Request) => {
       const ins = await db
         .from("conversations")
         .insert({ user_id: uid, character_id: characterId })
-        .select("id, summary, summarized_count, xp, relationship_level")
+        .select("id, summary, summarized_count, xp, relationship_level, level_progress")
         .single();
       convo = ins.data!;
     }
@@ -545,9 +572,6 @@ Deno.serve(async (req: Request) => {
     const clientHistory: WireMessage[] | undefined = body.clientHistory;
     const useClientHistory = Array.isArray(clientHistory);
     const localSummary: string | undefined = body.localSummary;
-    // İstemcinin terfi hesabından çıkan güncel seviye — bu turdan SONRA yazılır,
-    // bu turun direktif/foto uygunluğu HALA eski `convo.relationship_level`'ı kullanır.
-    const clientLevel: number | undefined = Number.isInteger(body.level) ? body.level : undefined;
     // Zaman farkındalığı: son mesaj zamanı, istemcinin "şimdi"si ve saat dilimi
     // farkı (dakika) — hepsi epoch ms. Sadece varsa kullanılır (bkz. timeContext).
     const lastMessageAt: number | undefined = typeof body.lastMessageAt === "number" ? body.lastMessageAt : undefined;
@@ -879,23 +903,26 @@ Deno.serve(async (req: Request) => {
       ]);
     }
 
-    // 4b) Seviye güncelle — terfi hesabı istemcide yapıldı, sunucu sadece saklar.
-    // Bu turun direktif/foto uygunluğu zaten yukarıda eski `currentLevel` ile yapıldı;
-    // burada yazılan değer bir SONRAKİ turda kullanılacak.
-    const newLevel = clientLevel !== undefined
-      ? Math.min(MAX_LEVEL, Math.max(1, clientLevel))
-      : currentLevel;
+    // 4b) Seviye/ilerleme SUNUCUDA hesaplanır (istemci kurcalayamaz) — HER
+    // mesajda ilerleme artar, dolunca seviye atlar. Bu turun direktifi zaten
+    // yukarıda eski `currentLevel` ile yapıldı; yeni değerler bir sonraki tura
+    // ve cevapla istemciye yansır.
+    const currentProgress: number = typeof convo.level_progress === "number" ? convo.level_progress : 0;
+    const gained = applyRelationshipGain(perMessageFraction(currentLevel), currentLevel, currentProgress);
+    const newLevel = gained.level;
+    const newProgress = gained.progress;
 
     await db.from("conversations")
       .update({
         updated_at: new Date().toISOString(),
         relationship_level: newLevel,
+        level_progress: newProgress,
       })
       .eq("id", conversationId);
 
     // 5) Özetleme — sadece DB modunda (clientHistory modunda istemci geçmişi yönetiyor)
     if (useClientHistory) {
-      return json({ conversationId, reply, level: newLevel, wentToSleep, tokenBalance: tokenBalanceAfterCharge });
+      return json({ conversationId, reply, level: newLevel, levelProgress: newProgress, wentToSleep, tokenBalance: tokenBalanceAfterCharge });
     }
 
     const { count: total } = await db
@@ -946,7 +973,7 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    return json({ conversationId, reply, level: newLevel, tokenBalance: tokenBalanceAfterCharge });
+    return json({ conversationId, reply, level: newLevel, levelProgress: newProgress, tokenBalance: tokenBalanceAfterCharge });
   } catch (e) {
     console.error(String(e));
     return json({ error: String(e) }, 500);

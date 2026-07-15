@@ -23,13 +23,14 @@ struct LastMessage: Codable {
     let content: String
     let role: String
     let createdAt: String
-    /// "text" | "image" — DB `messages.kind` sütunuyla aynı. Yerel (cihaz)
-    /// mesajlarından türetilirken `Message.imageURL` varlığına göre elle
-    /// set edilir (bkz. ChatListView.load()).
+    /// "text" | "image" | "voice" — DB `messages.kind` sütunuyla aynı ("voice"
+    /// yereldir). Yerel (cihaz) mesajlarından türetilirken medya bayraklarına
+    /// göre elle set edilir (bkz. ChatListView.load()).
     let kind: String?
 
     var isUser: Bool { role == "user" }
     var isImage: Bool { kind == "image" }
+    var isVoice: Bool { kind == "voice" }
 
     var date: Date? {
         let f = ISO8601DateFormatter()

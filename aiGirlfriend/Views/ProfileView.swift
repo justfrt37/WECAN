@@ -23,7 +23,6 @@ struct ProfileView: View {
     @State private var showDevEditCharacter = false
 
     // Ayarlar (eski SettingsView'den buraya taşındı)
-    @State private var appLock = UserDefaults.standard.bool(forKey: "settings.appLock")
     @State private var notificationsOn = false
     @State private var showDeleteConfirm = false
 
@@ -134,7 +133,6 @@ struct ProfileView: View {
             .padding(.top, 6)
 
             notificationsCard
-            lockCard
 
             ShareLink(item: shareURL) {
                 row("Arkadaşına Öner", trailingIcon: "square.and.arrow.up")
@@ -142,7 +140,21 @@ struct ProfileView: View {
             .buttonStyle(.plain)
 
             Button { requestReview() } label: {
-                row("Bizi Değerlendir", trailingIcon: "heart.fill", trailingTint: Color(hex: 0xFF5A6A))
+                HStack {
+                    Text("Bizi Değerlendir")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundStyle(.white)
+                    Spacer()
+                    // Tek altın yıldız (bkz. kullanıcı talebi).
+                    Image(systemName: "star.fill")
+                        .font(.system(size: 16))
+                        .foregroundStyle(Color(hex: 0xFFC24B))
+                }
+                .padding(.horizontal, 20)
+                .frame(height: 66)
+                .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: cardRadius))
+                .overlay(RoundedRectangle(cornerRadius: cardRadius).strokeBorder(.white.opacity(0.10), lineWidth: 1))
+                .contentShape(RoundedRectangle(cornerRadius: cardRadius))
             }
             .buttonStyle(.plain)
 
@@ -161,47 +173,19 @@ struct ProfileView: View {
                 .font(.system(size: 16, weight: .medium))
                 .foregroundStyle(.white)
             Spacer()
+            // Sadece toggle — sağa doğru ok (konuştuğun kişilerin bildirim
+            // ayarları ekranına giden chevron) kaldırıldı (bkz. kullanıcı talebi).
             Toggle("", isOn: $notificationsOn)
                 .labelsHidden()
                 .tint(AppColor.pink)
                 .onChange(of: notificationsOn) { _, wantsOn in
                     Task { await handleNotificationToggle(wantsOn) }
                 }
-            NavigationLink { NotificationSettingsView() } label: {
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.4))
-            }
-            .frame(width: 24, height: 24)
         }
         .padding(.horizontal, 20)
         .frame(height: 66)
         .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: cardRadius))
         .overlay(RoundedRectangle(cornerRadius: cardRadius).strokeBorder(.white.opacity(0.10), lineWidth: 1))
-    }
-
-    private var lockCard: some View {
-        HStack(spacing: 14) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Uygulama Kilidi")
-                    .font(.system(size: 17, weight: .bold))
-                    .foregroundStyle(.white)
-                Text("Face ID veya parmak izi ile uygulamayı kilitle")
-                    .font(.system(size: 13))
-                    .foregroundStyle(.white.opacity(0.55))
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            Spacer(minLength: 8)
-            Toggle("", isOn: $appLock)
-                .labelsHidden()
-                .tint(AppColor.pink)
-                .onChange(of: appLock) { _, v in
-                    UserDefaults.standard.set(v, forKey: "settings.appLock")
-                }
-        }
-        .padding(18)
-        .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 22))
-        .overlay(RoundedRectangle(cornerRadius: 22).strokeBorder(.white.opacity(0.10), lineWidth: 1))
     }
 
     private func row(_ title: String, trailingIcon: String? = nil, trailingTint: Color = .white.opacity(0.8)) -> some View {

@@ -2,8 +2,9 @@
 //  ChatViewModel.swift
 //  Sohbet ekranının durumunu yönetir.
 //  Tüm karakterler için: geçmiş cihazda, yerel özetler (her 20 mesajda bir).
-//  XP/terfi hesabı istemcide (bkz. RelationshipXP) — sunucu yalnızca güncel
-//  `relationship_level` değerini saklar/döner.
+//  XP/seviye/terfi hesabı artık SUNUCUDA (bkz. chat/index.ts
+//  applyRelationshipGain) — istemci cevaptaki `level`/`levelProgress` değerlerini
+//  sadece gösterir/saklar, kurcalayamaz. (Eski istemci mantığı: RelationshipXP.swift.)
 //
 
 import Foundation
@@ -90,8 +91,10 @@ final class ChatViewModel {
     }
 
     var canSend: Bool {
-        !inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && !isSending && !isLoadingHistory
+        let hasText = !inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        // Sesli/foto modunda metin ZORUNLU değil — boşsa varsayılan "Sesli mesaj
+        // gönder"/"Fotoğraf gönder" metniyle gönderilir (bkz. sendVoiceRequest/sendImageRequest).
+        return (hasText || isVoiceArmed || isImageArmed) && !isSending && !isLoadingHistory
     }
 
     // MARK: - Geçmişi yükle
@@ -249,7 +252,8 @@ final class ChatViewModel {
                 messages.append(Message(role: .assistant, content: result.reply))
                 handleTokenBalance(result.tokenBalance)
 
-                applyPostReplyEffects(gotPhoto: nil, stored: stored)
+                applyPostReplyEffects(gotPhoto: nil, stored: stored,
+                                      serverLevel: result.level, serverProgress: result.levelProgress)
 
                 if result.wentToSleep {
                     var updated = LocalConversationStore.shared.load(for: character.id) ?? stored
@@ -338,7 +342,8 @@ final class ChatViewModel {
 
                 messages.append(Message(role: .assistant, content: result.reply))
                 handleTokenBalance(result.tokenBalance)
-                applyPostReplyEffects(gotPhoto: nil, stored: stored)
+                applyPostReplyEffects(gotPhoto: nil, stored: stored,
+                                      serverLevel: result.level, serverProgress: result.levelProgress)
 
                 if result.wentToSleep {
                     var updated = LocalConversationStore.shared.load(for: character.id) ?? stored
@@ -411,9 +416,9 @@ final class ChatViewModel {
 
                 messages.append(Message(role: .assistant, content: result.reply))
                 handleTokenBalance(result.tokenBalance)
-                // `gotPhoto: nil` — bu bir GELEN fotoğraf, botun kendi ürettiği
-                // fotoğraf XP olayı (RelationshipXP.photoGainFraction) DEĞİL.
-                applyPostReplyEffects(gotPhoto: nil, stored: stored)
+                // `gotPhoto: nil` — bu bir GELEN fotoğraf. Seviye/ilerleme sunucudan gelir.
+                applyPostReplyEffects(gotPhoto: nil, stored: stored,
+                                      serverLevel: result.level, serverProgress: result.levelProgress)
 
                 if result.wentToSleep {
                     var updated = LocalConversationStore.shared.load(for: character.id) ?? stored
@@ -460,6 +465,12 @@ final class ChatViewModel {
     var generatingImageMessageIDs: Set<UUID> = []
     var generatingVoiceMessageIDs: Set<UUID> = []
 
+    /// Sesli mesaj isteğinden HEMEN sonra ~3 sn süren "hazırlanıyor" durumu —
+    /// balon önce yanıp sönen mikrofonla (karakter kaydediyormuş hissi)
+    /// görünür, sonra kilitli (kalp/token maliyeti) hâle geçer, ancak ondan
+    /// SONRA dokunulup web isteği atılabilir (bkz. sendVoiceRequest / PendingVoiceBubble).
+    var preparingVoiceMessageIDs: Set<UUID> = []
+
     /// "Şu an ne yapıyor" — ScheduleLookup ile yerelden hesaplanır, ağ
     /// çağrısı gerektirmez. `nil` = henüz rutin üretilmedi ya da eşleşen
     /// blok yok (chat header bu durumda "Online" göstermeye devam eder).
@@ -471,16 +482,30 @@ final class ChatViewModel {
     /// tahsili SADECE o balona dokununca olur (bkz. generatePendingVoice) —
     /// bu sayede kullanıcı önce token maliyetini görüp sonra karar verir.
     func sendVoiceRequest() {
-        let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, !isSending, !isLoadingHistory else { return }
+        guard !isSending, !isLoadingHistory else { return }
+        let typed = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Kullanıcı bir şey yazmadıysa varsayılan metin: "Sesli mesaj gönder"
+        // (buton etiketiyle aynı) — mesaj balonunda bu görünür.
+        let text = typed.isEmpty ? String(localized: "Send me a voice") : typed
 
+        let pendingID = UUID()
         messages.append(Message(role: .user, content: text))
-        messages.append(Message(role: .assistant, content: "", pendingVoiceRequest: true))
+        messages.append(Message(id: pendingID, role: .assistant, content: "", pendingVoiceRequest: true))
         updateCache()
         NotificationScheduler.shared.noteUserSent(character: character)
         inputText = ""
         isVoiceArmed = false
         errorMessage = nil
+
+        // ~3 sn "hazırlanıyor" (yanıp sönen mikrofon) — sonra kalp/kilit
+        // animasyonlu belirir (bkz. PendingVoiceBubble transition).
+        preparingVoiceMessageIDs.insert(pendingID)
+        Task {
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
+                preparingVoiceMessageIDs.remove(pendingID)
+            }
+        }
     }
 
     /// Bir "ödeme bekleyen" sesli mesaj balonuna dokununca — bot cevabını
@@ -490,21 +515,25 @@ final class ChatViewModel {
     func generatePendingVoice(for messageID: UUID) {
         guard let idx = messages.firstIndex(where: { $0.id == messageID }),
               messages[idx].isPendingVoice,
-              !generatingVoiceMessageIDs.contains(messageID)
+              !generatingVoiceMessageIDs.contains(messageID),
+              // Hâlâ "hazırlanıyor" (yanıp sönen mikrofon) aşamasındaysa henüz
+              // dokunulup üretilemez — önce kilitli hâle geçmeli.
+              !preparingVoiceMessageIDs.contains(messageID)
         else { return }
         guard let userMessageIdx = messages[..<idx].lastIndex(where: { $0.role == .user }) else { return }
         let text = messages[userMessageIdx].content
         let lastMessageAt = userMessageIdx > 0 ? messages[userMessageIdx - 1].createdAt : nil
 
+        // Bu pending balon YERİNDE güncellenir (kendi "üretiliyor" durumunu
+        // gösterir) — en altta AYRI bir "yazıyor/ses" balonu ÇIKMAZ. Aksi hâlde
+        // araya başka mesaj (ör. foto) girmişse gösterge yanlış yerde, en altta
+        // beliriyordu (bkz. kullanıcı talebi: "en altta ses kayıt çıkıyor").
         generatingVoiceMessageIDs.insert(messageID)
         isSending = true
         errorMessage = nil
 
         Task {
             await handleWakeUpIfAsleep()
-            showsTypingBubble = true
-            isSendingVoiceReply = true
-            store?.setTyping(character.id, true)
             let bubbleStartedAt = Date()
 
             do {
@@ -547,35 +576,22 @@ final class ChatViewModel {
                     handleTokenBalance(tokenBalance)
                 case .insufficientTokens:
                     generatingVoiceMessageIDs.remove(messageID)
-                    showsTypingBubble = false
-                    isSendingVoiceReply = false
-                    store?.setTyping(character.id, false)
                     errorMessage = String(localized: "Not enough tokens. Get more to keep chatting.")
                     isSending = false
                     return
                 case .failure:
                     generatingVoiceMessageIDs.remove(messageID)
-                    showsTypingBubble = false
-                    isSendingVoiceReply = false
-                    store?.setTyping(character.id, false)
                     errorMessage = String(localized: "Voice message failed to generate.")
                     isSending = false
                     return
                 }
                 guard let savedPath = VoicePlayer.saveVoiceMessage(audioData, messageID: messageID) else {
                     generatingVoiceMessageIDs.remove(messageID)
-                    showsTypingBubble = false
-                    isSendingVoiceReply = false
-                    store?.setTyping(character.id, false)
                     errorMessage = String(localized: "Voice message failed to generate.")
                     isSending = false
                     return
                 }
                 let duration = (try? AVAudioPlayer(data: audioData))?.duration
-
-                showsTypingBubble = false
-                isSendingVoiceReply = false
-                store?.setTyping(character.id, false)
 
                 if let finalIdx = messages.firstIndex(where: { $0.id == messageID }) {
                     messages[finalIdx].content = cleanedReply
@@ -591,9 +607,6 @@ final class ChatViewModel {
                 errorMessage = isInsufficientTokensError(error)
                     ? String(localized: "Not enough tokens. Get more to keep chatting.")
                     : error.localizedDescription
-                showsTypingBubble = false
-                isSendingVoiceReply = false
-                store?.setTyping(character.id, false)
             }
             isSending = false
         }
@@ -610,8 +623,11 @@ final class ChatViewModel {
     /// Asıl üretim + 25 token tahsili SADECE o balona dokununca olur (bkz.
     /// generatePendingImage).
     func sendImageRequest() {
-        let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, !isSending, !isLoadingHistory else { return }
+        guard !isSending, !isLoadingHistory else { return }
+        let typed = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Kullanıcı bir şey yazmadıysa varsayılan metin: "Fotoğraf gönder"
+        // (buton etiketiyle aynı) — mesaj balonunda bu görünür, tarif olarak da kullanılır.
+        let text = typed.isEmpty ? String(localized: "Send me a photo") : typed
 
         messages.append(Message(role: .user, content: text))
         updateCache()
@@ -674,8 +690,10 @@ final class ChatViewModel {
                 // `imageResult.redirected` true ise (orijinal istek reddedilip
                 // yumuşatılmış bir fotoğrafla değiştirildi) normal tepki yerine
                 // doğal bir yönlendirme cevabı istenir (bkz. IMAGE_REDIRECT_RULE).
+                // Fotoğraftan SONRA gelen metin tepkisi normal "yazıyor" 3-nokta
+                // balonuyla gösterilir (foto üretim spinner'ı DEĞİL) — bkz.
+                // kullanıcı talebi: "foto altına mesaj gelince typing olmalı".
                 showsTypingBubble = true
-                isSendingImageReply = true
                 store?.setTyping(character.id, true)
                 let bubbleStartedAt = Date()
                 let realMsgs = realMessages()
@@ -774,29 +792,31 @@ final class ChatViewModel {
     /// `send()` ve `sendVoiceRequest()` ortak kuyruğu: XP/terfi hesabı,
     /// cache güncelleme, özetleme tetikleme. `gotPhoto` sesli mesaj yolunda
     /// her zaman nil (fotoğraf isteği metin mesajlarına özgü).
-    private func applyPostReplyEffects(gotPhoto: URL?, stored: LocalConversationStore.Stored?) {
+    /// Seviye/ilerleme/XP kazanımı SUNUCUDA hesaplanır (bkz. chat/index.ts
+    /// applyRelationshipGain) — istemci yalnızca sunucunun cevapta döndürdüğü
+    /// `serverLevel`/`serverProgress` değerlerini uygular. Kurcalanamaz. Sunucu
+    /// değer döndürmediyse (ör. ses/foto yolu) seviye değiştirilmez.
+    private func applyPostReplyEffects(
+        gotPhoto: URL?,
+        stored: LocalConversationStore.Stored?,
+        serverLevel: Int? = nil,
+        serverProgress: Double? = nil
+    ) {
         let counter = (stored?.msgCounter ?? 0) + 1
-        var fraction = 0.0
-        if counter % RelationshipXP.messageBatchSize == 0 {
-            fraction += RelationshipXP.messageGainFraction(forLevel: relationshipLevel)
+
+        if let serverLevel {
+            let previousLevel = relationshipLevel
+            if serverLevel > previousLevel {
+                levelUpEvent = LevelUpEvent(
+                    fromLevel: previousLevel,
+                    toLevel: serverLevel,
+                    fromStage: Relationship.stageName(previousLevel, role: character.personalityRole),
+                    toStage: Relationship.stageName(serverLevel, role: character.personalityRole)
+                )
+            }
+            relationshipLevel = serverLevel
+            if let serverProgress { levelProgress = serverProgress }
         }
-        if gotPhoto != nil {
-            fraction += RelationshipXP.photoGainFraction(forLevel: relationshipLevel)
-        }
-        let previousLevel = relationshipLevel
-        let (newLevel, newProgress) = RelationshipXP.applyGain(
-            fraction, level: relationshipLevel, progress: levelProgress
-        )
-        if newLevel > previousLevel {
-            levelUpEvent = LevelUpEvent(
-                fromLevel: previousLevel,
-                toLevel: newLevel,
-                fromStage: Relationship.stageName(previousLevel, role: character.personalityRole),
-                toStage: Relationship.stageName(newLevel, role: character.personalityRole)
-            )
-        }
-        relationshipLevel = newLevel
-        levelProgress = newProgress
 
         updateCache(msgCounter: counter)
         if isVisible { markReadNow() }

@@ -66,6 +66,7 @@ struct ChatListView: View {
                         }
                         .padding(.bottom, 100) // tab bar boşluğu
                     }
+                    .scrollIndicators(.hidden)
                 }
             }
         }
@@ -119,7 +120,7 @@ struct ChatListView: View {
             let last: LastMessage? = displayMessages.last.map {
                 LastMessage(conversationID: conv.id, content: $0.content,
                             role: $0.role.rawValue, createdAt: Self.iso8601.string(from: $0.createdAt),
-                            kind: $0.imageURL != nil ? "image" : "text")
+                            kind: Self.previewKind(for: $0))
             }
             return ChatItem(character: ch, conversationID: conv.id,
                             last: last, unread: unread, updatedAt: conv.updatedAt)
@@ -138,7 +139,7 @@ struct ChatListView: View {
             let last: LastMessage? = localStored.messages.last.map {
                 LastMessage(conversationID: charID, content: $0.content,
                             role: $0.role.rawValue, createdAt: Self.iso8601.string(from: $0.createdAt),
-                            kind: $0.imageURL != nil ? "image" : "text")
+                            kind: Self.previewKind(for: $0))
             }
             items.append(ChatItem(character: ch, conversationID: charID,
                                    last: last, unread: unread, updatedAt: nil))
@@ -168,6 +169,15 @@ struct ChatListView: View {
         f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return f
     }()
+
+    /// Son-mesaj önizleme türü — foto (üretilmiş/ödeme bekleyen/kullanıcı
+    /// fotosu) ve ses (üretilmiş/ödeme bekleyen) dahil. Liste satırında
+    /// WhatsApp gibi "📷 Fotoğraf" / "🎤 Sesli mesaj" göstermek için (bkz. subtitle).
+    private static func previewKind(for m: Message) -> String {
+        if m.isVoice || m.isPendingVoice { return "voice" }
+        if m.imageURL != nil || m.isPendingImage || m.isUserPhoto { return "image" }
+        return "text"
+    }
 
     // MARK: Header
 
@@ -341,10 +351,17 @@ private struct ChatHistoryRow: View {
                 .foregroundStyle(AppColor.pink)
         } else if let last = item.last {
             Group {
-                if last.isImage {
+                if last.isVoice {
+                    // WhatsApp gibi: 🎤 Sesli mesaj
+                    HStack(spacing: 4) {
+                        Image(systemName: "mic.fill")
+                        Text(last.isUser ? "You: \(String(localized: "Voice message"))" : String(localized: "Voice message"))
+                    }
+                } else if last.isImage {
+                    // WhatsApp gibi: 📷 Fotoğraf
                     HStack(spacing: 4) {
                         Image(systemName: "camera.fill")
-                        Text(last.isUser ? "You: \(String(localized: "Image"))" : String(localized: "Image"))
+                        Text(last.isUser ? "You: \(String(localized: "Photo"))" : String(localized: "Photo"))
                     }
                 } else if last.isUser {
                     Text("You: \(last.content)")

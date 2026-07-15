@@ -1,7 +1,9 @@
 //
 //  RelationshipXP.swift
-//  İlişki seviyesi terfi mantığı — istemcide hesaplanır (eskiden chat edge
-//  function'daydı). Sunucu sadece güncel `relationship_level` değerini saklar/döner.
+//  DEPRECATED (2026-07): İlişki seviyesi/terfi hesabı yeniden SUNUCUYA taşındı
+//  (bkz. supabase/functions/chat/index.ts — gainPercent/perMessageFraction/
+//  applyRelationshipGain). Bu dosya artık çağrılmıyor; eğri referansı olarak
+//  duruyor (sunucudaki TS portu bununla birebir aynı). Silinebilir.
 //
 //  Model: XP artık kümülatif bir sayı değil, "şu anki seviyenin ne kadarı
 //  tamamlandı" (0...1) şeklinde bir ORAN. Her mesaj-batch'i (5 mesajda bir) veya

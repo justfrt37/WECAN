@@ -15,12 +15,14 @@ struct ChatView: View {
     @Environment(TokenStore.self) private var tokenStore
 
     @State private var showProfile = false
+    @State private var showTokenStore = false
     @State private var addSheetKind: NoteKind?
     @State private var showBlockConfirm = false
     @State private var isBlocked: Bool
     @State private var recognizer = SpeechRecognizer()
     @State private var voice = VoicePlayer()
     @State private var didPrefill = false
+    @State private var readyToAutoScroll = false
     @State private var levelUpBanner: ChatViewModel.LevelUpEvent?
     @State private var avatarPulse = false
     /// Bir mesaja dokununca saatini göster — tekrar dokununca gizlenir.
@@ -117,10 +119,14 @@ struct ChatView: View {
         .task {
             await viewModel.startActivityRefreshLoop()
         }
-        .fullScreenCover(isPresented: $showProfile) {
-            CharacterProfileView(character: viewModel.character)
+        .fullScreenCover(isPresented: $showTokenStore) {
+            TokenStoreView(tokenStore: tokenStore)
         }
-        .sheet(isPresented: $viewModel.showPaywall) { PaywallHostView() }
+        .fullScreenCover(isPresented: $showProfile) {
+            CharacterProfileView(character: viewModel.character, showsChatButton: false)
+        }
+        // PRO gerektiren her yerde onboarding paywall'ı (alttan fullscreen) açılır.
+        .fullScreenCover(isPresented: $viewModel.showPaywall) { OnboardingPaywallView() }
         .fullScreenCover(isPresented: Binding(
             get: { fullscreenImageURL != nil },
             set: { if !$0 { fullscreenImageURL = nil } }
@@ -262,20 +268,28 @@ struct ChatView: View {
                                     Text(headerStatusLabel)
                                         .font(.system(size: 12, weight: .medium))
                                         .foregroundStyle(.white.opacity(0.6))
-                                        // "…" ile KISA KESİLMESİN — tam görünsün (gerekirse alta sarar).
-                                        .fixedSize(horizontal: false, vertical: true)
+                                        // Tek satır; uzunsa "…" değil, font küçülerek sığar (alta kaymaz).
+                                        .lineLimit(1)
+                                        .minimumScaleFactor(0.7)
                                 }
                             }
                             Text("Level \(viewModel.relationshipLevel) · \(viewModel.relationshipStage)")
                                 .font(.system(size: 11, weight: .semibold))
                                 .foregroundStyle(AppColor.pinkSoft)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.7)
                         }
                     }
                 }
                 .buttonStyle(.plain)
+                // İsim/durum bloğuna kalan genişliği ver → uzun aşama isimleri
+                // alta sarmak yerine font küçülterek tek satırda sığar.
+                .frame(maxWidth: .infinity, alignment: .leading)
 
-                Spacer()
-
+                // Coin (token) rozeti + Ayarlar AYNI HStack'te → doğal olarak aynı
+                // hizada. Sohbette global overlay rozeti gizli (bkz. MainTabView),
+                // çift rozet olmasın diye burada gösteriliyor.
+                TokenBadge(tokenStore: tokenStore) { showTokenStore = true }
                 headerButton("gearshape.fill", menu: true)
             }
             .opacity(levelUpBanner == nil ? 1 : 0)
@@ -397,6 +411,7 @@ struct ChatView: View {
                 // mesajlar görünmez kalıyordu, sadece yukarı kaydırınca ortaya
                 // çıkıyordu. Sohbet geçmişi telefon ekranı için zaten sınırlı
                 // boyutta (bkz. LocalConversationStore) — hepsini baştan ölçmek ucuz.
+                VStack(spacing: 0) {
                 VStack(spacing: 10) {
                     ForEach(viewModel.messages) { message in
                         ChatBubble(message: message,
@@ -412,18 +427,24 @@ struct ChatView: View {
                             } else {
                                 voice.speak(message.content, id: message.id)
                             }
-                        }, isVoicePlaying: voice.speakingMessageID == message.id, onPlayVoice: {
-                            if voice.speakingMessageID == message.id {
-                                voice.stop()
-                            } else if let path = message.voiceLocalPath {
-                                voice.playFile(at: path, id: message.id)
+                        }, isVoicePlaying: voice.isPlaying && voice.speakingMessageID == message.id,
+                           voiceIsActive: voice.speakingMessageID == message.id,
+                           voiceProgress: voice.speakingMessageID == message.id ? voice.playbackProgress : 0,
+                           voiceElapsed: voice.speakingMessageID == message.id ? voice.playbackElapsed : 0,
+                           onPlayVoice: {
+                            // Çalıyorsa duraklat, duraklatılmışsa devam, değilse baştan çal.
+                            if let path = message.voiceLocalPath {
+                                voice.togglePlay(at: path, id: message.id)
                             }
+                        }, onVoiceSeek: { frac in
+                            if voice.speakingMessageID == message.id { voice.seek(to: frac) }
                         }, onTapImage: { url in
                             fullscreenImageURL = url
                         }, onTapLocalImage: { image in
                             fullscreenLocalImage = image
                         }, isGeneratingImage: viewModel.generatingImageMessageIDs.contains(message.id),
                            isGeneratingVoice: viewModel.generatingVoiceMessageIDs.contains(message.id),
+                           isPreparingVoice: viewModel.preparingVoiceMessageIDs.contains(message.id),
                            onGenerateImage: { viewModel.generatePendingImage(for: message.id) },
                            onGenerateVoice: { viewModel.generatePendingVoice(for: message.id) },
                            characterPhotoURL: viewModel.character.photoURL)
@@ -448,44 +469,64 @@ struct ChatView: View {
                         }
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.horizontal, 16)
+                            // "Yazıyor" balonu zemine fazla yapışmasın — mesajların
+                            // 5pt alt boşluğuna ek 4pt (bkz. kullanıcı talebi).
+                            .padding(.bottom, 4)
                             .id("typing")
                     }
                 }
-                .padding(.vertical, 12)
+                .padding(.top, 12)
+                // Son mesaj ile zemin arası boşluk AYRI görünmez çapa olarak durur;
+                // otomatik-kaydırma buna hizalanır (scrollTo("bottomAnchor")), böylece
+                // boşluk "katlanmanın altında" kaybolmaz — özellikle bot mesajında.
+                Color.clear.frame(height: 45).id("bottomAnchor")
+                }
+                // Kısa içerik (ör. ilk mesaj) doğal olarak ÜSTTEN başlar → header'a
+                // dayanır. Uzun geçmiş açılışta programatik olarak dibe konumlanır.
+                .frame(maxWidth: .infinity, alignment: .top)
             }
-            .defaultScrollAnchor(.bottom)   // ilk girişte en altta başla
-            .onChange(of: viewModel.messages.count) { scrollToBottom(proxy) }
-            .onChange(of: viewModel.showsTypingBubble) { scrollToBottom(proxy) }
-            .onChange(of: viewModel.isLoadingHistory) {
-                if !viewModel.isLoadingHistory { scrollToBottom(proxy) }
+            // NOT: defaultScrollAnchor(.bottom) KULLANILMIYOR — yukarı kaydırırken
+            // dibe yeniden tutunup titremeye (zıplama) yol açıyordu (bkz. kullanıcı
+            // talebi). Onun yerine: açılışta animasyonsuz, yeni mesajda animasyonlu
+            // programatik kaydırma.
+            .scrollIndicators(.hidden)
+            .onChange(of: viewModel.messages.count) {
+                if readyToAutoScroll {
+                    scrollToBottom(proxy)
+                    // Foto gibi UZUN balonlar yerleştikten sonra tekrar dibe kay.
+                    Task {
+                        try? await Task.sleep(nanoseconds: 300_000_000)
+                        if readyToAutoScroll { scrollToBottom(proxy) }
+                    }
+                } else {
+                    // İlk yükleme (geçmiş): animasyonsuz dibe konumlan.
+                    scrollToBottomInstant(proxy)
+                }
+            }
+            .onChange(of: viewModel.showsTypingBubble) {
+                if readyToAutoScroll { scrollToBottom(proxy) }
             }
             .onAppear {
-                // LazyVStack ilk çizimde tüm satırları ölçmediği için
-                // `.defaultScrollAnchor(.bottom)` tek başına güvenilir değil —
-                // mesajlar görünmez kalıp sadece yukarı kaydırınca ortaya
-                // çıkıyordu. Animasyonsuz zorla kaydır, sonra layout oturunca tekrar dene.
-                scrollToBottomInstant(proxy)
                 Task {
-                    try? await Task.sleep(nanoseconds: 200_000_000)
+                    // İçerik otursun; geçmiş varsa animasyonsuz dibe konumlan,
+                    // sonra otomatik-kaydırmayı aç.
+                    try? await Task.sleep(nanoseconds: 350_000_000)
                     scrollToBottomInstant(proxy)
+                    readyToAutoScroll = true
                 }
             }
         }
     }
 
     private func scrollToBottomInstant(_ proxy: ScrollViewProxy) {
-        if let last = viewModel.messages.last {
-            proxy.scrollTo(last.id, anchor: .bottom)
-        }
+        proxy.scrollTo("bottomAnchor", anchor: .bottom)
     }
 
     private func scrollToBottom(_ proxy: ScrollViewProxy) {
         withAnimation {
-            if viewModel.isSending {
-                proxy.scrollTo("typing", anchor: .bottom)
-            } else if let last = viewModel.messages.last {
-                proxy.scrollTo(last.id, anchor: .bottom)
-            }
+            // Padding'in ALTINDAki görünmez çapaya hizala — son mesaj/typing
+            // balonu 45pt boşlukla birlikte görünür kalsın (bkz. bottomAnchor).
+            proxy.scrollTo("bottomAnchor", anchor: .bottom)
         }
     }
 
@@ -513,15 +554,18 @@ struct ChatView: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
-        .background(AppColor.card.opacity(0.6))
+        // Üst köşeler yuvarlatılır (sol-üst + sağ-üst), alt köşeler düz.
+        .background(
+            AppColor.card.opacity(0.6),
+            in: .rect(topLeadingRadius: 12, topTrailingRadius: 12)
+        )
     }
 
     private func modeButton(icon: String, label: String, isArmed: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            HStack(spacing: 6) {
-                Image(systemName: icon).font(.system(size: 18))
-                Text(label).font(.system(size: 13, weight: .semibold))
-            }
+            Text(label).font(.system(size: 13, weight: .semibold))
+            .lineLimit(1)
+            .minimumScaleFactor(0.6)
             .foregroundStyle(isArmed ? AppColor.amber : .white.opacity(0.85))
             .padding(.horizontal, 14).frame(height: 34)
             .frame(maxWidth: .infinity)
@@ -683,11 +727,16 @@ private struct ChatBubble: View {
     var onTap: (() -> Void)? = nil
     var onSpeak: (() -> Void)? = nil
     var isVoicePlaying: Bool = false
+    var voiceIsActive: Bool = false
+    var voiceProgress: Double = 0
+    var voiceElapsed: Double = 0
     var onPlayVoice: (() -> Void)? = nil
+    var onVoiceSeek: ((Double) -> Void)? = nil
     var onTapImage: ((URL) -> Void)? = nil
     var onTapLocalImage: ((UIImage) -> Void)? = nil
     var isGeneratingImage: Bool = false
     var isGeneratingVoice: Bool = false
+    var isPreparingVoice: Bool = false
     var onGenerateImage: (() -> Void)? = nil
     var onGenerateVoice: (() -> Void)? = nil
     /// Ödeme bekleyen foto balonunun bulanık arka planı — karakterin KENDİ
@@ -715,10 +764,15 @@ private struct ChatBubble: View {
                                     isGenerating: isGeneratingImage,
                                     onTap: { onGenerateImage?() })
             } else if message.isPendingVoice {
-                PendingVoiceBubble(isGenerating: isGeneratingVoice,
+                PendingVoiceBubble(isPreparing: isPreparingVoice,
+                                    isGenerating: isGeneratingVoice,
                                     onTap: { onGenerateVoice?() })
             } else if message.isVoice {
-                VoiceMessageBubble(message: message, isUser: message.isUser, isPlaying: isVoicePlaying, onTap: { onPlayVoice?() })
+                VoiceMessageBubble(message: message, isUser: message.isUser, isPlaying: isVoicePlaying,
+                                   isActive: voiceIsActive,
+                                   progress: voiceProgress, elapsed: voiceElapsed,
+                                   onTap: { onPlayVoice?() },
+                                   onSeek: { frac in onVoiceSeek?(frac) })
             } else if let localPath = message.localImagePath,
                       let localImage = UserPhotoStore.loadUserPhoto(relativePath: localPath) {
                 // Kullanıcının BOTA gönderdiği kendi fotoğrafı — hiç yüklenmedi,
@@ -751,19 +805,24 @@ private struct ChatBubble: View {
                 ZStack {
                     CachedImage(url: imageURL) { img in
                         img.resizable().scaledToFill()
-                    } placeholder: { AppColor.card }
+                    } placeholder: {
+                        // Foto açılırken (henüz yüklenmediyse) progress dönsün.
+                        ZStack {
+                            AppColor.card
+                            ProgressView().tint(.white)
+                        }
+                    }
                     .frame(width: 220, height: 260)
                     .clipped()
                     .blur(radius: imageRevealed ? 0 : 26)
 
                     if !imageRevealed {
                         Color.black.opacity(0.25)
-                        VStack(spacing: 6) {
-                            Text("👀").font(.system(size: 30))
-                            Text("Tap to view")
-                                .font(.system(size: 13, weight: .bold))
-                                .foregroundStyle(.white)
-                        }
+                        Text("Tap to view")
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundStyle(.black)
+                            .padding(.horizontal, 16).padding(.vertical, 8)
+                            .background(.white, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                     }
                 }
                 .frame(width: 220, height: 260)
@@ -795,19 +854,6 @@ private struct ChatBubble: View {
 
             if showsTimestamp, !message.isUser {
                 timestampLabel
-            }
-
-            // Kızın mesajını seslendir (oynat/durdur)
-            if !message.isUser, message.imageURL == nil, !message.isVoice,
-               !message.isPendingImage, !message.isPendingVoice, let onSpeak {
-                Button(action: onSpeak) {
-                    Image(systemName: isSpeaking ? "stop.circle.fill" : "speaker.wave.2.fill")
-                        .font(.system(size: 16))
-                        .foregroundStyle(AppColor.pink)
-                        .frame(width: 30, height: 30)
-                        .background(.white.opacity(0.08), in: Circle())
-                }
-                .buttonStyle(.plain)
             }
 
             if !message.isUser { Spacer(minLength: 50) }
@@ -922,18 +968,21 @@ private struct PendingImageBubble: View {
             if isGenerating {
                 ImagePendingIndicator()
             } else {
+                // "25 ♥" + "Görmek için dokun" AYNI beyaz dikdörtgen içinde
+                // (bkz. kullanıcı talebi). Maliyet üstte, metin altta; hepsi siyah.
                 VStack(spacing: 6) {
-                    Text("👀").font(.system(size: 30))
-                    Text("Tap to view")
-                        .font(.system(size: 13, weight: .bold))
-                        .foregroundStyle(.white)
                     HStack(spacing: 4) {
                         Text("25")
                             .font(.system(size: 13, weight: .heavy))
-                            .foregroundStyle(AppColor.amber)
+                            .foregroundStyle(.black)
                         CoinIcon(size: 14)
                     }
+                    Text("Tap to view")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundStyle(.black)
                 }
+                .padding(.horizontal, 16).padding(.vertical, 10)
+                .background(.white, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
         }
         .frame(width: 220, height: 260)
@@ -948,34 +997,61 @@ private struct PendingImageBubble: View {
 /// sentezlenmedi, bkz. Message.pendingVoiceRequest). Dokununca `onTap`
 /// (ChatViewModel.generatePendingVoice) tetiklenir.
 private struct PendingVoiceBubble: View {
+    /// İstekten hemen sonraki ~3 sn "hazırlanıyor" (karakter kaydediyormuş
+    /// hissi) — yanıp sönen mikrofon, henüz dokunulamaz (bkz. ChatViewModel
+    /// .preparingVoiceMessageIDs).
+    let isPreparing: Bool
     let isGenerating: Bool
     let onTap: () -> Void
 
+    /// Sesli mesaj maliyeti (token). Sunucudaki tahsille (voice-message-tts)
+    /// aynı — orası kaynak-doğru; burada gösterim için ayna.
+    private let coinCost = 12
+
+    /// Hazırlanırken/üretilirken yanıp sönen kayıt ikonu için.
+    @State private var blink = false
+
     var body: some View {
         HStack(spacing: 10) {
-            Image(systemName: isGenerating ? "waveform" : "lock.fill")
-                .font(.system(size: 16))
-                .foregroundStyle(AppColor.amber)
-
-            if isGenerating {
-                VoicePendingIndicator()
-            } else {
-                HStack(spacing: 3) {
-                    ForEach(0..<10, id: \.self) { _ in
-                        Capsule().fill(.white.opacity(0.25)).frame(width: 2.5, height: 10)
+            if isPreparing || isGenerating {
+                // Kayıt ikonu balonun İÇİNDE yanıp söner (önce ~3 sn hazırlanıyor,
+                // sonra dokununca üretim) — bittiğinde WhatsApp tarzı sesli mesaja
+                // dönüşür (bkz. kullanıcı talebi).
+                Image(systemName: "mic.fill")
+                    .font(.system(size: 22))
+                    .foregroundStyle(AppColor.pink)
+                    .opacity(blink ? 1 : 0.25)
+                    .onAppear {
+                        withAnimation(.easeInOut(duration: 0.65).repeatForever(autoreverses: true)) {
+                            blink = true
+                        }
                     }
+                    // Kilitli aşamada mikrofon kaybolunca sıfırla — satın almaya
+                    // basıp üretim başlayınca tekrar görününce yeniden yanıp sönsün
+                    // (bkz. kullanıcı talebi).
+                    .onDisappear { blink = false }
+            } else {
+                // PLAY tuşunun yerinde maliyet rozeti — beyaz zemin, sayı + kalp.
+                // Mikrofondan SONRA animasyonlu belirir (bkz. sendVoiceRequest
+                // withAnimation + kullanıcı talebi).
+                HStack(spacing: 3) {
+                    Text("\(coinCost)")
+                        .font(.system(size: 14, weight: .heavy))
+                        .foregroundStyle(.black)
+                    CoinIcon(size: 15)
                 }
-                Text("0:––")
-                    .font(.system(size: 12, weight: .medium, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.5))
+                .padding(.horizontal, 9)
+                .frame(height: 30)
+                .background(.white, in: Capsule())
+                .transition(.scale(scale: 0.5).combined(with: .opacity))
             }
 
-            if !isGenerating {
-                HStack(spacing: 4) {
-                    Text("12")
-                        .font(.system(size: 13, weight: .heavy))
-                        .foregroundStyle(AppColor.amber)
-                    CoinIcon(size: 14)
+            // Dekoratif dalga-formu (soluk, WhatsApp görünümü). Süre YAZISI YOK —
+            // süre yalnızca ses açılıp geldiğinde (VoiceMessageBubble) gösterilir
+            // (bkz. kullanıcı talebi: "kalp varken sağda süresi görünmesin").
+            HStack(spacing: 3) {
+                ForEach(0..<14, id: \.self) { _ in
+                    Capsule().fill(.white.opacity(0.28)).frame(width: 2.5, height: 10)
                 }
             }
         }
@@ -983,34 +1059,73 @@ private struct PendingVoiceBubble: View {
         .padding(.vertical, 10)
         .background(AppColor.card, in: RoundedRectangle(cornerRadius: 18))
         .contentShape(RoundedRectangle(cornerRadius: 18))
-        .onTapGesture { if !isGenerating { onTap() } }
+        .onTapGesture { if !isGenerating && !isPreparing { onTap() } }
     }
 }
 
 private struct ImagePendingIndicator: View {
-    @State private var sweep = false
-
     var body: some View {
-        GeometryReader { geo in
-            ZStack(alignment: .leading) {
-                Capsule().fill(AppColor.card)
-                Capsule().fill(AppColor.pink)
-                    .frame(width: geo.size.width * 0.4)
-                    .offset(x: sweep ? geo.size.width * 0.6 : -geo.size.width * 0.4)
-            }
-        }
-        .frame(width: 160, height: 6)
-        .clipShape(Capsule())
-        .overlay(Capsule().strokeBorder(.white.opacity(0.1), lineWidth: 1))
-        .onAppear {
-            withAnimation(.easeInOut(duration: 1.1).repeatForever(autoreverses: false)) {
-                sweep = true
-            }
-        }
+        // Düz bar yerine dönen daire (spinner).
+        ProgressView()
+            .progressViewStyle(.circular)
+            .tint(.white)
+            .scaleEffect(1.3)
     }
 }
 
 // MARK: - Foto tam ekran görüntüleyici
+
+// MARK: - Yakınlaştırılabilir tam ekran sarmalayıcı (pinch-to-zoom + pan + çift dokunma sıfırlama)
+
+private struct ZoomableView<Content: View>: View {
+    let onSingleTap: () -> Void
+    @ViewBuilder let content: Content
+
+    @State private var scale: CGFloat = 1
+    @State private var lastScale: CGFloat = 1
+    @State private var offset: CGSize = .zero
+    @State private var lastOffset: CGSize = .zero
+
+    private let minScale: CGFloat = 1
+    private let maxScale: CGFloat = 4
+
+    var body: some View {
+        content
+            .scaleEffect(scale)
+            .offset(offset)
+            .gesture(
+                MagnificationGesture()
+                    .onChanged { value in
+                        scale = min(max(lastScale * value, minScale), maxScale)
+                    }
+                    .onEnded { _ in
+                        lastScale = scale
+                        if scale <= minScale { resetZoom() }
+                    }
+            )
+            .simultaneousGesture(
+                DragGesture()
+                    .onChanged { value in
+                        guard scale > minScale else { return }
+                        offset = CGSize(width: lastOffset.width + value.translation.width,
+                                        height: lastOffset.height + value.translation.height)
+                    }
+                    .onEnded { _ in lastOffset = offset }
+            )
+            .onTapGesture(count: 2) {
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                    if scale > minScale { resetZoom() } else { scale = 2; lastScale = 2 }
+                }
+            }
+            .onTapGesture { if scale <= minScale { onSingleTap() } }
+    }
+
+    private func resetZoom() {
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+            scale = 1; lastScale = 1; offset = .zero; lastOffset = .zero
+        }
+    }
+}
 
 private struct FullscreenImageView: View {
     let url: URL
@@ -1023,13 +1138,14 @@ private struct FullscreenImageView: View {
         ZStack(alignment: .topTrailing) {
             Color.black.ignoresSafeArea()
 
-            CachedImage(url: url) { img in
-                img.resizable().scaledToFit()
-            } placeholder: {
-                ProgressView().tint(.white)
+            ZoomableView(onSingleTap: onDismiss) {
+                CachedImage(url: url) { img in
+                    img.resizable().scaledToFit()
+                } placeholder: {
+                    ProgressView().tint(.white)
+                }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .onTapGesture { onDismiss() }
 
             HStack(spacing: 10) {
                 Button(action: downloadImage) {
@@ -1104,10 +1220,11 @@ private struct LocalImageFullscreenView: View {
     var body: some View {
         ZStack(alignment: .topTrailing) {
             Color.black.ignoresSafeArea()
-            Image(uiImage: image)
-                .resizable().scaledToFit()
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .onTapGesture { onDismiss() }
+            ZoomableView(onSingleTap: onDismiss) {
+                Image(uiImage: image)
+                    .resizable().scaledToFit()
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             Button(action: onDismiss) {
                 Image(systemName: "xmark")
                     .font(.system(size: 16, weight: .bold))

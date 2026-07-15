@@ -47,6 +47,11 @@ struct aiGirlfriendApp: App {
             .preferredColorScheme(.dark)
             .task {
                 PurchaseService.shared.configure()
+                #if DEBUG
+                // GEÇİCİ (test): kullanıcıyı PRO göster — SADECE debug derlemede,
+                // release'e sızmaz. RevenueCat/backend-otoriter PRO kurulunca kaldır.
+                PurchaseService.shared.tier = .pro
+                #endif
                 let delegate = NotificationDelegate(store: store)
                 notificationDelegate = delegate
                 UNUserNotificationCenter.current().delegate = delegate

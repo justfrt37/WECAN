@@ -159,26 +159,51 @@ struct MainTabView: View {
                 }
             }
             .onAppear { openPendingOnboardingChat() }
+            #if DEBUG
+            .task {
+                // SS için: OPEN_CHAT=1 ile ilk karakterin chat'ini örnek mesajlarla aç.
+                guard ProcessInfo.processInfo.environment["OPEN_CHAT"] == "1" else { return }
+                for _ in 0..<50 where store.characters.isEmpty { try? await Task.sleep(nanoseconds: 100_000_000) }
+                guard let c = store.characters.first else { return }
+                let msgs = [
+                    Message(role: .assistant, content: "Selam 🙂 Nihayet yazdın! Günün nasıl geçti?"),
+                    Message(role: .user, content: "İyiydi ama biraz yorgunum, seni merak ettim"),
+                    Message(role: .assistant, content: "Aww, beni merak etmen çok tatlı 🥰 Anlat bakalım, seni ne yordu bugün?"),
+                    Message(role: .user, content: "İş yoğundu, toplantılar bitmek bilmedi"),
+                    Message(role: .assistant, content: "Off, o toplantılar... Bari arada beni düşündün mü? 😏"),
+                    Message(role: .user, content: "Tabii ki düşündüm 😄 Sen ne yapıyordun?"),
+                    Message(role: .assistant, content: "Seni düşünüyordum işte 😊 Kahvemi alıp pencere kenarında oturdum, dışarısı yağmurluydu."),
+                    Message(role: .user, content: "Çok romantik geliyor kulağa"),
+                    Message(role: .assistant, content: "Keşke yanımda olsaydın, sana da bir fincan yapardım ☕ Sarılıp film izlerdik."),
+                    Message(role: .user, content: "Bunu gerçekten çok isterdim"),
+                    Message(role: .assistant, content: "O zaman söz — bu akşam sadece ikimiz 💕 Ne izlemek istersin?"),
+                ]
+                let stored = LocalConversationStore.Stored(messages: msgs, xp: 60, level: 1, summary: "", summarizedCount: 0)
+                LocalConversationStore.shared.save(stored, for: c.id)
+                store.chatCache[c.id] = msgs
+                path.append(c)
+            }
+            #endif
         }
         .tint(AppColor.pink)
         // NavigationStack'in KENDİSİNE bindirilmiş overlay — kök içeriğe değil,
         // böylece ChatView push edilince (kök yerini alınca) rozet KAYBOLMAZ,
         // her zaman en üstte kalır (bkz. tasarım: "chat içinde de görünmeli").
         .overlay(alignment: .topTrailing) {
-            Group {
-                // PRO değilken tüm sekme köklerinde: kalp+sayı rozeti yerine
-                // PRO butonu. Sohbet push edilince (path boş değil) token rozeti
-                // döner — sohbette bakiye görünür kalsın diye.
-                if path.isEmpty, !PurchaseService.shared.isPro {
-                    proButton
-                } else {
-                    TokenBadge(tokenStore: tokenStore) { showTokenStore = true }
+            // Yalnızca sekme KÖKLERİNDE (path boş): PRO değilse PRO butonu, değilse
+            // token rozeti. Sohbette (path boş değil) bu overlay GİZLİ — coin +
+            // Ayarlar ChatView header'ında birlikte durur (aynı hizada, bkz. ChatView).
+            if path.isEmpty {
+                Group {
+                    if !PurchaseService.shared.isPro {
+                        proButton
+                    } else {
+                        TokenBadge(tokenStore: tokenStore) { showTokenStore = true }
+                    }
                 }
+                .padding(.top, 8)
+                .padding(.trailing, 16)
             }
-            .padding(.top, 8)
-            // Sohbette (path boş değil) coin sola kayar → sağ uçtaki Ayarlar
-            // (gear) butonuna yer açar; coin gear'ın SOLUNDA, aynı hizada durur.
-            .padding(.trailing, path.isEmpty ? 16 : 60)
         }
         .fullScreenCover(isPresented: $showTokenStore) {
             TokenStoreView(tokenStore: tokenStore)

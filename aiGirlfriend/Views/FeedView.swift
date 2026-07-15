@@ -10,24 +10,18 @@ struct FeedView: View {
     @State private var currentIndex = 0
     @State private var dragOffset = CGSize.zero
     @State private var showTutorial = !UserDefaultsManager.shared.hasSeenSwipeTutorial
-    @State private var meetCandidate: Character?
 
     /// Zaten sohbete başlanmış (yerel bir konuşma kaydı olan) karakterler
     /// Discover'da tekrar gösterilmez — aynı tanım NotificationScheduler'ın
     /// Liked You uygunluk kontrolüyle birebir aynı (bkz. LikedByStore).
     private var characters: [Character] {
-        let list = store.characters.filter {
+        // Yalnızca backend'den gelen (store.characters) karakterler — sahte/dummy
+        // feed kaldırıldı (bkz. kullanıcı talebi: "backende ne geliyorsa onu göster").
+        store.characters.filter {
             !BlockedCharactersStore.isBlocked($0.id) &&
             !PassedCharactersStore.isPassed($0.id) &&
             LocalConversationStore.shared.load(for: $0.id) == nil
         }
-        #if DEBUG
-        // Gerçek karakter kalmadıysa Discover'ı test edebilmek için sahte bir
-        // kız göster (bkz. Character.dummyGirl). Release'e etkisi yok.
-        if ProcessInfo.processInfo.environment["FORCE_DUMMY"] == "1" { return [Character.dummyGirl] }
-        if list.isEmpty { return [Character.dummyGirl] }
-        #endif
-        return list
     }
 
     var body: some View {
@@ -88,16 +82,6 @@ struct FeedView: View {
                     }
                 }
 
-                if let candidate = meetCandidate {
-                    MeetConfirmOverlay(
-                        character: candidate,
-                        onYes: {
-                            meetCandidate = nil
-                            store.pendingMeetRequest = MeetRequest(character: candidate, prefillText: IcebreakerPool.next())
-                        },
-                        onNo: { meetCandidate = nil }
-                    )
-                }
             }
             .frame(width: geo.size.width, height: geo.size.height)
         }
@@ -199,11 +183,8 @@ struct FeedView: View {
                 dragOffset = CGSize(width: dir * w * 1.6, height: t.height * 0.3)
             }
             if dir == 1, let current {
-                if UserDefaultsManager.shared.skipMeetConfirm {
-                    store.pendingMeetRequest = MeetRequest(character: current, prefillText: IcebreakerPool.next())
-                } else {
-                    meetCandidate = current
-                }
+                // "Tanışmak ister misin?" onayı KALDIRILDI — beğeninde doğrudan sohbete git.
+                store.pendingMeetRequest = MeetRequest(character: current, prefillText: IcebreakerPool.next())
             } else if dir == -1, let current {
                 // Kart hemen `characters`ten düşsün (PassedCharactersStore
                 // filtreye giriyor) — önceden HİÇBİR yere kaydedilmiyordu,

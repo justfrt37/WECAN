@@ -8,9 +8,12 @@ import SwiftUI
 
 struct CharacterProfileView: View {
     let character: Character
+    /// Chat'ten açıldığında alttaki "Chat" butonu gizlenir (zaten sohbetteyiz).
+    var showsChatButton: Bool = true
     @Environment(\.dismiss) private var dismiss
     @State private var page = 0
     @State private var showPaywall = false
+    @State private var showLevels = false
     /// Bu kullanıcının bu karakterle olan gerçek seviyesi/ilerlemesi — `character.relationshipLevel`
     /// eski/global bir alan olduğu için (bkz. gotchas), cihazdaki yerel depodan okunur.
     @State private var userLevel: Int = 1
@@ -42,26 +45,25 @@ struct CharacterProfileView: View {
                         photosSection
                             .padding(.horizontal, 24)
                             .padding(.top, 22)
-                            .padding(.bottom, 110) // bottom bar space
+                            .padding(.bottom, 30)
                     }
                 }
+                .scrollIndicators(.hidden)
                 .ignoresSafeArea(edges: .top)
 
                 closeButton
                     .padding(.trailing, 20)
                     .padding(.top, 12)
                     .frame(maxWidth: .infinity, alignment: .trailing)
-
-                // Sticky bottom bar — Gallery + Chat
-                VStack(spacing: 0) {
-                    Spacer()
-                    bottomBar
-                }
             }
             .navigationDestination(for: Character.self) { ChatView(character: $0) }
             .toolbar(.hidden, for: .navigationBar)
         }
-        .fullScreenCover(isPresented: $showPaywall) { PaywallHostView() }
+        // PRO gerektiren her yerde onboarding paywall'ı (alttan fullscreen) açılır.
+        .fullScreenCover(isPresented: $showPaywall) { OnboardingPaywallView() }
+        .sheet(isPresented: $showLevels) {
+            RelationshipLevelsView(currentLevel: userLevel)
+        }
         .task {
             if let stored = LocalConversationStore.shared.load(for: character.id) {
                 userLevel = stored.level
@@ -152,12 +154,40 @@ struct CharacterProfileView: View {
                 }
             }
             Spacer()
-            levelCircle
+            HStack(spacing: 10) {
+                // Sohbet artık alt bar yerine Level'ın SOLUNDA yuvarlak buton
+                // olarak (bkz. kullanıcı talebi). Sohbetten açıldığında gizli.
+                if showsChatButton { chatCircleButton }
+                levelCircle
+            }
         }
     }
 
+    /// Level dairesinin solundaki yuvarlak "Sohbet" butonu — bu NavigationStack
+    /// içinde ChatView'i push eder (bkz. navigationDestination).
+    private var chatCircleButton: some View {
+        NavigationLink(value: character) {
+            Image(systemName: "bubble.left.and.bubble.right.fill")
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 56, height: 56)
+                .background(
+                    LinearGradient(colors: [AppColor.pink, AppColor.amber],
+                                   startPoint: .topLeading, endPoint: .bottomTrailing),
+                    in: Circle()
+                )
+        }
+        .buttonStyle(.plain)
+    }
+
     /// Kalp + LV N, ring seviyenin İÇİNDEKİ ilerlemeyle (levelProgress) orantılı dolar (0 → boş).
+    /// Dokununca İlişki Seviyeleri ekranı açılır.
     private var levelCircle: some View {
+        Button { showLevels = true } label: { levelCircleContent }
+            .buttonStyle(.plain)
+    }
+
+    private var levelCircleContent: some View {
         ZStack {
             Circle().stroke(.white.opacity(0.12), lineWidth: 3)
             Circle()
@@ -294,38 +324,6 @@ struct CharacterProfileView: View {
                 .background(AppColor.bg.opacity(0.65), in: Circle())
                 .overlay(Circle().strokeBorder(.white.opacity(0.12), lineWidth: 1))
         }
-    }
-
-    // MARK: Bottom bar
-
-    private var bottomBar: some View {
-        HStack(spacing: 12) {
-            // Chat — pushes inside this NavigationStack. Galeri butonu kaldırıldı:
-            // fotoğraflar artık profil içinde (ilgi alanları altında) inline grid.
-            NavigationLink(value: character) {
-                Label("Chat", systemImage: "bubble.left.and.bubble.right.fill")
-                    .font(.system(size: 15, weight: .bold))
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity).frame(height: 52)
-                    .background(
-                        LinearGradient(colors: [AppColor.pink, AppColor.amber],
-                                       startPoint: .leading, endPoint: .trailing),
-                        in: RoundedRectangle(cornerRadius: 16)
-                    )
-            }
-            .buttonStyle(.plain)
-        }
-        .padding(.horizontal, 20)
-        .padding(.bottom, 30)
-        .padding(.top, 12)
-        .background(
-            AppColor.bg.opacity(0.95)
-                .overlay(
-                    Rectangle().frame(height: 1).foregroundStyle(.white.opacity(0.08)),
-                    alignment: .top
-                )
-                .ignoresSafeArea(edges: .bottom)
-        )
     }
 }
 

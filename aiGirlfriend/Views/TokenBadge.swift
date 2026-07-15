@@ -81,6 +81,9 @@ struct TokenBadge: View {
         }
         .onChange(of: tokenStore.lastDelta) { _, newValue in
             guard let newValue else { return }
+            // AZALMA (harcama) animasyonsuz — sayı doğrudan düşer. Yüzen etiket
+            // sadece KAZANIMDA (+N) gösterilir.
+            guard newValue > 0 else { tokenStore.lastDelta = nil; return }
             floatingDelta = newValue
             // Rozetin sol-üst köşesinden başlar, biraz YANA (dışına) doğru
             // kayarak yükselir — doğrudan sayının üstüne binmesin, kolayca

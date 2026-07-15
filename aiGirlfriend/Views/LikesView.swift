@@ -80,7 +80,8 @@ struct LikesView: View {
             }
         }
         .fullScreenCover(item: $profileCharacter) { CharacterProfileView(character: $0) }
-        .sheet(isPresented: $showPaywall) { SubscriptionPaywallView() }
+        // PRO gerektiren her yerde onboarding paywall'ı (alttan fullscreen) açılır.
+        .fullScreenCover(isPresented: $showPaywall) { OnboardingPaywallView() }
     }
 
     private var header: some View {

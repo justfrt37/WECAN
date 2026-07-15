@@ -69,6 +69,9 @@ private struct ChatResponse: Codable {
     let history: [WireMessage]?
     let xp: Int?
     let level: Int?
+    /// Güncel seviyenin ilerleme oranı (0..1) — SUNUCUDA hesaplanır (bkz.
+    /// chat/index.ts applyRelationshipGain). İstemci sadece gösterir.
+    let levelProgress: Double?
     let leveledUp: Bool?
     let photoUrl: String?
     let summary: String?   // özetleme modunda döner
@@ -88,7 +91,8 @@ struct ChatHistory {
 
 struct ChatReply {
     let reply: String
-    let level: Int      // sunucunun sakladığı (istemcinin bir önceki turda gönderdiği) seviye
+    let level: Int      // SUNUCUDA hesaplanan güncel seviye (istemci sadece gösterir)
+    let levelProgress: Double?   // güncel seviyenin ilerleme oranı (0..1), sunucudan
     let photoURL: URL?
     /// true ise karakter bu turda gerçekten uyumayı kabul etti (bkz.
     /// ChatViewModel.send, chat/index.ts classifySleepAgreement).
@@ -163,6 +167,7 @@ struct ChatService {
         return ChatReply(
             reply: resp.reply ?? "",
             level: resp.level ?? level,
+            levelProgress: resp.levelProgress,
             photoURL: resp.photoUrl.flatMap(URL.init(string:)),
             wentToSleep: resp.wentToSleep ?? false,
             tokenBalance: resp.tokenBalance
@@ -207,6 +212,7 @@ struct ChatService {
         return ChatReply(
             reply: resp.reply ?? "",
             level: resp.level ?? level,
+            levelProgress: resp.levelProgress,
             photoURL: resp.photoUrl.flatMap(URL.init(string:)),
             wentToSleep: resp.wentToSleep ?? false,
             tokenBalance: resp.tokenBalance
@@ -247,6 +253,7 @@ struct ChatService {
         return ChatReply(
             reply: resp.reply ?? "",
             level: resp.level ?? level,
+            levelProgress: resp.levelProgress,
             photoURL: resp.photoUrl.flatMap(URL.init(string:)),
             wentToSleep: resp.wentToSleep ?? false,
             tokenBalance: resp.tokenBalance
