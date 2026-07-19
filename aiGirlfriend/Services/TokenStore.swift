@@ -44,6 +44,9 @@ final class TokenStore {
         guard let rows = try? JSONDecoder().decode([Row].self, from: data), let first = rows.first else { return }
         balance = first.balance
         UserDefaults.standard.set(first.balance, forKey: cacheKey)
+        #if DEBUG
+        print("🪙 Kredi (refresh): \(first.balance)")
+        #endif
     }
 
     /// Bir edge function cevabından gelen `tokenBalance` alanıyla anında
@@ -53,5 +56,10 @@ final class TokenStore {
         balance = value
         UserDefaults.standard.set(value, forKey: cacheKey)
         if delta != 0 { lastDelta = delta }
+        #if DEBUG
+        // Cevaptan gelen krediyi Xcode konsolunda göster (bkz. kullanıcı talebi).
+        let sign = delta > 0 ? "+\(delta)" : "\(delta)"
+        print("🪙 Kredi: \(value)" + (delta != 0 ? " (\(sign))" : ""))
+        #endif
     }
 }

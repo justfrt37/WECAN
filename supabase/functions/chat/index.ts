@@ -528,15 +528,13 @@ Deno.serve(async (req: Request) => {
     // siler (messages/memories cascade ile birlikte gider), bir sonraki açılışta
     // sıfırdan (yeni bir "ilk selam" akışıyla) başlar.
     if (body.clearConversation === true) {
-      const { data: existing } = await db
-        .from("conversations")
-        .select("id")
+      // TÜM eşleşen conversation'ları sil (messages/memories cascade ile gider).
+      // maybeSingle KULLANMA — aynı user+character için birden çok satır varsa
+      // (eski dupe'lar) hata verip HİÇBİR ŞEY silmiyordu → mesajlar geri geliyordu.
+      await db.from("conversations")
+        .delete()
         .eq("user_id", uid)
-        .eq("character_id", characterId)
-        .maybeSingle();
-      if (existing) {
-        await db.from("conversations").delete().eq("id", existing.id);
-      }
+        .eq("character_id", characterId);
       return json({ ok: true });
     }
 
@@ -551,13 +549,17 @@ Deno.serve(async (req: Request) => {
     const interests: string[] = Array.isArray(character?.interests) ? character.interests : [];
     const exHistory: string | null = character?.ex_history ?? null;
 
-    // 1) Konuşmayı bul ya da oluştur (kullanıcı + karakter)
-    let { data: convo } = await db
+    // 1) Konuşmayı bul ya da oluştur (kullanıcı + karakter). maybeSingle KULLANMA —
+    // eski dupe'lar varsa hata verip convo=null oluyor ve HER mesajda YENİ bir
+    // conversation ekleniyordu (dupe'lar böyle çoğalıyordu). En güncel olanı al.
+    let { data: convoRows } = await db
       .from("conversations")
       .select("id, summary, summarized_count, xp, relationship_level, level_progress")
       .eq("user_id", uid)
       .eq("character_id", characterId)
-      .maybeSingle();
+      .order("updated_at", { ascending: false })
+      .limit(1);
+    let convo = convoRows?.[0];
 
     if (!convo) {
       const ins = await db

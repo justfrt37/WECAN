@@ -137,35 +137,15 @@ struct CreateCharacterView: View {
 
     @Environment(\.dismiss) private var dismiss
     @Environment(CharacterStore.self) private var store
+    @Environment(TokenStore.self) private var tokenStore
 
     init(devMode: DevWizardMode? = nil) {
         self.devMode = devMode
     }
 
     // ── Step state ──
-    @State private var stepIndex = CreateCharacterView.initialStep()
-    @State private var phase: Phase = CreateCharacterView.initialPhase()
-
-    /// DEBUG: CC_PHASE=preview|loading ile doğrudan fotoğraf önizleme/"hazırlanıyor"
-    /// ekranını aç (SS almak için).
-    private static func initialPhase() -> Phase {
-        #if DEBUG
-        switch ProcessInfo.processInfo.environment["CC_PHASE"] {
-        case "preview", "loading": return .photoPreview
-        default: return .steps
-        }
-        #else
-        return .steps
-        #endif
-    }
-
-    /// DEBUG: CC_STEP env ile sihirbazı belirli adımda aç (SS almak için).
-    private static func initialStep() -> Int {
-        #if DEBUG
-        if let s = ProcessInfo.processInfo.environment["CC_STEP"], let i = Int(s) { return i }
-        #endif
-        return 0
-    }
+    @State private var stepIndex = 0
+    @State private var phase: Phase = .steps
 
     // ── DEV-only steps (bkz. devMode) — real device photo uploads +
     // ElevenLabs voice pick, layered onto the exact same wizard chrome. ──
@@ -238,6 +218,8 @@ struct CreateCharacterView: View {
     /// SADECE PRO ise başlar (bkz. reveal()). Paywall kapanınca PRO olduysa
     /// otomatik devam eder (bkz. onDismiss).
     @State private var showPaywall = false
+    /// PRO ama coin (100) yetmiyorsa açılan COIN mağazası (bkz. reveal / createCharacter).
+    @State private var showTokenStore = false
 
     private enum Phase { case steps, generatingPhoto, photoPreview, creating, ready }
 
@@ -270,15 +252,6 @@ struct CreateCharacterView: View {
             }
         }
         .tint(AppColor.pink)
-        #if DEBUG
-        .onAppear {
-            let env = ProcessInfo.processInfo.environment["CC_PHASE"]
-            if env == "loading" || env == "preview" {
-                if characterName.isEmpty { characterName = "Sena" }
-                if env == "loading" { generating = true }   // nabız/hazırlanıyor
-            }
-        }
-        #endif
         // PRO gerektiren her yerde onboarding paywall'ı (alttan fullscreen) açılır.
         .fullScreenCover(isPresented: $showPaywall, onDismiss: {
             // Paywall kapandı — PRO oldularsa fotoğrafı hemen üret ve devam et.
@@ -286,8 +259,19 @@ struct CreateCharacterView: View {
         }) {
             OnboardingPaywallView()
         }
+        // PRO ama coin yetmiyorsa: coin mağazası (paywall). Kapanınca yeterli
+        // coin varsa yaratmaya devam et.
+        .fullScreenCover(isPresented: $showTokenStore, onDismiss: {
+            if tokenStore.balance >= CreateCharacterView.creationCost { reveal() }
+        }) {
+            TokenStoreView(tokenStore: tokenStore)
+        }
         .task { await prefillIfEditingDevCharacter() }
     }
+
+    /// Client tarafı gösterim/erken-kontrol için maliyet aynası — KAYNAK-DOĞRU
+    /// değer sunucudadır (create-character CREATION_COST), gerçek tahsil orada.
+    static let creationCost = 100
 
     /// Ortak duvar-saati nabzı (0..1). İki TimelineView(.animation) aynı display-link
     /// saatini okur → buton ve kenar birebir senkron yanıp söner.
@@ -1482,7 +1466,14 @@ struct CreateCharacterView: View {
         // DEV curated characters bypass the PRO gate entirely — this is an
         // internal tool, not a user-facing purchase flow.
         if devMode == nil {
+            // 1) PRO değilse önce PRO paywall.
             guard PurchaseService.shared.tier != .none else { showPaywall = true; return }
+            // 2) PRO ama coin (100) yetmiyorsa COIN mağazası (bkz. kullanıcı talebi).
+            //    Kesin/atomik tahsil sunucuda; bu erken kontrol UX için (boşuna
+            //    foto üretme + anında paywall). Sunucu yine 402 dönerse de yakalanır.
+            guard tokenStore.balance >= CreateCharacterView.creationCost else {
+                showTokenStore = true; return
+            }
         }
         generating = true
         photoGenError = nil
@@ -1709,9 +1700,17 @@ struct CreateCharacterView: View {
         )
 
         switch outcome {
-        case .success(let c):
+        case .success(let c, let tokenBalance):
+            // Yaratma sonrası kalan coin bakiyesini güncelle (sunucu döndü).
+            if let tokenBalance { tokenStore.setBalance(tokenBalance) }
             withAnimation { created = c }
             store.characters.append(c)
+            return
+        case .insufficientTokens(let tokenBalance):
+            // PRO ama coin yetmedi (sunucu 402) → bakiyeyi güncelle + coin mağazası.
+            tokenStore.setBalance(tokenBalance)
+            photoRevealed = true
+            showTokenStore = true
             return
         case .rejected(let errorCode):
             if errorCode == "weekly_limit_reached" {

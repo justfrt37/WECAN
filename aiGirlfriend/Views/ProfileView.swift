@@ -17,11 +17,6 @@ struct ProfileView: View {
     @Environment(\.requestReview) private var requestReview
     @Environment(\.openURL) private var openURL
 
-    // DEV
-    @State private var devTier: SubscriptionTier = PurchaseService.shared.tier
-    @State private var showDevCreateCharacter = false
-    @State private var showDevEditCharacter = false
-
     // Ayarlar (eski SettingsView'den buraya taşındı)
     @State private var notificationsOn = false
     @State private var showDeleteConfirm = false
@@ -38,11 +33,6 @@ struct ProfileView: View {
                 VStack(spacing: 14) {
                     avatarCard
                     settingsSection
-                    // DEV-only, gated to the two dev uids (bkz. DevAccess).
-                    if DevAccess.isDev {
-                        devTokenTestPanel
-                        devCuratedCharacterPanel
-                    }
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 4)
@@ -55,8 +45,6 @@ struct ProfileView: View {
                            startPoint: .top, endPoint: .bottom)
                 .ignoresSafeArea()
         )
-        .sheet(isPresented: $showDevCreateCharacter) { CreateCharacterView(devMode: .create) }
-        .sheet(isPresented: $showDevEditCharacter) { DevEditCharacterPickerView() }
         .task { notificationsOn = await currentNotificationStatus() }
         .alert("Tüm verileri sil?", isPresented: $showDeleteConfirm) {
             Button("İptal", role: .cancel) {}
@@ -257,89 +245,6 @@ struct ProfileView: View {
         try? FileManager.default.removeItem(at: cache)
     }
 
-    // MARK: DEV panelleri
-
-    /// GEÇİCİ DEV PANELİ — RevenueCat/gerçek IAP kurulunca KALDIRILACAK (bkz.
-    /// DevTokenTools). Token mekaniklerini gerçek ödeme olmadan test etmeye
-    /// yarıyor.
-    private var devTokenTestPanel: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 8) {
-                Image(systemName: "hammer.fill").foregroundStyle(Color(hex: 0x9B59B6))
-                Text("DEV: Token Testing")
-                    .font(.system(size: 14, weight: .bold))
-                    .foregroundStyle(.white)
-            }
-
-            HStack(spacing: 10) {
-                devActionButton("+1000 🪙") { await DevTokenTools.addTokens(into: tokenStore) }
-                devActionButton("-1000 🪙") { await DevTokenTools.removeTokens(from: tokenStore) }
-            }
-
-            Text("Subscription tier")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.5))
-
-            Picker("", selection: $devTier) {
-                Text("Off").tag(SubscriptionTier.none)
-                Text("Pro").tag(SubscriptionTier.pro)
-                Text("Pro+").tag(SubscriptionTier.proPlus)
-                Text("Max").tag(SubscriptionTier.max)
-            }
-            .pickerStyle(.segmented)
-            .onChange(of: devTier) { _, newTier in
-                Task { await DevTokenTools.setTier(newTier, tokenStore: tokenStore) }
-            }
-        }
-        .padding(16)
-        .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 20))
-        .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(.white.opacity(0.08), lineWidth: 1))
-    }
-
-    /// DEV-only — CreateCharacterView'un dev modunu açar (kalıcı dev aracı,
-    /// yalnızca iki dev uid'e görünür).
-    private var devCuratedCharacterPanel: some View {
-        VStack(spacing: 10) {
-            devCuratedCharacterRow(icon: "wand.and.stars", title: "DEV: Create Curated Character") {
-                showDevCreateCharacter = true
-            }
-            devCuratedCharacterRow(icon: "pencil.and.list.clipboard", title: "DEV: Edit Existing Character") {
-                showDevEditCharacter = true
-            }
-        }
-    }
-
-    private func devCuratedCharacterRow(icon: String, title: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 8) {
-                Image(systemName: icon).foregroundStyle(Color(hex: 0x9B59B6))
-                Text(title)
-                    .font(.system(size: 14, weight: .bold))
-                    .foregroundStyle(.white)
-                Spacer()
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.4))
-            }
-            .padding(16)
-            .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 20))
-            .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(.white.opacity(0.08), lineWidth: 1))
-        }
-        .buttonStyle(.plain)
-    }
-
-    private func devActionButton(_ title: String, action: @escaping () async -> Void) -> some View {
-        Button {
-            Task { await action() }
-        } label: {
-            Text(title)
-                .font(.system(size: 13, weight: .bold))
-                .foregroundStyle(.white)
-                .frame(maxWidth: .infinity).padding(.vertical, 10)
-                .background(AppColor.pink.opacity(0.25), in: RoundedRectangle(cornerRadius: 12))
-        }
-        .buttonStyle(.plain)
-    }
 }
 
 #Preview {

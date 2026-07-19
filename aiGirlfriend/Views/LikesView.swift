@@ -34,11 +34,6 @@ struct LikesView: View {
             let bDate: Date = LikedByStore.likedAt(b.id) ?? .distantPast
             return aDate > bDate
         }
-        #if DEBUG
-        // Gerçek beğenen yokken, backend'den gelince nasıl görüneceğini test
-        // etmek için sahte beğenenler (bkz. Character.dummyLikers).
-        if sorted.isEmpty { return Character.dummyLikers }
-        #endif
         return sorted
     }
 

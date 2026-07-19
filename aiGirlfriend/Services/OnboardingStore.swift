@@ -91,23 +91,6 @@ final class OnboardingStore {
         userName = defaults.string(forKey: Keys.userName) ?? ""
         selectedCharacter = defaults.string(forKey: Keys.character).flatMap(OnboardingCharacter.init)
         answers = defaults.array(forKey: Keys.answers) as? [Int] ?? []
-
-        #if DEBUG
-        // Geliştirme kolaylığı: belirli bir onboarding adımını doğrudan açmak
-        // için launch env değişkeni (ör. simülatörde ekran doğrulaması).
-        //   SIMCTL_CHILD_OB_START_STEP=socialProof xcrun simctl launch ...
-        if let forced = ProcessInfo.processInfo.environment["OB_START_STEP"] {
-            switch forced {
-            case "name":            step = .name
-            case "socialProof":     step = .socialProof
-            case "characterSelect": step = .characterSelect
-            case "questions":       step = .questions
-            case "finalTease":      step = .finalTease
-            case "paywall":         step = .paywall
-            default:                break
-            }
-        }
-        #endif
     }
 
     func complete() {

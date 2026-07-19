@@ -192,34 +192,4 @@ extension Character {
 }
 
 #if DEBUG
-extension Character {
-    /// DEBUG: Discover'da gösterilecek gerçek karakter kalmadığında (katalog
-    /// boş / hepsi geçilmiş) test amaçlı enjekte edilen sahte kız. Fotoğrafı
-    /// bundle'daki onboarding görselinden gelir (file URL). Release'e girmez.
-    static let dummyGirl = Character(
-        id: UUID(uuidString: "00000000-0000-0000-0000-0000000000DD")!,
-        name: "Deniz",
-        tagline: "Test profili — Discover'ı denemek için",
-        systemPrompt: "You are Deniz, a friendly test character.",
-        avatarSymbol: "heart.circle.fill",
-        age: 23, city: "İzmir", country: "Turkey", profession: "Model",
-        category: "Realistic",
-        photoURL: Bundle.main.url(forResource: "dummyGirl", withExtension: "jpg")
-    )
-
-    static let dummyGirl2 = Character(
-        id: UUID(uuidString: "00000000-0000-0000-0000-0000000000DE")!,
-        name: "Selin",
-        tagline: "Test profili",
-        systemPrompt: "You are Selin, a friendly test character.",
-        avatarSymbol: "heart.circle.fill",
-        age: 25, city: "İstanbul", country: "Turkey", profession: "Photographer",
-        category: "Realistic",
-        photoURL: Bundle.main.url(forResource: "dummyGirl2", withExtension: "jpg")
-    )
-
-    /// DEBUG: Beğeniler ("seni beğenenler") boşken, backend'den veri gelince
-    /// nasıl görüneceğini test etmek için gösterilen sahte beğenenler.
-    static let dummyLikers: [Character] = [dummyGirl, dummyGirl2]
-}
 #endif

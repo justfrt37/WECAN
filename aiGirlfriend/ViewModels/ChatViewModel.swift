@@ -66,6 +66,29 @@ final class ChatViewModel {
     /// düğmelere basmak SERBEST (isVoiceArmed/isImageArmed, kamera/mikrofon açma),
     /// sadece gerçek GÖNDERIM anında kontrol edilir.
     var showPaywall = false
+    /// Token yetmediğinde açılan COIN mağazası (PRO kullanıcılar için). PRO
+    /// değilse showPaywall (PRO paywall) açılır (bkz. presentInsufficientTokensPaywall).
+    var showTokenStore = false
+
+    /// Token yetmediğinde: UYARI YOK — PRO ise coin mağazası, değilse PRO
+    /// paywall açılır (bkz. kullanıcı talebi).
+    private func presentInsufficientTokensPaywall() {
+        if PurchaseService.shared.isPro { showTokenStore = true }
+        else { showPaywall = true }
+        // Rozet gerçek (düşük) bakiyeyi göstersin diye tazele.
+        Task { await tokenStore?.refresh() }
+    }
+
+    /// Mesaj GÖNDERMEDEN ÖNCE kredi kontrolü — bilinen bakiye yetmiyorsa istek
+    /// ATILMAZ, paywall açılır ve false döner. (Bakiye bayatsa sunucu 402'si
+    /// yine yakalar, bkz. presentInsufficientTokensPaywall.)
+    private func hasTokensOrPaywall(cost: Int = 1) -> Bool {
+        if (tokenStore?.balance ?? 0) < cost {
+            presentInsufficientTokensPaywall()
+            return false
+        }
+        return true
+    }
 
     init(character: Character) {
         self.character = character
@@ -202,6 +225,8 @@ final class ChatViewModel {
     func send(_ preset: String? = nil) {
         let text = (preset ?? inputText).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !isSending, !isLoadingHistory else { return }
+        // Kredi yetmiyorsa istek ATMA — paywall aç (PRO→coin, değilse→PRO).
+        guard hasTokensOrPaywall() else { return }
 
         // Zaman farkındalığı için — yeni mesajı eklemeden ÖNCEki son mesajın zamanı.
         let lastMessageAt = messages.last?.createdAt
@@ -263,9 +288,11 @@ final class ChatViewModel {
                     NotificationScheduler.shared.cancelSleepyGoodnight(for: character.id)
                 }
             } catch {
-                errorMessage = isInsufficientTokensError(error)
-                    ? String(localized: "Not enough tokens. Get more to keep chatting.")
-                    : error.localizedDescription
+                if isInsufficientTokensError(error) {
+                    presentInsufficientTokensPaywall()   // uyarı yok, paywall aç
+                } else {
+                    errorMessage = error.localizedDescription
+                }
                 showsTypingBubble = false
                 store?.setTyping(character.id, false)
             }
@@ -293,6 +320,8 @@ final class ChatViewModel {
     func sendUserVoice(transcript: String, audioURL: URL) {
         let trimmed = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, !isSending, !isLoadingHistory else { return }
+        // Kredi yetmiyorsa istek ATMA — paywall aç.
+        guard hasTokensOrPaywall() else { return }
 
         let lastMessageAt = messages.last?.createdAt
         let messageID = UUID()
@@ -353,9 +382,11 @@ final class ChatViewModel {
                     NotificationScheduler.shared.cancelSleepyGoodnight(for: character.id)
                 }
             } catch {
-                errorMessage = isInsufficientTokensError(error)
-                    ? String(localized: "Not enough tokens. Get more to keep chatting.")
-                    : error.localizedDescription
+                if isInsufficientTokensError(error) {
+                    presentInsufficientTokensPaywall()   // uyarı yok, paywall aç
+                } else {
+                    errorMessage = error.localizedDescription
+                }
                 showsTypingBubble = false
                 store?.setTyping(character.id, false)
             }
@@ -428,9 +459,11 @@ final class ChatViewModel {
                     NotificationScheduler.shared.cancelSleepyGoodnight(for: character.id)
                 }
             } catch {
-                errorMessage = isInsufficientTokensError(error)
-                    ? String(localized: "Not enough tokens. Get more to keep chatting.")
-                    : error.localizedDescription
+                if isInsufficientTokensError(error) {
+                    presentInsufficientTokensPaywall()   // uyarı yok, paywall aç
+                } else {
+                    errorMessage = error.localizedDescription
+                }
                 showsTypingBubble = false
                 store?.setTyping(character.id, false)
             }
@@ -483,6 +516,8 @@ final class ChatViewModel {
     /// bu sayede kullanıcı önce token maliyetini görüp sonra karar verir.
     func sendVoiceRequest() {
         guard !isSending, !isLoadingHistory else { return }
+        // Ses PRO özelliği — PRO değilse (kredi yetse bile) PRO paywall aç, üretme.
+        guard PurchaseService.shared.isPro else { showPaywall = true; return }
         let typed = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         // Kullanıcı bir şey yazmadıysa varsayılan metin: "Sesli mesaj gönder"
         // (buton etiketiyle aynı) — mesaj balonunda bu görünür.
@@ -513,6 +548,8 @@ final class ChatViewModel {
     /// ile seslendirir (12 token, bkz. voice-message-tts). Ses tam olarak
     /// cihaza kaydedilene KADAR balon "üretiliyor" durumunda kalır.
     func generatePendingVoice(for messageID: UUID) {
+        // Ses PRO özelliği — PRO değilse üretme, PRO paywall aç.
+        guard PurchaseService.shared.isPro else { showPaywall = true; return }
         guard let idx = messages.firstIndex(where: { $0.id == messageID }),
               messages[idx].isPendingVoice,
               !generatingVoiceMessageIDs.contains(messageID),
@@ -576,7 +613,7 @@ final class ChatViewModel {
                     handleTokenBalance(tokenBalance)
                 case .insufficientTokens:
                     generatingVoiceMessageIDs.remove(messageID)
-                    errorMessage = String(localized: "Not enough tokens. Get more to keep chatting.")
+                    presentInsufficientTokensPaywall()   // uyarı yok, paywall aç
                     isSending = false
                     return
                 case .failure:
@@ -604,9 +641,11 @@ final class ChatViewModel {
                 applyPostReplyEffects(gotPhoto: nil, stored: stored)
             } catch {
                 generatingVoiceMessageIDs.remove(messageID)
-                errorMessage = isInsufficientTokensError(error)
-                    ? String(localized: "Not enough tokens. Get more to keep chatting.")
-                    : error.localizedDescription
+                if isInsufficientTokensError(error) {
+                    presentInsufficientTokensPaywall()   // uyarı yok, paywall aç
+                } else {
+                    errorMessage = error.localizedDescription
+                }
             }
             isSending = false
         }
@@ -624,6 +663,8 @@ final class ChatViewModel {
     /// generatePendingImage).
     func sendImageRequest() {
         guard !isSending, !isLoadingHistory else { return }
+        // Foto PRO özelliği — PRO değilse (kredi yetse bile) PRO paywall aç, üretme.
+        guard PurchaseService.shared.isPro else { showPaywall = true; return }
         let typed = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         // Kullanıcı bir şey yazmadıysa varsayılan metin: "Fotoğraf gönder"
         // (buton etiketiyle aynı) — mesaj balonunda bu görünür, tarif olarak da kullanılır.
@@ -655,6 +696,8 @@ final class ChatViewModel {
     /// tamamlanmadan `imageURL` set edilmez, yoksa CachedImage 1-2 saniye
     /// boş görünürdü (bkz. kullanıcı talebi).
     func generatePendingImage(for messageID: UUID) {
+        // Foto PRO özelliği — PRO değilse üretme, PRO paywall aç.
+        guard PurchaseService.shared.isPro else { showPaywall = true; return }
         guard let idx = messages.firstIndex(where: { $0.id == messageID }),
               let prompt = messages[idx].pendingImagePrompt,
               messages[idx].imageURL == nil,
@@ -726,9 +769,11 @@ final class ChatViewModel {
                 applyPostReplyEffects(gotPhoto: imageResult.url, stored: stored)
             } catch {
                 generatingImageMessageIDs.remove(messageID)
-                errorMessage = isInsufficientTokensError(error)
-                    ? String(localized: "Not enough tokens. Get more to keep chatting.")
-                    : error.localizedDescription
+                if isInsufficientTokensError(error) {
+                    presentInsufficientTokensPaywall()   // uyarı yok, paywall aç
+                } else {
+                    errorMessage = error.localizedDescription
+                }
                 showsTypingBubble = false
                 isSendingImageReply = false
                 store?.setTyping(character.id, false)

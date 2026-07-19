@@ -20,6 +20,9 @@ struct ChatListView: View {
     @State private var items: [ChatItem] = []
     @State private var isLoading = true
     @State private var searchText = ""
+    /// Şu an açık (swipe ile "Sil" görünen) tek satır — biri açılınca diğeri
+    /// kapanır; başka yere dokununca nil'e çekilip hepsi kapanır.
+    @State private var openRowID: UUID?
 
     private let service = ConversationsService()
 
@@ -34,11 +37,64 @@ struct ChatListView: View {
         return items.filter { $0.character.name.localizedCaseInsensitiveContains(searchText) }
     }
 
+    /// Sohbeti listeden kaldır + sunucu/cihaz kaydını sil (bkz. ChatMaintenance).
+    /// Ayrıca kalıcı bir "tombstone" (silinme zamanı) yazılır — sunucu silme
+    /// gecikmesi / önbellek yarışı / chat açılınca yeniden-oluşma OLSA BİLE
+    /// silinen sohbet, gerçekten YENİ bir aktivite gelene kadar listede görünmez.
+    private func deleteItem(_ item: ChatItem, animated: Bool = true) {
+        setTombstone(item.character.id)
+        if animated {
+            withAnimation { items.removeAll { $0.character.id == item.character.id } }
+        } else {
+            // Basılı tut → "bam" anında sil, animasyon yok (bkz. kullanıcı talebi).
+            items.removeAll { $0.character.id == item.character.id }
+        }
+        saveCachedItems(items)
+        Task { await ChatMaintenance.clearChat(character: item.character, store: store) }
+    }
+
+    // MARK: - Silinmiş sohbet "tombstone"ları (kalıcı, UserDefaults)
+
+    private static let tombstonesKey = "chatlist.deleted.tombstones.v1"
+
+    private func tombstones() -> [String: Double] {
+        (UserDefaults.standard.dictionary(forKey: Self.tombstonesKey) as? [String: Double]) ?? [:]
+    }
+    private func setTombstone(_ id: UUID) {
+        var t = tombstones()
+        t[id.uuidString] = Date().timeIntervalSince1970
+        UserDefaults.standard.set(t, forKey: Self.tombstonesKey)
+    }
+    private func clearTombstone(_ id: UUID) {
+        var t = tombstones()
+        t.removeValue(forKey: id.uuidString)
+        UserDefaults.standard.set(t, forKey: Self.tombstonesKey)
+    }
+
+    /// Tombstone'lanmış sohbetleri gizler; ama silinme zamanından SONRA gerçek
+    /// bir aktivite olduysa (kullanıcı tekrar yazışmaya başladı) tombstone'u
+    /// kaldırıp sohbeti geri gösterir.
+    private func applyTombstones(_ list: [ChatItem]) -> [ChatItem] {
+        let tomb = tombstones()
+        guard !tomb.isEmpty else { return list }
+        return list.filter { item in
+            guard let ts = tomb[item.character.id.uuidString] else { return true }
+            let latest = parseISO8601(item.last?.createdAt) ?? parseISO8601(item.updatedAt) ?? .distantPast
+            if latest.timeIntervalSince1970 > ts + 1 {   // silmeden SONRA yeni aktivite → geri getir
+                clearTombstone(item.character.id)
+                return true
+            }
+            return false   // hâlâ silinmiş sayılır → gizle
+        }
+    }
+
     var body: some View {
         ZStack {
             LinearGradient(colors: [AppColor.bg, AppColor.bg2, AppColor.bg],
                            startPoint: .top, endPoint: .bottom)
                 .ignoresSafeArea()
+                // Açık bir "Sil" satırı varken boş bir yere dokununca kapansın.
+                .onTapGesture { if openRowID != nil { openRowID = nil } }
 
             // Başlık + arama + "ALL MESSAGES" SABİT kalır; yalnızca mesaj
             // listesi (ALL MESSAGES'ın altındaki kısım) kayar.
@@ -55,13 +111,26 @@ struct ChatListView: View {
                 } else {
                     allMessagesLabel
                     ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 0) {
+                        // VStack (Lazy DEĞİL) — kasıtlı: LazyVStack görünmeyen
+                        // satırların yüksekliğini TAHMİN ediyor, tahmin şaşınca
+                        // satırlar arasında boşluklar oluşuyordu (bkz. kullanıcı
+                        // ekran görüntüsü). Sohbet listesi kısa, hepsini ölçmek ucuz.
+                        VStack(alignment: .leading, spacing: 0) {
                             ForEach(filtered) { item in
-                                NavigationLink(value: item.character) {
+                                // Sola çekince "Sil" butonu belirir + AÇIK kalır
+                                // (açmadan chat'i açmaz); basılı tutunca menüde de
+                                // "Sil" var (bkz. kullanıcı talebi).
+                                SwipeToDeleteRow(
+                                    id: item.character.id,
+                                    openRowID: $openRowID,
+                                    onTap: { store.pendingChatCharacter = item.character },
+                                    onDelete: { deleteItem(item) }
+                                ) {
                                     ChatHistoryRow(item: item,
-                                                   isTyping: store.typingCharacterIDs.contains(item.character.id))
+                                                   isTyping: store.typingCharacterIDs.contains(item.character.id),
+                                                   // Basılı tut menüsündeki "Sil" → animasyonsuz, anında.
+                                                   onDelete: { deleteItem(item, animated: false) })
                                 }
-                                .buttonStyle(.plain)
                             }
                         }
                         .padding(.bottom, 100) // tab bar boşluğu
@@ -79,7 +148,7 @@ struct ChatListView: View {
         // Diskteki önbellekten ANINDA göster — sadece ilk (soğuk) yüklemede;
         // typing-değişikliği gibi sonraki tetiklemelerde zaten canlı veri var.
         if items.isEmpty, let cached = loadCachedItems(), !cached.isEmpty {
-            items = cached
+            items = applyTombstones(cached)
             isLoading = false
         }
 
@@ -150,6 +219,15 @@ struct ChatListView: View {
             let rhsDate = parseISO8601(rhs.last?.createdAt) ?? parseISO8601(rhs.updatedAt) ?? .distantPast
             return lhsDate > rhsDate
         }
+        // Karakter başına TEK satır — aynı karaktere ait birden çok konuşma
+        // (ChatItem.id == character.id) ForEach'te kimlik çakışması + duplike
+        // satır + "birini çekince ikisi açılıyor" hatasına yol açıyordu.
+        // Sıralama sonrası ilk (en yeni) satır tutulur.
+        var seenCharacterIDs = Set<UUID>()
+        items = items.filter { seenCharacterIDs.insert($0.character.id).inserted }
+        // Silinmiş (tombstone'lu) sohbetleri gizle — sunucu/önbellek gecikse bile
+        // geri gelmesin (bkz. applyTombstones).
+        items = applyTombstones(items)
         isLoading = false
         saveCachedItems(items)
     }
@@ -233,10 +311,6 @@ struct ChatListView: View {
             Text("No chats yet")
                 .font(.title3.bold())
                 .foregroundStyle(.white)
-            Text("Message someone you liked in Discover to start chatting 💬")
-                .font(.subheadline)
-                .multilineTextAlignment(.center)
-                .foregroundStyle(.white.opacity(0.6))
         }
         .frame(maxWidth: .infinity)
         .padding(.top, 60)
@@ -248,6 +322,7 @@ struct ChatListView: View {
 private struct ChatHistoryRow: View {
     let item: ChatItem
     let isTyping: Bool
+    var onDelete: () -> Void = {}
     @Environment(CharacterStore.self) private var store
     @State private var showProfile = false
     @State private var addSheetKind: NoteKind?
@@ -256,9 +331,10 @@ private struct ChatHistoryRow: View {
 
     private var hasUnread: Bool { item.unread > 0 }
 
-    init(item: ChatItem, isTyping: Bool) {
+    init(item: ChatItem, isTyping: Bool, onDelete: @escaping () -> Void = {}) {
         self.item = item
         self.isTyping = isTyping
+        self.onDelete = onDelete
         _isBlocked = State(initialValue: BlockedCharactersStore.isBlocked(item.character.id))
     }
 
@@ -311,7 +387,8 @@ private struct ChatHistoryRow: View {
             }
         }
         .padding(.horizontal, 20)
-        .padding(.vertical, 10)
+        // Sabit satır yüksekliği — tüm satırlar tekdüze olsun, boşluk oluşmasın.
+        .frame(height: 72)
         .background(hasUnread ? AppColor.pink.opacity(0.08) : .clear)
         .contextMenu {
             Button { showProfile = true } label: { Label("View Profile", systemImage: "person.circle") }
@@ -319,7 +396,8 @@ private struct ChatHistoryRow: View {
             Button { addSheetKind = .behavior } label: { Label("Add Behavior", systemImage: "face.smiling") }
             Button(role: .destructive) {
                 Task { await ChatMaintenance.clearChat(character: item.character, store: store) }
-            } label: { Label("Clear Chat", systemImage: "trash") }
+            } label: { Label("Clear Chat", systemImage: "eraser") }
+            Button(role: .destructive) { onDelete() } label: { Label("Sil", systemImage: "trash") }
             if isBlocked {
                 Button {
                     BlockedCharactersStore.unblock(item.character.id)
@@ -378,6 +456,8 @@ private struct ChatHistoryRow: View {
 
     @ViewBuilder
     private var rightAccessory: some View {
+        // Okunmamış sayısı rozeti kalır; "okundu" (checkmark) ikonu kaldırıldı
+        // (bkz. kullanıcı talebi: saat altında ikon olmasın).
         if hasUnread {
             Text("\(item.unread)")
                 .font(.system(size: 11, weight: .bold))
@@ -385,11 +465,87 @@ private struct ChatHistoryRow: View {
                 .frame(minWidth: 20, minHeight: 20)
                 .padding(.horizontal, 5)
                 .background(AppColor.pink, in: Capsule())
-        } else if let last = item.last, last.isUser {
-            Image(systemName: "checkmark.message.fill")
-                .font(.system(size: 12))
-                .foregroundStyle(.white.opacity(0.4))
         }
+    }
+}
+
+/// Sola çekince "Sil" butonu beliren satır sarmalayıcı. List kullanmadan
+/// (özel stil + chevron'suz NavigationLink korunsun diye) kendi swipe'ı:
+/// - Yatay-baskın sürükleme sola açar/sağa kapatır (simultaneousGesture → dikey
+///   scroll ve dokunma-ile-açma çakışmaz).
+/// - Sil butonu içeriğin SAĞINDA, kapalıyken ekran dışında (clipped).
+private struct SwipeToDeleteRow<Content: View>: View {
+    let id: UUID
+    @Binding var openRowID: UUID?
+    let onTap: () -> Void
+    let onDelete: () -> Void
+    @ViewBuilder var content: () -> Content
+
+    @State private var offset: CGFloat = 0
+    @State private var lastOffset: CGFloat = 0
+    private let deleteWidth: CGFloat = 88
+    private let rowHeight: CGFloat = 72
+
+    private var isOpen: Bool { offset < 0 }
+
+    var body: some View {
+        GeometryReader { geo in
+            HStack(spacing: 0) {
+                content()
+                    .frame(width: geo.size.width)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        // Açıkken dokunmak KAPATIR (chat'i açmaz); kapalıyken açar.
+                        if isOpen { close() }
+                        else { openRowID = nil; onTap() }
+                    }
+                Button {
+                    onDelete()
+                } label: {
+                    VStack(spacing: 4) {
+                        Image(systemName: "trash.fill").font(.system(size: 18, weight: .semibold))
+                        Text("Sil").font(.system(size: 12, weight: .bold))
+                    }
+                    .foregroundStyle(.white)
+                    .frame(width: deleteWidth)
+                    .frame(maxHeight: .infinity)
+                    .background(Color.red)
+                }
+                .buttonStyle(.plain)
+            }
+            .offset(x: offset)
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 15)
+                    .onChanged { v in
+                        // Yalnızca yatay-baskın hareket — dikey scroll'a karışma.
+                        guard abs(v.translation.width) > abs(v.translation.height) else { return }
+                        offset = min(0, max(-deleteWidth, lastOffset + v.translation.width))
+                    }
+                    .onEnded { v in
+                        guard abs(v.translation.width) > abs(v.translation.height) else { return }
+                        let shouldOpen = offset < -deleteWidth / 2
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                            offset = shouldOpen ? -deleteWidth : 0
+                        }
+                        lastOffset = offset
+                        // Bu satır açıldıysa "tek açık satır" yap → diğerleri kapanır.
+                        if shouldOpen { openRowID = id }
+                        else if openRowID == id { openRowID = nil }
+                    }
+            )
+        }
+        .frame(height: rowHeight)
+        .clipped()
+        // Başka bir satır açıldı (ya da hepsi kapatıldı) → bunu kapat.
+        .onChange(of: openRowID) { _, newID in
+            if newID != id, offset != 0 { close() }
+        }
+    }
+
+    private func close() {
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { offset = 0 }
+        lastOffset = 0
+        if openRowID == id { openRowID = nil }
     }
 }
 

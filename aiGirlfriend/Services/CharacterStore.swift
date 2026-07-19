@@ -37,6 +37,11 @@ final class CharacterStore {
     /// Sohbetler sekmesine geçiş yapmak için (level-up dışındaki tüm bot bildirimleri).
     var pendingTab: MainTab?
 
+    /// Sohbet listesinden bir satıra dokununca — MainTabView bunu görüp o
+    /// karakterin sohbetine programatik geçer (NavigationLink yerine, çünkü
+    /// satırda özel swipe/tap davranışı var, bkz. ChatListView.SwipeToDeleteRow).
+    var pendingChatCharacter: Character?
+
     func setTyping(_ id: UUID, _ value: Bool) {
         if value { typingCharacterIDs.insert(id) } else { typingCharacterIDs.remove(id) }
     }

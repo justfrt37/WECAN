@@ -43,35 +43,11 @@ struct MainTabView: View {
     @Environment(CharacterStore.self) private var store
     @Environment(TokenStore.self) private var tokenStore
     @Environment(OnboardingStore.self) private var onboarding
-    @State private var selection: MainTab = MainTabView.initialTab()
+    @State private var selection: MainTab = .discover
     @State private var path = NavigationPath()
-    @State private var showTokenStore = MainTabView.initialShowStore()
+    @State private var showTokenStore = false
     @State private var showPaywall = false
     @State private var streakResult: StreakClaimResult?
-
-    /// DEBUG: SIMCTL_CHILD_SHOW_STORE=1 ile coin Mağaza'yı açık başlat (SS için).
-    private static func initialShowStore() -> Bool {
-        #if DEBUG
-        return ProcessInfo.processInfo.environment["SHOW_STORE"] == "1"
-        #else
-        return false
-        #endif
-    }
-
-    /// DEBUG: SIMCTL_CHILD_MAIN_TAB ile başlangıç sekmesini seç (SS almak için).
-    private static func initialTab() -> MainTab {
-        #if DEBUG
-        switch ProcessInfo.processInfo.environment["MAIN_TAB"] {
-        case "chat":    return .chat
-        case "explore": return .explore
-        case "likes":   return .likes
-        case "profile": return .profile
-        default:        return .discover
-        }
-        #else
-        return .discover
-        #endif
-    }
 
     /// Onboarding biterken seçilen karakterin (Scarlet/Maya) chat'ini, uygulama
     /// açılır açılmaz DOĞRUDAN açar — paywall YOK (bkz. OnboardingReadyView).
@@ -152,6 +128,12 @@ struct MainTabView: View {
                     store.pendingMeetRequest = nil
                 }
             }
+            .onChange(of: store.pendingChatCharacter) { _, character in
+                if let character {
+                    path.append(character)
+                    store.pendingChatCharacter = nil
+                }
+            }
             .onChange(of: store.pendingTab) { _, tab in
                 if let tab {
                     selection = tab
@@ -159,31 +141,6 @@ struct MainTabView: View {
                 }
             }
             .onAppear { openPendingOnboardingChat() }
-            #if DEBUG
-            .task {
-                // SS için: OPEN_CHAT=1 ile ilk karakterin chat'ini örnek mesajlarla aç.
-                guard ProcessInfo.processInfo.environment["OPEN_CHAT"] == "1" else { return }
-                for _ in 0..<50 where store.characters.isEmpty { try? await Task.sleep(nanoseconds: 100_000_000) }
-                guard let c = store.characters.first else { return }
-                let msgs = [
-                    Message(role: .assistant, content: "Selam 🙂 Nihayet yazdın! Günün nasıl geçti?"),
-                    Message(role: .user, content: "İyiydi ama biraz yorgunum, seni merak ettim"),
-                    Message(role: .assistant, content: "Aww, beni merak etmen çok tatlı 🥰 Anlat bakalım, seni ne yordu bugün?"),
-                    Message(role: .user, content: "İş yoğundu, toplantılar bitmek bilmedi"),
-                    Message(role: .assistant, content: "Off, o toplantılar... Bari arada beni düşündün mü? 😏"),
-                    Message(role: .user, content: "Tabii ki düşündüm 😄 Sen ne yapıyordun?"),
-                    Message(role: .assistant, content: "Seni düşünüyordum işte 😊 Kahvemi alıp pencere kenarında oturdum, dışarısı yağmurluydu."),
-                    Message(role: .user, content: "Çok romantik geliyor kulağa"),
-                    Message(role: .assistant, content: "Keşke yanımda olsaydın, sana da bir fincan yapardım ☕ Sarılıp film izlerdik."),
-                    Message(role: .user, content: "Bunu gerçekten çok isterdim"),
-                    Message(role: .assistant, content: "O zaman söz — bu akşam sadece ikimiz 💕 Ne izlemek istersin?"),
-                ]
-                let stored = LocalConversationStore.Stored(messages: msgs, xp: 60, level: 1, summary: "", summarizedCount: 0)
-                LocalConversationStore.shared.save(stored, for: c.id)
-                store.chatCache[c.id] = msgs
-                path.append(c)
-            }
-            #endif
         }
         .tint(AppColor.pink)
         // NavigationStack'in KENDİSİNE bindirilmiş overlay — kök içeriğe değil,

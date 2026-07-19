@@ -74,7 +74,6 @@ enum SupabaseAuth {
             UserDefaultsManager.shared.userId = uid
             UserDefaultsManager.shared.accessToken = token
             UserDefaultsManager.shared.refreshToken = s.refresh_token
-            print("Supabase \(label) OK — USERID: \(uid)")
             return true
         } catch {
             print("Supabase \(label) ağ hatası: \(error.localizedDescription)")

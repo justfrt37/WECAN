@@ -4344,9 +4344,6 @@
     "DEV: Edit Character" : {
 
     },
-    "DEV: Token Testing" : {
-
-    },
     "Devam et" : {
 
     },
@@ -9489,9 +9486,6 @@
         }
       }
     },
-    "Max" : {
-
-    },
     "Medium" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -9534,6 +9528,7 @@
       }
     },
     "Message someone you liked in Discover to start chatting 💬" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -10713,6 +10708,7 @@
       }
     },
     "Not enough tokens. Get more to keep chatting." : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -11213,9 +11209,6 @@
           }
         }
       }
-    },
-    "Off" : {
-
     },
     "Officially blaming you for my lack of sleep right now!" : {
 
@@ -12235,9 +12228,6 @@
         }
       }
     },
-    "Pro" : {
-
-    },
     "PRO" : {
       "localizations" : {
         "de" : {
@@ -12277,9 +12267,6 @@
           }
         }
       }
-    },
-    "Pro+" : {
-
     },
     "Profession" : {
       "localizations" : {
@@ -14185,9 +14172,6 @@
           }
         }
       }
-    },
-    "Subscription tier" : {
-
     },
     "Suspicious" : {
       "localizations" : {

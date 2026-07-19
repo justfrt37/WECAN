@@ -8,6 +8,13 @@ import Photos
 import PhotosUI
 import UIKit
 
+/// Mesaj listesinin alt kenarının, kaydırma görünür alanındaki Y konumu —
+/// "kullanıcı dibe yakın mı" tespitinde kullanılır (bkz. ChatView.messagesList).
+private struct ChatBottomOffsetKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
+}
+
 struct ChatView: View {
     @State private var viewModel: ChatViewModel
     @Environment(\.dismiss) private var dismiss
@@ -23,6 +30,10 @@ struct ChatView: View {
     @State private var voice = VoicePlayer()
     @State private var didPrefill = false
     @State private var readyToAutoScroll = false
+    /// Kullanıcı listenin DİBİNE yakın mı — yeni mesaj/typing gelince yalnızca
+    /// dipteyse otomatik kaydırılır; geçmişe bakmak için yukarı kaydırdıysa dibe
+    /// ZORLANMAZ (yukarı-aşağı zıplama bunun eksikliğindendi).
+    @State private var isNearBottom = true
     @State private var levelUpBanner: ChatViewModel.LevelUpEvent?
     @State private var avatarPulse = false
     /// Bir mesaja dokununca saatini göster — tekrar dokununca gizlenir.
@@ -120,6 +131,10 @@ struct ChatView: View {
             await viewModel.startActivityRefreshLoop()
         }
         .fullScreenCover(isPresented: $showTokenStore) {
+            TokenStoreView(tokenStore: tokenStore)
+        }
+        // Token yetmeyince (PRO kullanıcı) VM bunu açar — uyarı yerine coin mağazası.
+        .fullScreenCover(isPresented: $viewModel.showTokenStore) {
             TokenStoreView(tokenStore: tokenStore)
         }
         .fullScreenCover(isPresented: $showProfile) {
@@ -286,10 +301,14 @@ struct ChatView: View {
                 // alta sarmak yerine font küçülterek tek satırda sığar.
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-                // Coin (token) rozeti + Ayarlar AYNI HStack'te → doğal olarak aynı
-                // hizada. Sohbette global overlay rozeti gizli (bkz. MainTabView),
-                // çift rozet olmasın diye burada gösteriliyor.
-                TokenBadge(tokenStore: tokenStore) { showTokenStore = true }
+                // PRO değilse coin (kalp) rozeti yerine PRO butonu; PRO ise coin
+                // rozeti. Ayarlar hep yanında (bkz. kullanıcı talebi). Sohbette
+                // global overlay rozeti gizli (bkz. MainTabView).
+                if PurchaseService.shared.isPro {
+                    TokenBadge(tokenStore: tokenStore) { showTokenStore = true }
+                } else {
+                    chatProButton
+                }
                 headerButton("gearshape.fill", menu: true)
             }
             .opacity(levelUpBanner == nil ? 1 : 0)
@@ -305,6 +324,25 @@ struct ChatView: View {
         // yer açar, bkz. MainTabView coin overlay trailing padding).
         .padding(.trailing, 14)
         .padding(.vertical, 8)
+    }
+
+    /// PRO değilken chat header'ında coin rozeti yerine görünen PRO butonu —
+    /// onboarding paywall'ını açar (MainTabView'daki tab-kökü PRO butonuyla aynı).
+    private var chatProButton: some View {
+        Button { viewModel.showPaywall = true } label: {
+            HStack(spacing: 5) {
+                Image(systemName: "crown.fill").font(.system(size: 12, weight: .bold))
+                Text("PRO").font(.system(size: 13, weight: .heavy))
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 13).padding(.vertical, 7)
+            .background(
+                LinearGradient(colors: [Color(hex: 0xFFAF5C), Color(hex: 0xFF6F61)],
+                               startPoint: .leading, endPoint: .trailing),
+                in: Capsule()
+            )
+        }
+        .buttonStyle(.plain)
     }
 
     private func levelUpBannerView(_ event: ChatViewModel.LevelUpEvent) -> some View {
@@ -402,6 +440,7 @@ struct ChatView: View {
     // MARK: Mesajlar
 
     private var messagesList: some View {
+        GeometryReader { outer in
         ScrollViewReader { proxy in
             ScrollView {
                 // VStack (NOT LazyVStack) — kasıtlı. Lazy çizim, görünmeyen
@@ -484,27 +523,38 @@ struct ChatView: View {
                 // Kısa içerik (ör. ilk mesaj) doğal olarak ÜSTTEN başlar → header'a
                 // dayanır. Uzun geçmiş açılışta programatik olarak dibe konumlanır.
                 .frame(maxWidth: .infinity, alignment: .top)
+                // İçeriğin alt kenarının, görünür alandaki konumunu yayınla.
+                .background(
+                    GeometryReader { g in
+                        Color.clear.preference(
+                            key: ChatBottomOffsetKey.self,
+                            value: g.frame(in: .named("chatScroll")).maxY
+                        )
+                    }
+                )
             }
             // NOT: defaultScrollAnchor(.bottom) KULLANILMIYOR — yukarı kaydırırken
             // dibe yeniden tutunup titremeye (zıplama) yol açıyordu (bkz. kullanıcı
             // talebi). Onun yerine: açılışta animasyonsuz, yeni mesajda animasyonlu
-            // programatik kaydırma.
+            // programatik kaydırma — ve yalnızca kullanıcı DİPTEYSE (bkz. isNearBottom).
+            .coordinateSpace(name: "chatScroll")
             .scrollIndicators(.hidden)
+            .onPreferenceChange(ChatBottomOffsetKey.self) { contentBottomY in
+                // İçerik alt kenarı görünür alanın dibine yakınsa "dipte" say.
+                // Uzaktaysa (yukarı kaydırılmış) yeni mesaj dibe ZORLAMAZ.
+                isNearBottom = contentBottomY <= outer.size.height + 140
+            }
             .onChange(of: viewModel.messages.count) {
-                if readyToAutoScroll {
-                    scrollToBottom(proxy)
-                    // Foto gibi UZUN balonlar yerleştikten sonra tekrar dibe kay.
-                    Task {
-                        try? await Task.sleep(nanoseconds: 300_000_000)
-                        if readyToAutoScroll { scrollToBottom(proxy) }
-                    }
-                } else {
+                guard readyToAutoScroll else {
                     // İlk yükleme (geçmiş): animasyonsuz dibe konumlan.
                     scrollToBottomInstant(proxy)
+                    return
                 }
+                // Kullanıcı geçmişe bakmak için yukarı kaymışsa dibe ZORLAMA.
+                if isNearBottom { scrollToBottom(proxy) }
             }
             .onChange(of: viewModel.showsTypingBubble) {
-                if readyToAutoScroll { scrollToBottom(proxy) }
+                if readyToAutoScroll && isNearBottom { scrollToBottom(proxy) }
             }
             .onAppear {
                 Task {
@@ -515,6 +565,7 @@ struct ChatView: View {
                     readyToAutoScroll = true
                 }
             }
+        }
         }
     }
 
@@ -1013,38 +1064,41 @@ private struct PendingVoiceBubble: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            if isPreparing || isGenerating {
-                // Kayıt ikonu balonun İÇİNDE yanıp söner (önce ~3 sn hazırlanıyor,
-                // sonra dokununca üretim) — bittiğinde WhatsApp tarzı sesli mesaja
-                // dönüşür (bkz. kullanıcı talebi).
-                Image(systemName: "mic.fill")
-                    .font(.system(size: 22))
-                    .foregroundStyle(AppColor.pink)
-                    .opacity(blink ? 1 : 0.25)
-                    .onAppear {
-                        withAnimation(.easeInOut(duration: 0.65).repeatForever(autoreverses: true)) {
-                            blink = true
+            // Öndeki eleman (mikrofon / maliyet rozeti) SABİT genişlikte bir
+            // yuvada — kalp rozetine basıp mikrofona geçince balon boyutu
+            // DEĞİŞMESİN (bkz. kullanıcı talebi).
+            Group {
+                if isPreparing || isGenerating {
+                    // Kayıt ikonu balonun İÇİNDE yanıp söner (önce ~3 sn hazırlanıyor,
+                    // sonra dokununca üretim) — bittiğinde WhatsApp tarzı sesli mesaja
+                    // dönüşür (bkz. kullanıcı talebi).
+                    Image(systemName: "mic.fill")
+                        .font(.system(size: 22))
+                        .foregroundStyle(AppColor.pink)
+                        .opacity(blink ? 1 : 0.25)
+                        .onAppear {
+                            withAnimation(.easeInOut(duration: 0.65).repeatForever(autoreverses: true)) {
+                                blink = true
+                            }
                         }
+                        // Kilitli aşamada mikrofon kaybolunca sıfırla — satın almaya
+                        // basıp üretim başlayınca tekrar görününce yeniden yanıp sönsün.
+                        .onDisappear { blink = false }
+                } else {
+                    // PLAY tuşunun yerinde maliyet rozeti — beyaz zemin, sayı + kalp.
+                    HStack(spacing: 3) {
+                        Text("\(coinCost)")
+                            .font(.system(size: 14, weight: .heavy))
+                            .foregroundStyle(.black)
+                        CoinIcon(size: 15)
                     }
-                    // Kilitli aşamada mikrofon kaybolunca sıfırla — satın almaya
-                    // basıp üretim başlayınca tekrar görününce yeniden yanıp sönsün
-                    // (bkz. kullanıcı talebi).
-                    .onDisappear { blink = false }
-            } else {
-                // PLAY tuşunun yerinde maliyet rozeti — beyaz zemin, sayı + kalp.
-                // Mikrofondan SONRA animasyonlu belirir (bkz. sendVoiceRequest
-                // withAnimation + kullanıcı talebi).
-                HStack(spacing: 3) {
-                    Text("\(coinCost)")
-                        .font(.system(size: 14, weight: .heavy))
-                        .foregroundStyle(.black)
-                    CoinIcon(size: 15)
+                    .padding(.horizontal, 9)
+                    .frame(height: 30)
+                    .background(.white, in: Capsule())
+                    .transition(.scale(scale: 0.5).combined(with: .opacity))
                 }
-                .padding(.horizontal, 9)
-                .frame(height: 30)
-                .background(.white, in: Capsule())
-                .transition(.scale(scale: 0.5).combined(with: .opacity))
             }
+            .frame(width: 58, alignment: .leading)
 
             // Dekoratif dalga-formu (soluk, WhatsApp görünümü). Süre YAZISI YOK —
             // süre yalnızca ses açılıp geldiğinde (VoiceMessageBubble) gösterilir
