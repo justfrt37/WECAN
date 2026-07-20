@@ -1,10 +1,17 @@
 //
 //  LocalConversationStore.swift
-//  Kullanıcı tarafından oluşturulan karakterlerin sohbet geçmişini
-//  cihaz üzerinde (Application Support) saklar. Supabase messages tablosu kullanılmaz.
+//  "SIFIR YEREL" (bkz. plan tender-cooking-bear): sohbet durumu artık DİSKE
+//  YAZILMAZ. Bu tip yalnızca GEÇİCİ bir bellek-içi önbelleğe dönüştü — tek
+//  doğru kaynak Supabase'dir (conversations + messages + durum sütunları, bkz.
+//  migration 009). Her açılışta CharacterStore.hydrateConversations() bu
+//  önbelleği sunucudan tazeler; uygulama silinip yüklenince önbellek boş başlar
+//  ve yalnızca sunucuda olan geri gelir. Böylece "silinen sohbet diriliyor /
+//  reinstall sonrası geri geliyor" hataları kökten biter.
 //
-//  Özet sistemi: her 20 mesajda bir eski mesajlar özetlenir (sunucu modunu aynalar).
-//  Yapı: summary (sıkıştırılmış geçmiş) + son 20 mesaj → AI'a gönderilir.
+//  API (load/save/clear/allCharacterIDs/clearAll/updateSummary) korundu ki
+//  mevcut tüm çağrı yerleri değişmeden derlensin — yalnızca alt katman disk
+//  yerine kilitli bir bellek-içi sözlük. userId ile isim-uzayı korunur (bir
+//  anonim kullanıcının önbelleği yeniden-anonimleşme sonrası diğerine sızmasın).
 //
 
 import Foundation
@@ -12,6 +19,11 @@ import Foundation
 final class LocalConversationStore {
     static let shared = LocalConversationStore()
     private init() {}
+
+    // Eşzamanlı erişim (ör. ScheduleGenerator arka plan Task'ları) için kilit.
+    private let lock = NSLock()
+    private var mem: [String: [UUID: Stored]] = [:]
+    private func userKey() -> String { UserDefaultsManager.shared.userId ?? "anonymous" }
 
     struct Stored: Codable {
         var messages: [Message]       // tüm gerçek mesajlar (görüntüleme için)
@@ -102,73 +114,44 @@ final class LocalConversationStore {
         }
     }
 
-    // MARK: - Dosya yolu
-
-    // Namespaced by the current Supabase userId — without this, a silent
-    // re-anonymization (expired refresh token → brand-new anonymous userId)
-    // left the NEW account reading the PREVIOUS account's local chat files
-    // (character UUIDs are stable/shared, so every character looked like it
-    // already had a chat, emptying Discover and faking the matches list).
-    private func storeURL(for id: UUID) -> URL {
-        let userId = UserDefaultsManager.shared.userId ?? "anonymous"
-        let support = FileManager.default
-            .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("LocalConversations", isDirectory: true)
-            .appendingPathComponent(userId, isDirectory: true)
-        try? FileManager.default.createDirectory(at: support, withIntermediateDirectories: true)
-        return support.appendingPathComponent("\(id.uuidString).json")
-    }
-
-    // MARK: - Yükle / Kaydet / Temizle
+    // MARK: - Yükle / Kaydet / Temizle (bellek-içi)
 
     func load(for id: UUID) -> Stored? {
-        guard let data = try? Data(contentsOf: storeURL(for: id)),
-              let stored = try? JSONDecoder().decode(Stored.self, from: data)
-        else { return nil }
-        return stored
+        lock.lock(); defer { lock.unlock() }
+        return mem[userKey()]?[id]
     }
 
     func save(_ stored: Stored, for id: UUID) {
-        guard let data = try? JSONEncoder().encode(stored) else { return }
-        try? data.write(to: storeURL(for: id), options: .atomic)
+        lock.lock(); defer { lock.unlock() }
+        mem[userKey(), default: [:]][id] = stored
     }
 
     func clear(for id: UUID) {
-        try? FileManager.default.removeItem(at: storeURL(for: id))
+        lock.lock(); defer { lock.unlock() }
+        mem[userKey()]?[id] = nil
     }
 
-    /// Mevcut kullanıcının yerel konuşması olan TÜM karakter ID'leri — sohbet
-    /// listesi, sunucuda konuşması olmayan (ör. onboarding sonrası açılan ya da
-    /// bildirimle enjekte edilen) sohbetleri de göstersin diye.
+    /// Bu oturumda (sunucudan hidrasyon + onboarding + gönderim) önbelleğe
+    /// girmiş TÜM karakter ID'leri.
     func allCharacterIDs() -> [UUID] {
-        let userId = UserDefaultsManager.shared.userId ?? "anonymous"
-        let dir = FileManager.default
-            .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("LocalConversations", isDirectory: true)
-            .appendingPathComponent(userId, isDirectory: true)
-        guard let files = try? FileManager.default.contentsOfDirectory(
-            at: dir, includingPropertiesForKeys: nil
-        ) else { return [] }
-        return files.compactMap {
-            $0.pathExtension == "json" ? UUID(uuidString: $0.deletingPathExtension().lastPathComponent) : nil
-        }
+        lock.lock(); defer { lock.unlock() }
+        return Array((mem[userKey()] ?? [:]).keys)
     }
 
-    /// Tüm yerel konuşmaları siler (Ayarlar → "Tüm Verileri Sil").
+    /// Tüm bellek-içi önbelleği temizler (mevcut kullanıcı için).
     func clearAll() {
-        let dir = FileManager.default
-            .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("LocalConversations", isDirectory: true)
-        try? FileManager.default.removeItem(at: dir)
+        lock.lock(); defer { lock.unlock() }
+        mem[userKey()] = [:]
     }
 
     // MARK: - Özet güncelle (özetleme tamamlandığında çağrılır)
 
     func updateSummary(for id: UUID, summary: String, summarizedCount: Int, schedule: CharacterSchedule? = nil) {
-        guard var stored = load(for: id) else { return }
+        lock.lock(); defer { lock.unlock() }
+        guard var stored = mem[userKey()]?[id] else { return }
         stored.summary = summary
         stored.summarizedCount = summarizedCount
         if let schedule { stored.schedule = schedule }
-        save(stored, for: id)
+        mem[userKey(), default: [:]][id] = stored
     }
 }

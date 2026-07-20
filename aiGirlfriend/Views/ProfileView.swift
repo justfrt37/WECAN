@@ -19,7 +19,6 @@ struct ProfileView: View {
 
     // Ayarlar (eski SettingsView'den buraya taşındı)
     @State private var notificationsOn = false
-    @State private var showDeleteConfirm = false
 
     // TODO: gerçek URL'lerle değiştir (App Store / gizlilik / koşullar).
     private let shareURL = URL(string: "https://apps.apple.com/app/id0000000000")!
@@ -46,17 +45,11 @@ struct ProfileView: View {
                 .ignoresSafeArea()
         )
         .task { notificationsOn = await currentNotificationStatus() }
-        .alert("Tüm verileri sil?", isPresented: $showDeleteConfirm) {
-            Button("İptal", role: .cancel) {}
-            Button("Sil", role: .destructive) { deleteAllData() }
-        } message: {
-            Text("Tüm sohbetlerin ve verilerin kalıcı olarak silinecek. Bu işlem geri alınamaz.")
-        }
     }
 
     // MARK: Başlık
 
-    private var header: some View {
+     private var header: some View {
         HStack {
             Text("Profile")
                 .font(.system(size: 22, weight: .bold))
@@ -150,8 +143,6 @@ struct ProfileView: View {
                 row("Yardım & Destek", trailingIcon: "envelope.fill")
             }
             .buttonStyle(.plain)
-
-            deleteRow
         }
     }
 
@@ -195,25 +186,6 @@ struct ProfileView: View {
         .contentShape(RoundedRectangle(cornerRadius: cardRadius))
     }
 
-    private var deleteRow: some View {
-        Button { showDeleteConfirm = true } label: {
-            HStack {
-                Text("Tüm Verileri Sil")
-                    .font(.system(size: 16, weight: .bold))
-                    .foregroundStyle(Color(hex: 0xFF5A6A))
-                Spacer()
-                Image(systemName: "trash.fill")
-                    .font(.system(size: 16))
-                    .foregroundStyle(Color(hex: 0xFF5A6A))
-            }
-            .padding(.horizontal, 20)
-            .frame(height: 66)
-            .background(Color(hex: 0xFF4D5E).opacity(0.08), in: RoundedRectangle(cornerRadius: cardRadius))
-            .overlay(RoundedRectangle(cornerRadius: cardRadius).strokeBorder(Color(hex: 0xFF4D5E).opacity(0.28), lineWidth: 1))
-        }
-        .buttonStyle(.plain)
-    }
-
     // MARK: Ayarlar aksiyonları
 
     private func currentNotificationStatus() async -> Bool {
@@ -234,15 +206,6 @@ struct ProfileView: View {
                 await UIApplication.shared.open(url)
             }
         }
-    }
-
-    private func deleteAllData() {
-        // Yerel konuşmalar + sohbet listesi önbelleği.
-        LocalConversationStore.shared.clearAll()
-        let cache = FileManager.default
-            .urls(for: .cachesDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("chatlist_cache.json")
-        try? FileManager.default.removeItem(at: cache)
     }
 
 }

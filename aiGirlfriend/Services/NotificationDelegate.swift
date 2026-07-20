@@ -111,24 +111,14 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
         }
 
         if let line {
-            injectMessage(line, for: characterID)
-        }
-
-        // Ghosted gönderildi → kullanıcı tekrar yazana kadar bu karakter için
-        // TÜM proaktif bildirimler (jealousy/bedtime/level-up) susar — bkz.
-        // NotificationScheduler eligibility check'leri + noteUserSent (temizler).
-        if kind == .ghosted {
-            var stored = LocalConversationStore.shared.load(for: characterID)
-            stored?.ghostedAt = Date()
-            if let stored { LocalConversationStore.shared.save(stored, for: characterID) }
-        }
-
-        // .sleepyGoodbye reverts the character to genuinely asleep — clear the
-        // wake-override so CharacterSleepState.isEffectivelyAsleep is true again.
-        if kind == .sleepyGoodbye {
-            var stored = LocalConversationStore.shared.load(for: characterID)
-            stored?.wokenUpAt = nil
-            if let stored { LocalConversationStore.shared.save(stored, for: characterID) }
+            // SADECE "Liked You" (ilk temas) yeni bir sohbet oluşturabilir.
+            // Diğer proaktif bildirimler (ghosted/jealousy/missedYou/goodMorning...)
+            // yalnızca ZATEN VAR OLAN sohbete eklenir — kullanıcının SİLDİĞİ bir
+            // sohbeti bildirim DİRİLTMESİN (bkz. kullanıcı talebi: "sildim geri geliyor").
+            // "Sıfır yerel": mesaj SUNUCUYA yazılır (kalıcı, sohbet listesinde
+            // sunucudan görünür); ghosted_at / woken_up_at'ı da sunucu kind'e
+            // göre günceller (bkz. chat/index.ts injectProactive).
+            injectProactive(line, kind: kind, character: character, createIfMissing: kind == .liked)
         }
 
         guard navigate else { return }
@@ -155,14 +145,36 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
         completionHandler([.banner, .sound])
     }
 
-    private func injectMessage(_ text: String, for characterID: UUID) {
-        // "Liked You" bildirimleri hiç konuşulmamış botlar için gelir — o yüzden
-        // henüz LocalConversationStore kaydı yok; bu mesaj sohbetin İLK mesajı olur.
-        var stored = LocalConversationStore.shared.load(for: characterID)
-            ?? LocalConversationStore.Stored(messages: [], xp: 0, level: 1, summary: "", summarizedCount: 0)
-        stored.messages.append(Message(role: .assistant, content: text))
-        LocalConversationStore.shared.save(stored, for: characterID)
-        store.chatCache.removeValue(forKey: characterID) // force ChatViewModel to reload fresh, not the stale cache
-        store.conversationsVersion += 1
+    /// Proaktif bildirim satırını SUNUCUDA saklar (kalıcı) ve bellek-içi
+    /// önbelleği anında günceller (UI beklemesin). Var olmayan sohbet +
+    /// createIfMissing:false → hiçbir şey yapmaz (silineni diriltme).
+    private func injectProactive(_ text: String, kind: NotificationKind, character: Character, createIfMissing: Bool) {
+        let characterID = character.id
+
+        // 1) Bellek-içi anlık güncelleme — kullanıcı Sohbetler'i açtığında
+        //    sunucu yanıtını beklemeden mesajı görsün.
+        if var stored = LocalConversationStore.shared.load(for: characterID)
+            ?? (createIfMissing
+                ? LocalConversationStore.Stored(messages: [], xp: 0, level: 1, summary: "", summarizedCount: 0)
+                : nil) {
+            stored.messages.append(Message(role: .assistant, content: text))
+            // Ghosted → kullanıcı tekrar yazana kadar tüm proaktif bildirimler
+            // susar (bkz. NotificationScheduler eligibility + noteUserSent).
+            if kind == .ghosted { stored.ghostedAt = Date() }
+            // sleepyGoodbye → uyandırma override'ı temizlenir (karakter yine uyur).
+            if kind == .sleepyGoodbye { stored.wokenUpAt = nil }
+            LocalConversationStore.shared.save(stored, for: characterID)
+            store.chatCache[characterID] = stored.messages
+            store.conversationsVersion += 1
+        }
+
+        // 2) SUNUCUYA yaz (kalıcı) — sohbet listesi sunucudan beslendiği için
+        //    mesajın orada kalıcı görünmesi ŞART (bkz. ChatListView server-only).
+        Task { [store] in
+            _ = await ChatService().injectProactiveMessage(
+                character: character, kind: kind.rawValue, text: text, createIfMissing: createIfMissing
+            )
+            store.conversationsVersion += 1   // liste sunucudan tazelensin
+        }
     }
 }

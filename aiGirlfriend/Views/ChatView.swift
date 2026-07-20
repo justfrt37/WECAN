@@ -34,7 +34,6 @@ struct ChatView: View {
     /// dipteyse otomatik kaydırılır; geçmişe bakmak için yukarı kaydırdıysa dibe
     /// ZORLANMAZ (yukarı-aşağı zıplama bunun eksikliğindendi).
     @State private var isNearBottom = true
-    @State private var levelUpBanner: ChatViewModel.LevelUpEvent?
     @State private var avatarPulse = false
     /// Bir mesaja dokununca saatini göster — tekrar dokununca gizlenir.
     @State private var expandedMessageID: Message.ID?
@@ -225,17 +224,13 @@ struct ChatView: View {
             Text("\(viewModel.character.name) will no longer appear in Discover. This chat won't be deleted.")
         }
         .onChange(of: viewModel.levelUpEvent) { _, newValue in
-            guard let event = newValue else { return }
-            withAnimation(.spring(response: 0.45, dampingFraction: 0.7)) {
-                levelUpBanner = event
-                avatarPulse = true
-            }
+            // Yukarıdan inen "seviye arttı" banner'ı KALDIRILDI (bkz. kullanıcı
+            // talebi). Sadece avatar halkasında kısa bir parlama kalıyor.
+            guard newValue != nil else { return }
+            withAnimation(.spring(response: 0.45, dampingFraction: 0.7)) { avatarPulse = true }
             Task {
                 try? await Task.sleep(nanoseconds: 2_800_000_000)
-                withAnimation(.easeInOut(duration: 0.4)) {
-                    levelUpBanner = nil
-                    avatarPulse = false
-                }
+                withAnimation(.easeInOut(duration: 0.4)) { avatarPulse = false }
                 viewModel.levelUpEvent = nil
             }
         }
@@ -311,12 +306,6 @@ struct ChatView: View {
                 }
                 headerButton("gearshape.fill", menu: true)
             }
-            .opacity(levelUpBanner == nil ? 1 : 0)
-
-            if let event = levelUpBanner {
-                levelUpBannerView(event)
-                    .transition(.move(edge: .top).combined(with: .opacity))
-            }
         }
         .padding(.leading, 14)
         // Ayarlar (gear) butonu EN SAĞDA — coin rozetinin SAĞINDA, aynı hizada.
@@ -343,32 +332,6 @@ struct ChatView: View {
             )
         }
         .buttonStyle(.plain)
-    }
-
-    private func levelUpBannerView(_ event: ChatViewModel.LevelUpEvent) -> some View {
-        HStack(spacing: 10) {
-            Image(systemName: "heart.fill")
-                .font(.system(size: 18))
-                .foregroundStyle(.white)
-                .symbolEffect(.bounce, value: event.toLevel)
-            VStack(alignment: .leading, spacing: 1) {
-                Text("Relationship level up! 💕")
-                    .font(.system(size: 14, weight: .bold))
-                    .foregroundStyle(.white)
-                Text("\(event.fromStage) → \(event.toStage)")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.85))
-            }
-            Spacer()
-        }
-        .padding(.horizontal, 14)
-        .frame(maxWidth: .infinity)
-        .frame(height: 48)
-        .background(
-            LinearGradient(colors: [AppColor.pink, AppColor.amber],
-                           startPoint: .leading, endPoint: .trailing),
-            in: RoundedRectangle(cornerRadius: 14, style: .continuous)
-        )
     }
 
     private var avatarWithLevel: some View {

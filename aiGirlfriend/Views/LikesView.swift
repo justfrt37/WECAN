@@ -123,10 +123,6 @@ struct LikesView: View {
             Text("No new likes yet")
                 .font(.title3.bold())
                 .foregroundStyle(.white)
-            Text("Check back soon — someone new likes you once a day 💕")
-                .font(.subheadline)
-                .multilineTextAlignment(.center)
-                .foregroundStyle(.white.opacity(0.6))
         }
         .frame(maxWidth: .infinity)
         .padding(.top, 60)

@@ -26,66 +26,22 @@ struct ChatListView: View {
 
     private let service = ConversationsService()
 
-    /// Sohbet listesinin diskteki önbelleği — sekme her açıldığında sunucu
-    /// cevabını beklemeden ANINDA bir önceki durumu gösterir, arkada tazeler.
-    private let cacheURL: URL = FileManager.default
-        .urls(for: .cachesDirectory, in: .userDomainMask)[0]
-        .appendingPathComponent("chatlist_cache.json")
-
     private var filtered: [ChatItem] {
         guard !searchText.isEmpty else { return items }
         return items.filter { $0.character.name.localizedCaseInsensitiveContains(searchText) }
     }
 
-    /// Sohbeti listeden kaldır + sunucu/cihaz kaydını sil (bkz. ChatMaintenance).
-    /// Ayrıca kalıcı bir "tombstone" (silinme zamanı) yazılır — sunucu silme
-    /// gecikmesi / önbellek yarışı / chat açılınca yeniden-oluşma OLSA BİLE
-    /// silinen sohbet, gerçekten YENİ bir aktivite gelene kadar listede görünmez.
+    /// Sohbeti listeden kaldır + SUNUCU kaydını sil (bkz. ChatMaintenance).
+    /// "Sıfır yerel": artık disk önbelleği / tombstone yok — sunucu silme +
+    /// no-create-on-open zaten dirilmeyi engelliyor (bkz. chat/index.ts).
     private func deleteItem(_ item: ChatItem, animated: Bool = true) {
-        setTombstone(item.character.id)
         if animated {
             withAnimation { items.removeAll { $0.character.id == item.character.id } }
         } else {
             // Basılı tut → "bam" anında sil, animasyon yok (bkz. kullanıcı talebi).
             items.removeAll { $0.character.id == item.character.id }
         }
-        saveCachedItems(items)
         Task { await ChatMaintenance.clearChat(character: item.character, store: store) }
-    }
-
-    // MARK: - Silinmiş sohbet "tombstone"ları (kalıcı, UserDefaults)
-
-    private static let tombstonesKey = "chatlist.deleted.tombstones.v1"
-
-    private func tombstones() -> [String: Double] {
-        (UserDefaults.standard.dictionary(forKey: Self.tombstonesKey) as? [String: Double]) ?? [:]
-    }
-    private func setTombstone(_ id: UUID) {
-        var t = tombstones()
-        t[id.uuidString] = Date().timeIntervalSince1970
-        UserDefaults.standard.set(t, forKey: Self.tombstonesKey)
-    }
-    private func clearTombstone(_ id: UUID) {
-        var t = tombstones()
-        t.removeValue(forKey: id.uuidString)
-        UserDefaults.standard.set(t, forKey: Self.tombstonesKey)
-    }
-
-    /// Tombstone'lanmış sohbetleri gizler; ama silinme zamanından SONRA gerçek
-    /// bir aktivite olduysa (kullanıcı tekrar yazışmaya başladı) tombstone'u
-    /// kaldırıp sohbeti geri gösterir.
-    private func applyTombstones(_ list: [ChatItem]) -> [ChatItem] {
-        let tomb = tombstones()
-        guard !tomb.isEmpty else { return list }
-        return list.filter { item in
-            guard let ts = tomb[item.character.id.uuidString] else { return true }
-            let latest = parseISO8601(item.last?.createdAt) ?? parseISO8601(item.updatedAt) ?? .distantPast
-            if latest.timeIntervalSince1970 > ts + 1 {   // silmeden SONRA yeni aktivite → geri getir
-                clearTombstone(item.character.id)
-                return true
-            }
-            return false   // hâlâ silinmiş sayılır → gizle
-        }
     }
 
     var body: some View {
@@ -145,73 +101,40 @@ struct ChatListView: View {
     }
 
     private func load() async {
-        // Diskteki önbellekten ANINDA göster — sadece ilk (soğuk) yüklemede;
-        // typing-değişikliği gibi sonraki tetiklemelerde zaten canlı veri var.
-        if items.isEmpty, let cached = loadCachedItems(), !cached.isEmpty {
-            items = applyTombstones(cached)
-            isLoading = false
-        }
-
+        // "Sıfır yerel": TEK kaynak sunucu. Disk önbelleği / yerel-birleşim /
+        // tombstone YOK — yalnızca sunucudaki konuşmalar + mesajlar gösterilir.
         async let convsT = service.fetchConversations()
         async let msgsT = service.fetchAllMessages()
         let (convs, msgs) = await (convsT, msgsT)
 
-        // Mesajları konuşmaya göre grupla (desc sıralı geldi).
+        // Mesajları konuşmaya göre grupla (desc sıralı geldi — en yeni önce).
         var byConv: [UUID: [LastMessage]] = [:]
         for m in msgs { byConv[m.conversationID, default: []].append(m) }
 
         items = convs.compactMap { conv in
             guard let ch = store.characters.first(where: { $0.id == conv.characterID }) else { return nil }
             let convMsgs = byConv[conv.id] ?? []
-            let localStored = LocalConversationStore.shared.load(for: conv.characterID)
+            // Yalnızca gerçekten mesajı olan sohbetler listelenir — boş (yalnız
+            // durum) satır hayalet sohbet gibi görünmesin.
+            guard !convMsgs.isEmpty else { return nil }
 
-            // Yerel depo VARSA baz alınır — sunucu hiçbir zaman görmediği bildirim
-            // enjeksiyonlarını (jealousy/ghosted/liked) da içerir; `ReadTracker.seen`
-            // de zaten bu yerel sayıma göre tutuluyor (bkz. ChatViewModel.markReadNow).
-            let displayMessages: [Message]
-            let unread: Int
-            if let localStored, !localStored.messages.isEmpty {
-                displayMessages = localStored.messages
-                let assistantCount = localStored.messages.filter { $0.role == .assistant }.count
-                unread = max(0, assistantCount - ReadTracker.seen(conv.characterID))
-            } else {
-                displayMessages = convMsgs.reversed().map {
-                    Message(role: ChatRole(rawValue: $0.role) ?? .assistant,
-                            content: $0.content, createdAt: $0.date ?? Date())
-                }
-                let assistantCount = convMsgs.filter { !$0.isUser }.count
-                unread = max(0, assistantCount - ReadTracker.seen(conv.characterID))
+            // ChatView anında açılsın diye geçmişi bellek-içi önbelleğe al (asc).
+            let displayMessages: [Message] = convMsgs.reversed().map {
+                Message(role: ChatRole(rawValue: $0.role) ?? .assistant,
+                        content: $0.content, createdAt: $0.date ?? Date())
             }
-            // Sohbet geçmişini önbelleğe al → ChatView anında açılır, bildirimle
-            // gelen mesajı da görür (bayat sunucu-only önbellekle ezilmesin diye).
             store.chatCache[ch.id] = displayMessages
 
-            let last: LastMessage? = displayMessages.last.map {
+            let assistantCount = convMsgs.filter { !$0.isUser }.count
+            let unread = max(0, assistantCount - ReadTracker.seen(conv.characterID))
+            // Önizleme en yeni mesajdan (convMsgs desc → .first) — sunucudaki
+            // `kind` (text/image/voice) korunur, WhatsApp tarzı önizleme için.
+            let last: LastMessage? = convMsgs.first.map {
                 LastMessage(conversationID: conv.id, content: $0.content,
-                            role: $0.role.rawValue, createdAt: Self.iso8601.string(from: $0.createdAt),
-                            kind: Self.previewKind(for: $0))
+                            role: $0.role, createdAt: $0.createdAt, kind: $0.kind)
             }
             return ChatItem(character: ch, conversationID: conv.id,
                             last: last, unread: unread, updatedAt: conv.updatedAt)
-        }
-        // Sunucuda konuşması olmayan ama YEREL geçmişi olan sohbetleri de ekle
-        // (ör. onboarding sonrası açılan chat, bildirimle enjekte edilenler) —
-        // liste yalnızca sunucu konuşmalarını gösterince bunlar hiç görünmüyordu.
-        let listedIDs = Set(items.map { $0.character.id })
-        for charID in LocalConversationStore.shared.allCharacterIDs() where !listedIDs.contains(charID) {
-            guard let ch = store.characters.first(where: { $0.id == charID }),
-                  let localStored = LocalConversationStore.shared.load(for: charID),
-                  !localStored.messages.isEmpty else { continue }
-            store.chatCache[charID] = localStored.messages
-            let assistantCount = localStored.messages.filter { $0.role == .assistant }.count
-            let unread = max(0, assistantCount - ReadTracker.seen(charID))
-            let last: LastMessage? = localStored.messages.last.map {
-                LastMessage(conversationID: charID, content: $0.content,
-                            role: $0.role.rawValue, createdAt: Self.iso8601.string(from: $0.createdAt),
-                            kind: Self.previewKind(for: $0))
-            }
-            items.append(ChatItem(character: ch, conversationID: charID,
-                                   last: last, unread: unread, updatedAt: nil))
         }
 
         items.sort { lhs, rhs in
@@ -219,42 +142,11 @@ struct ChatListView: View {
             let rhsDate = parseISO8601(rhs.last?.createdAt) ?? parseISO8601(rhs.updatedAt) ?? .distantPast
             return lhsDate > rhsDate
         }
-        // Karakter başına TEK satır — aynı karaktere ait birden çok konuşma
-        // (ChatItem.id == character.id) ForEach'te kimlik çakışması + duplike
-        // satır + "birini çekince ikisi açılıyor" hatasına yol açıyordu.
-        // Sıralama sonrası ilk (en yeni) satır tutulur.
+        // Karakter başına TEK satır (aynı karaktere ait birden çok konuşma
+        // olabilir) — sıralama sonrası ilk (en yeni) tutulur.
         var seenCharacterIDs = Set<UUID>()
         items = items.filter { seenCharacterIDs.insert($0.character.id).inserted }
-        // Silinmiş (tombstone'lu) sohbetleri gizle — sunucu/önbellek gecikse bile
-        // geri gelmesin (bkz. applyTombstones).
-        items = applyTombstones(items)
         isLoading = false
-        saveCachedItems(items)
-    }
-
-    private func loadCachedItems() -> [ChatItem]? {
-        guard let data = try? Data(contentsOf: cacheURL) else { return nil }
-        return try? JSONDecoder().decode([ChatItem].self, from: data)
-    }
-
-    private func saveCachedItems(_ items: [ChatItem]) {
-        guard let data = try? JSONEncoder().encode(items) else { return }
-        try? data.write(to: cacheURL, options: .atomic)
-    }
-
-    private static let iso8601: ISO8601DateFormatter = {
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return f
-    }()
-
-    /// Son-mesaj önizleme türü — foto (üretilmiş/ödeme bekleyen/kullanıcı
-    /// fotosu) ve ses (üretilmiş/ödeme bekleyen) dahil. Liste satırında
-    /// WhatsApp gibi "📷 Fotoğraf" / "🎤 Sesli mesaj" göstermek için (bkz. subtitle).
-    private static func previewKind(for m: Message) -> String {
-        if m.isVoice || m.isPendingVoice { return "voice" }
-        if m.imageURL != nil || m.isPendingImage || m.isUserPhoto { return "image" }
-        return "text"
     }
 
     // MARK: Header

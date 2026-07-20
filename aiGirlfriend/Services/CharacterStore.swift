@@ -42,6 +42,11 @@ final class CharacterStore {
     /// satırda özel swipe/tap davranışı var, bkz. ChatListView.SwipeToDeleteRow).
     var pendingChatCharacter: Character?
 
+    /// Onboarding'te seçilen karakterin ilk-selamı. ChatViewModel bunu görünce
+    /// mesajı ANINDA değil, normal "yazıyor" (3 nokta) animasyonuyla gösterir —
+    /// mesaj sunucuya zaten kalıcı yazıldı (bkz. MainTabView.openPendingOnboardingChat).
+    var pendingFirstHello: (characterID: UUID, line: String)?
+
     func setTyping(_ id: UUID, _ value: Bool) {
         if value { typingCharacterIDs.insert(id) } else { typingCharacterIDs.remove(id) }
     }
@@ -65,6 +70,12 @@ final class CharacterStore {
     /// uygulama boş ekranda takılmasın.
     func load() async {
         errorMessage = nil
+
+        // "Sıfır yerel" geçişi: önceki sürümlerden kalan DİSK sohbet verilerini
+        // tek seferlik temizle (artık hiçbir şey diske yazmıyoruz — bkz.
+        // LocalConversationStore). Böylece yükseltme yapan kullanıcıda eski
+        // dosyalar sessizce ortada kalıp kafa karıştırmaz.
+        Self.purgeLegacyLocalData()
 
         // 1) Diskteki önbellekten ANINDA göster — sunucu cevabını beklemeden.
         if let cached = loadCachedCharacters(), !cached.isEmpty {
@@ -103,13 +114,77 @@ final class CharacterStore {
 
         isLoaded = true
 
-        // Günlük rutinleri arka planda toplu üret — kullanıcı hiçbir sohbeti
-        // AÇMADAN önce, splash'i bekletmeden (fire-and-forget). Böylece ilk
-        // kez bir sohbete girince zaten "Online" yerine gerçek aktiviteyi görür.
-        let charactersSnapshot = characters
-        Task.detached(priority: .background) {
-            await ScheduleGenerator.prewarmAll(characters: charactersSnapshot)
+        // "Sıfır yerel": sohbet durumunu SUNUCUDAN bellek-içi önbelleğe doldur
+        // (bkz. hydrateConversations / LocalConversationStore). Diğer ekranlar
+        // (Keşfet "zaten konuşuyor" filtresi, Beğeniler, bildirim gating) bu
+        // önbelleği okur — açılışta boş kalmasın diye burada tazelenir.
+        // NOT: eski toplu rutin ön-üretimi (ScheduleGenerator.prewarmAll)
+        // KALDIRILDI — rutin artık yalnızca disk'te değil bellekte tutulduğu
+        // için her açılışta yeniden üretmek pahalı olurdu; rutin artık sohbet
+        // AÇILDIĞINDA talep üzerine üretilir (bkz. ChatViewModel.ensureScheduleGenerated).
+        await hydrateConversations()
+    }
+
+    private let conversationsService = ConversationsService()
+
+    /// Eski (disk-tabanlı) sohbet verisini kaldırır — bir kez, sessizce.
+    private static func purgeLegacyLocalData() {
+        let fm = FileManager.default
+        if let support = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
+            try? fm.removeItem(at: support.appendingPathComponent("LocalConversations", isDirectory: true))
         }
+        if let caches = fm.urls(for: .cachesDirectory, in: .userDomainMask).first {
+            try? fm.removeItem(at: caches.appendingPathComponent("chatlist_cache.json"))
+        }
+        UserDefaults.standard.removeObject(forKey: "chatlist.deleted.tombstones.v1")
+    }
+
+    /// "Sıfır yerel": bellek-içi LocalConversationStore'u tamamen SUNUCUDAN
+    /// (conversations + messages, migration 009 durum sütunları dahil) yeniden
+    /// doldurur. Diske hiçbir şey yazılmaz; uygulama silinince önbellek boş
+    /// başlar ve yalnızca sunucuda olan geri gelir.
+    func hydrateConversations() async {
+        async let statesT = conversationsService.fetchConversationStates()
+        async let msgsT = conversationsService.fetchAllMessages()
+        let (states, msgs) = await (statesT, msgsT)
+
+        var byConv: [UUID: [LastMessage]] = [:]
+        for m in msgs { byConv[m.conversationID, default: []].append(m) }
+
+        func parseDate(_ s: String?) -> Date? {
+            guard let s else { return nil }
+            let f = ISO8601DateFormatter()
+            f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            return f.date(from: s) ?? ISO8601DateFormatter().date(from: s)
+        }
+
+        for state in states {
+            // desc → asc (görüntüleme/sayım sırası)
+            let convMsgs = Array((byConv[state.id] ?? []).reversed())
+            let messages: [Message] = convMsgs.map {
+                Message(role: ChatRole(rawValue: $0.role) ?? .assistant,
+                        content: $0.content, createdAt: $0.date ?? Date())
+            }
+            let existing = LocalConversationStore.shared.load(for: state.characterID)
+            let stored = LocalConversationStore.Stored(
+                messages: messages,
+                xp: 0,
+                level: state.relationshipLevel ?? existing?.level ?? 1,
+                summary: state.summary ?? "",
+                summarizedCount: state.summarizedCount ?? 0,
+                msgCounter: existing?.msgCounter ?? 0,
+                levelProgress: state.levelProgress ?? 0,
+                detectedLanguage: state.detectedLanguage ?? existing?.detectedLanguage,
+                // Sunucu rutini (schedule) henüz saklamıyor (bkz. Phase C) →
+                // talep üzerine üretilmiş bellek-içi rutini KORU.
+                schedule: state.schedule ?? existing?.schedule,
+                wokenUpAt: parseDate(state.wokenUpAt) ?? existing?.wokenUpAt,
+                manualSleepAt: parseDate(state.manualSleepAt) ?? existing?.manualSleepAt,
+                ghostedAt: parseDate(state.ghostedAt)
+            )
+            LocalConversationStore.shared.save(stored, for: state.characterID)
+        }
+        conversationsVersion += 1
     }
 
     /// Foreground refresh — NOT the initial `load()` (no cache-first flash,
@@ -121,9 +196,13 @@ final class CharacterStore {
     /// this replaces it, no per-view refresh code needed.
     func refreshCharacters() async {
         guard isLoaded else { return } // avoid racing the initial load()
-        guard let fetched = try? await service.fetchAll(), !fetched.isEmpty else { return }
-        characters = fetched
-        saveCachedCharacters(fetched)
+        if let fetched = try? await service.fetchAll(), !fetched.isEmpty {
+            characters = fetched
+            saveCachedCharacters(fetched)
+        }
+        // Öne gelişte sohbet durumunu da sunucudan tazele — bir bildirim
+        // (proaktif mesaj, bkz. Phase C) arka planda sunucuya yazılmış olabilir.
+        await hydrateConversations()
     }
 
     private func loadCachedCharacters() -> [Character]? {

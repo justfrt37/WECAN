@@ -554,26 +554,24 @@ Deno.serve(async (req: Request) => {
     // conversation ekleniyordu (dupe'lar böyle çoğalıyordu). En güncel olanı al.
     let { data: convoRows } = await db
       .from("conversations")
-      .select("id, summary, summarized_count, xp, relationship_level, level_progress")
+      .select("id, summary, summarized_count, xp, relationship_level, level_progress, schedule, woken_up_at, manual_sleep_at, ghosted_at, detected_language")
       .eq("user_id", uid)
       .eq("character_id", characterId)
       .order("updated_at", { ascending: false })
       .limit(1);
     let convo = convoRows?.[0];
-
-    if (!convo) {
-      const ins = await db
-        .from("conversations")
-        .insert({ user_id: uid, character_id: characterId })
-        .select("id, summary, summarized_count, xp, relationship_level, level_progress")
-        .single();
-      convo = ins.data!;
-    }
-    const conversationId: string = convo.id;
+    // NOT: conversation OLUŞTURMA burada YAPILMAZ. Sohbeti sadece AÇMAK (geçmiş
+    // modu) boş bir conversation yaratıyordu → silsen bile açınca/liste
+    // yenilenince yeniden oluşup "geri geliyordu" (bkz. kullanıcı talebi).
+    // Oluşturma, gerçekten mesaj yazılan/kaydedilen modlara ertelenir (aşağıda).
 
     const clientHistory: WireMessage[] | undefined = body.clientHistory;
-    const useClientHistory = Array.isArray(clientHistory);
-    const localSummary: string | undefined = body.localSummary;
+    // "Sıfır yerel" geçişi: sunucu ARTIK tek doğru kaynak. clientHistory/localSummary
+    // (istemci hâlâ gönderiyor olabilir) YOK SAYILIR — bağlam DB'den kurulur, mesajlar
+    // DB'ye HER cevapta yazılır, özet DB'de tutulur. clientHistory yalnızca dil
+    // tespitinde (aşağıda) ipucu olarak kalır. Bkz. migration 009 / plan.
+    const useClientHistory = false;
+    const localSummary: string | undefined = undefined;
     // Zaman farkındalığı: son mesaj zamanı, istemcinin "şimdi"si ve saat dilimi
     // farkı (dakika) — hepsi epoch ms. Sadece varsa kullanılır (bkz. timeContext).
     const lastMessageAt: number | undefined = typeof body.lastMessageAt === "number" ? body.lastMessageAt : undefined;
@@ -662,20 +660,78 @@ Deno.serve(async (req: Request) => {
       return json({ summary, schedule });
     }
 
+    // === PROAKTİF ENJEKSİYON MODU (injectProactive) ===
+    // Bir asistan mesajını SUNUCUDA saklar (yerele yazmak yerine). İki kullanım:
+    //  1) Proaktif bildirim teslim edilince (ghosted/jealousy/missedYou/goodMorning/
+    //     sleepy/liked) — bkz. NotificationDelegate (Phase C).
+    //  2) Onboarding ilk-selam — kullanıcı bir karakteri seçince (createIfMissing:true).
+    // Silinmiş bir sohbeti DİRİLTMEMEK için, var olmayan sohbet + createIfMissing:false
+    // → hiçbir şey yapmaz (bkz. eski injectMessage kuralı).
+    if (body.injectProactive && typeof body.injectProactive === "object") {
+      const kind: string = String(body.injectProactive.kind ?? "");
+      const text: string = String(body.injectProactive.text ?? "");
+      const createIfMissing: boolean = body.injectProactive.createIfMissing === true;
+      if (!text.trim()) return json({ injected: false, conversationId: convo?.id ?? null });
+      if (!convo) {
+        if (!createIfMissing) return json({ injected: false, conversationId: null });
+        const ins = await db
+          .from("conversations")
+          .insert({ user_id: uid, character_id: characterId })
+          .select("id, summary, summarized_count, xp, relationship_level, level_progress, schedule, woken_up_at, manual_sleep_at, ghosted_at, detected_language")
+          .single();
+        convo = ins.data!;
+      }
+      await db.from("messages").insert([
+        { conversation_id: convo.id, role: "assistant", content: text, kind: "text" },
+      ]);
+      const proactiveUpdate: Record<string, unknown> = { updated_at: new Date().toISOString() };
+      // ghosted → kullanıcı yazana kadar sustur (bkz. NotificationScheduler eligibility).
+      if (kind === "ghosted") proactiveUpdate.ghosted_at = new Date().toISOString();
+      // sleepyGoodbye → uyandırma override'ını temizle (karakter gerçekten uyur).
+      if (kind === "sleepyGoodbye") proactiveUpdate.woken_up_at = null;
+      await db.from("conversations").update(proactiveUpdate).eq("id", convo.id);
+      return json({ injected: true, conversationId: convo.id });
+    }
+
     // === GEÇMİŞ MODU — clientHistory yoksa ===
     if (!useClientHistory && (!userMessage || userMessage.trim() === "")) {
+      // Sohbeti açmak conversation OLUŞTURMAZ — yoksa boş geçmiş dön.
+      if (!convo) {
+        return json({ conversationId: null, history: [], xp: 0, level: 1 });
+      }
       const { data: msgs } = await db
         .from("messages")
         .select("role, content, kind")
-        .eq("conversation_id", conversationId)
+        .eq("conversation_id", convo.id)
         .order("created_at", { ascending: true });
       return json({
-        conversationId,
+        conversationId: convo.id,
         history: msgs ?? [],
         xp: convo.xp ?? 0,
         level: convo.relationship_level ?? 1,
+        levelProgress: typeof convo.level_progress === "number" ? convo.level_progress : 0,
+        summary: convo.summary ?? "",
+        summarizedCount: convo.summarized_count ?? 0,
+        // "Sıfır yerel" durum alanları — istemci belleğe hidrasyon için (bkz. B1/B5).
+        schedule: convo.schedule ?? null,
+        wokenUpAt: convo.woken_up_at ?? null,
+        manualSleepAt: convo.manual_sleep_at ?? null,
+        ghostedAt: convo.ghosted_at ?? null,
+        detectedLanguage: convo.detected_language ?? null,
       });
     }
+
+    // Buradan sonrası (cevap / foto-tepki modları) gerçekten conversation
+    // GEREKTİRİR → yoksa ŞİMDİ oluştur (sadece burada, açılışta değil).
+    if (!convo) {
+      const ins = await db
+        .from("conversations")
+        .insert({ user_id: uid, character_id: characterId })
+        .select("id, summary, summarized_count, xp, relationship_level, level_progress, schedule, woken_up_at, manual_sleep_at, ghosted_at, detected_language")
+        .single();
+      convo = ins.data!;
+    }
+    const conversationId: string = convo.id;
 
     // === FOTOĞRAF İNDİRME TEPKİSİ MODU (photoDownloadReaction: true) ===
     // Kullanıcı özel/mahrem işaretli bir fotoğrafı cihazına indirdi. userMessage
@@ -914,12 +970,23 @@ Deno.serve(async (req: Request) => {
     const newLevel = gained.level;
     const newProgress = gained.progress;
 
+    // "Sıfır yerel": durum alanları da SUNUCUDA güncellenir.
+    // - detected_language: bu turda tespit edildiyse sakla (dil yapışkan olmalı).
+    // - ghosted_at: kullanıcı yazdı → temizle (eski noteUserSent yereli temizliyordu).
+    // - manual_sleep_at: sohbet içinde uykuya anlaşıldıysa (wentToSleep) şimdi olarak set.
+    // - woken_up_at: istemci uyuyan karakteri uyandırdıysa (body.wokeUp) şimdi.
+    const nowIso = new Date().toISOString();
+    const convoUpdate: Record<string, unknown> = {
+      updated_at: nowIso,
+      relationship_level: newLevel,
+      level_progress: newProgress,
+      ghosted_at: null,
+    };
+    if (detectedLanguage) convoUpdate.detected_language = detectedLanguage;
+    if (wentToSleep) convoUpdate.manual_sleep_at = nowIso;
+    if (body.wokeUp === true) convoUpdate.woken_up_at = nowIso;
     await db.from("conversations")
-      .update({
-        updated_at: new Date().toISOString(),
-        relationship_level: newLevel,
-        level_progress: newProgress,
-      })
+      .update(convoUpdate)
       .eq("id", conversationId);
 
     // 5) Özetleme — sadece DB modunda (clientHistory modunda istemci geçmişi yönetiyor)
@@ -975,7 +1042,7 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    return json({ conversationId, reply, level: newLevel, levelProgress: newProgress, tokenBalance: tokenBalanceAfterCharge });
+    return json({ conversationId, reply, level: newLevel, levelProgress: newProgress, wentToSleep, tokenBalance: tokenBalanceAfterCharge });
   } catch (e) {
     console.error(String(e));
     return json({ error: String(e) }, 500);

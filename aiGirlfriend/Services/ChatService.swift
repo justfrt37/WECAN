@@ -150,6 +150,48 @@ struct ChatService {
         return false
     }
 
+    private struct InjectProactivePayload: Codable {
+        let kind: String
+        let text: String
+        let createIfMissing: Bool
+    }
+    private struct InjectProactiveRequest: Codable {
+        let characterId: String
+        let systemPrompt: String
+        let injectProactive: InjectProactivePayload
+    }
+    private struct InjectProactiveResponse: Codable {
+        let injected: Bool?
+        let conversationId: String?
+    }
+
+    /// Bir asistan mesajını (proaktif bildirim satırı veya onboarding ilk-selamı)
+    /// SUNUCUDA saklar (bkz. chat/index.ts injectProactive). "Sıfır yerel":
+    /// mesaj artık yerele değil sunucuya yazılır → reinstall sonrası ve sohbet
+    /// listesinde sunucudan görünür. `createIfMissing` yalnızca ilk-temas
+    /// (liked / firstHello) için true — silinmiş sohbeti DİRİLTMEMEK için diğer
+    /// bildirimlerde false (var olmayan sohbete yazmaz). Dönen: mesaj eklendi mi.
+    @discardableResult
+    func injectProactiveMessage(character: Character, kind: String, text: String, createIfMissing: Bool) async -> Bool {
+        var request = URLRequest(url: Config.chatFunctionURL)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let bearer = UserDefaultsManager.shared.accessToken ?? Config.supabaseAnonKey
+        request.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
+        request.setValue(Config.supabaseAnonKey, forHTTPHeaderField: "apikey")
+        guard let body = try? JSONEncoder().encode(InjectProactiveRequest(
+            characterId: character.id.uuidString.lowercased(),
+            systemPrompt: character.systemPrompt,
+            injectProactive: InjectProactivePayload(kind: kind, text: text, createIfMissing: createIfMissing)
+        )) else { return false }
+        request.httpBody = body
+        guard let (data, response) = try? await URLSession.shared.data(for: request),
+              let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode)
+        else { return false }
+        let decoded = try? JSONDecoder().decode(InjectProactiveResponse.self, from: data)
+        return decoded?.injected ?? false
+    }
+
     /// Preset karakter: sunucudan geçmiş yükle.
     func loadHistory(character: Character) async throws -> ChatHistory {
         let resp = try await call(character: character, userMessage: nil)
@@ -402,6 +444,7 @@ struct ChatService {
     func clearConversation(character: Character) async throws {
         _ = try await perform(character: character, userMessage: nil, extra: .clear)
     }
+
 
     /// Eski mesajları özetle (yerel mod için istemci tarafı özetleme).
     func generateLocalSummary(

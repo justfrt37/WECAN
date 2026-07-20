@@ -105,11 +105,15 @@ final class ChatViewModel {
     }
 
     func clearChat() {
+        // Temizle = sohbet BOŞ kalır. Eskiden hemen ardından loadHistory()
+        // çağrılıyordu; o da boş sohbette yeni conversation + "ilk selam"
+        // oluşturup mesajı ANINDA geri getiriyordu (bkz. kullanıcı talebi:
+        // "temizledim ama geri geliyor"). Artık yalnızca siler, boş bırakır —
+        // ilk-selam yalnızca sohbet BİR SONRAKİ açılışında gelir.
         messages = []
         hasSyntheticOpening = false
         Task {
             if let store { await ChatMaintenance.clearChat(character: character, store: store) }
-            await loadHistory()
         }
     }
 
@@ -124,6 +128,19 @@ final class ChatViewModel {
 
     func loadHistory() async {
         NotificationScheduler.shared.cancelJealousyTimer(for: character.id)
+
+        // 0. Onboarding ilk-selamı: mesaj sunucuya zaten kalıcı yazıldı (bkz.
+        //    MainTabView.openPendingOnboardingChat) — burada ANINDA göstermek
+        //    yerine normal "yazıyor" (3 nokta) animasyonuyla getir. Sadece ilk
+        //    açılışta; sinyal tüketilir, sonraki açılışlar önbellekten/sunucudan gelir.
+        if let pending = store?.pendingFirstHello, pending.characterID == character.id {
+            store?.pendingFirstHello = nil
+            await attachFirstHello(line: pending.line, synthetic: false)
+            markReadNow()
+            refreshCurrentActivity()
+            ensureScheduleGenerated()
+            return
+        }
 
         // 1. Bellek içi önbellek
         if let cached = store?.chatCache[character.id], !cached.isEmpty {
@@ -209,15 +226,21 @@ final class ChatViewModel {
     /// Botun ilk mesajı artık AI ile üretilmiyor (gecikme + tutarsızlık yaratıyordu) —
     /// sabit 3 varyanttan rastgele biri, normal mesajlaşmadaki gibi kısa bir
     /// "yazıyor" balonu gecikmesinden sonra gelir (bkz. TypingTiming).
-    private func attachFirstHello() async {
+    /// `line` verilirse o satır kullanılır (onboarding ilk-selamı — sunucuya
+    /// zaten kalıcı yazılmış), yoksa rastgele bir varyant seçilir (salt yerel).
+    /// `synthetic`: true ise mesaj sunucuda YOK (salt görsel açılış selamı,
+    /// realMessages/okundu sayımından hariç); false ise sunucuda kalıcıdır
+    /// (gerçek bir mesaj gibi sayılır ve önbelleğe alınır).
+    private func attachFirstHello(line: String? = nil, synthetic: Bool = true) async {
         isLoadingHistory = false // mesaj listesi görünür olsun ki "yazıyor" balonu gösterilebilsin
         try? await Task.sleep(nanoseconds: UInt64(TypingTiming.randomStartDelay() * 1_000_000_000))
         showsTypingBubble = true
-        let line = FirstHelloContent.randomLine()
-        try? await Task.sleep(nanoseconds: UInt64(TypingTiming.duration(forReplyLength: line.count) * 1_000_000_000))
+        let helloLine = line ?? FirstHelloContent.randomLine()
+        try? await Task.sleep(nanoseconds: UInt64(TypingTiming.duration(forReplyLength: helloLine.count) * 1_000_000_000))
         showsTypingBubble = false
-        messages = [Message(role: .assistant, content: line)]
-        hasSyntheticOpening = true
+        messages = [Message(role: .assistant, content: helloLine)]
+        hasSyntheticOpening = synthetic
+        if !synthetic { store?.chatCache[character.id] = messages }
     }
 
     // MARK: - Mesaj gönder

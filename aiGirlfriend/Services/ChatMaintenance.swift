@@ -17,4 +17,5 @@ enum ChatMaintenance {
         ReadTracker.setSeen(character.id, 0)
         try? await ChatService().clearConversation(character: character)
     }
+
 }

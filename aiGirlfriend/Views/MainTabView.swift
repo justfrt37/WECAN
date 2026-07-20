@@ -56,16 +56,19 @@ struct MainTabView: View {
         if let character = store.characters.first(where: {
             $0.name.localizedCaseInsensitiveContains(name)
         }) {
-            // Konuşmayı YEREL kaydet (botun ilk selamı) ki chat geçmişine gelsin —
-            // aksi halde mesaj gönderilene kadar sunucuda konuşma oluşmaz ve
-            // Sohbet sekmesinde görünmezdi (bkz. ChatListView yerel-birleşim).
+            // İlk selamı SUNUCUDA oluştur (bkz. injectProactive, "sıfır yerel")
+            // — böylece sohbet, reinstall sonrası ve Sohbetler sekmesinde
+            // sunucudan görünür. Mesajı ÖNBELLEĞE KOYMUYORUZ: chat ekranı bunu
+            // normal "yazıyor" (3 nokta) animasyonuyla göstersin diye
+            // pendingFirstHello işaretliyoruz (bkz. ChatViewModel.loadHistory).
             if LocalConversationStore.shared.load(for: character.id) == nil {
-                let hello = Message(role: .assistant, content: FirstHelloContent.randomLine())
-                let stored = LocalConversationStore.Stored(
-                    messages: [hello], xp: 0, level: 0, summary: "", summarizedCount: 0
-                )
-                LocalConversationStore.shared.save(stored, for: character.id)
-                store.conversationsVersion &+= 1   // Sohbet listesi tazelensin
+                let helloLine = FirstHelloContent.randomLine()
+                store.pendingFirstHello = (character.id, helloLine)
+                Task {
+                    await ChatService().injectProactiveMessage(
+                        character: character, kind: "firstHello", text: helloLine, createIfMissing: true
+                    )
+                }
             }
             path.append(character)
         }

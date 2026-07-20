@@ -99,6 +99,7 @@
       }
     },
     "%@ → %@" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -2807,6 +2808,7 @@
       }
     },
     "Check back soon — someone new likes you once a day 💕" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -8517,9 +8519,6 @@
         }
       }
     },
-    "İptal" : {
-
-    },
     "Is it weird that I can't sleep because I miss you? Sorry." : {
 
     },
@@ -12572,6 +12571,7 @@
       }
     },
     "Relationship level up! 💕" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -15369,15 +15369,6 @@
           }
         }
       }
-    },
-    "Tüm sohbetlerin ve verilerin kalıcı olarak silinecek. Bu işlem geri alınamaz." : {
-
-    },
-    "Tüm Verileri Sil" : {
-
-    },
-    "Tüm verileri sil?" : {
-
     },
     "Turquoise" : {
       "extractionState" : "stale",
