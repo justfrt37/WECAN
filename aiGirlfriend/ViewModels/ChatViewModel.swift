@@ -60,6 +60,14 @@ final class ChatViewModel {
         if case ChatServiceError.badStatus(402, _) = error { return true }
         return false
     }
+
+    /// chat-image "no_photo_available" (422) — karakterin gönderilebilir foto
+    /// havuzu yok/uygun değil. Artık Grok'tan foto ÜRETİLMİYOR (bkz. kullanıcı
+    /// talebi), o yüzden havuz boşsa hata gösterilir.
+    private func isNoPhotoError(_ error: Error) -> Bool {
+        if case ChatServiceError.badStatus(422, let body) = error, body.contains("no_photo_available") { return true }
+        return false
+    }
     var isVisible = false
     private var hasSyntheticOpening = false
     /// PRO gerektiren bir gönderim denendiğinde açılır (bkz. PurchaseService.isPro) —
@@ -159,6 +167,11 @@ final class ChatViewModel {
                 relationshipLevel = stored.level
                 levelProgress = stored.levelProgress
             }
+            // Seviye/ilerlemeyi SUNUCUDAN kesinle (arka planda, mesajı bloklamadan):
+            // bellek-içi store hidrasyonu gecikmiş olabileceğinden açılışta seviye
+            // init değerinde (karakterin global seviyesi) takılı kalıp "ilk mesajdan
+            // sonra düzeliyor"du (bkz. kullanıcı talebi). Artık açılışta düzelir.
+            Task { await syncLevelFromServer() }
             markReadNow()
             refreshCurrentActivity()
             ensureScheduleGenerated()
@@ -191,9 +204,7 @@ final class ChatViewModel {
         do {
             let history = try await service.loadHistory(character: character)
             relationshipLevel = history.level
-            // Eski mutlak XP sistemi kaldırıldı — ilk göç sonrası mevcut seviyenin
-            // ilerlemesi 0'dan başlar (küçük kozmetik sıfırlama, işlevi etkilemez).
-            levelProgress = 0
+            levelProgress = history.levelProgress ?? 0
             if history.messages.isEmpty {
                 await attachFirstHello()
             } else {
@@ -219,6 +230,15 @@ final class ChatViewModel {
             errorMessage = error.localizedDescription
             if messages.isEmpty { await attachFirstHello() }
         }
+    }
+
+    /// Sohbet açılışında seviye/ilerlemeyi SUNUCUDAN (history modu) kesinler —
+    /// önbellekten anında açılan sohbette, bellek-içi store hidrasyonu gecikse
+    /// bile seviye doğru görünsün (ilk mesajı beklemeden). Mesajları DEĞİŞTİRMEZ.
+    private func syncLevelFromServer() async {
+        guard let history = try? await service.loadHistory(character: character) else { return }
+        relationshipLevel = history.level
+        if let lp = history.levelProgress { levelProgress = lp }
     }
 
     // MARK: - İlk selam
@@ -674,42 +694,47 @@ final class ChatViewModel {
         }
     }
 
-    /// `send()`'in fotoğraf-isteği karşılığı: kullanıcının yazdığı tarif metninden
-    /// xAI ile gerçek bir fotoğraf üretir, sonra fotoğraftan SONRA gelen kısa bir
-    /// metin tepkisi ister (bkz. chat/index.ts IMAGE_CAPTION_RULE). GEÇMİŞ: model
-    /// isteğe bağlı bir [[no_caption]] işareti sunulunca neredeyse HER SEFERİNDE
-    /// onu seçiyordu (canlı testte 8/8) — işaret tamamen kaldırıldı, artık her
-    /// zaman gerçek bir tepki üretiliyor.
-    /// Fotoğraf HEMEN üretilmez — kullanıcının tarifi bir "ödeme bekleyen"
-    /// balonda (bkz. Message.pendingImagePrompt) saklanır, bulanık gösterilir.
-    /// Asıl üretim + 25 token tahsili SADECE o balona dokununca olur (bkz.
-    /// generatePendingImage).
+    /// Fotoğraf İSTEĞİ. Kullanıcı talebi: foto düğmesine basınca karakter METİN
+    /// cevabı VERMEZ (özellikle boş girdide "fotoğraf gönder" metnini gönderip
+    /// "düğmeye bas" gibi tuhaf cevap alma sorunu) — bunun yerine kısa bir
+    /// "yazıyor" gösterilir, sonra bulanık "ödeme bekleyen" foto balonu gelir.
+    /// GÖRSELİ AÇMAK (balona dokunma) 25 jetondur (bkz. generatePendingImage).
+    /// Kullanıcı bir TARİF yazdıysa o mesaj olarak görünür + seçim istemi olur;
+    /// boşsa hiç kullanıcı-metni gösterilmez.
     func sendImageRequest() {
         guard !isSending, !isLoadingHistory else { return }
-        // Foto PRO özelliği — PRO değilse (kredi yetse bile) PRO paywall aç, üretme.
+        // Foto PRO özelliği — PRO değilse (kredi yetse bile) PRO paywall aç.
         guard PurchaseService.shared.isPro else { showPaywall = true; return }
         let typed = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
-        // Kullanıcı bir şey yazmadıysa varsayılan metin: "Fotoğraf gönder"
-        // (buton etiketiyle aynı) — mesaj balonunda bu görünür, tarif olarak da kullanılır.
-        let text = typed.isEmpty ? String(localized: "Send me a photo") : typed
-
-        messages.append(Message(role: .user, content: text))
+        // Seçim istemi: kullanıcı yazdıysa onu, yazmadıysa içsel bir varsayılan
+        // (kullanıcıya GÖSTERİLMEZ) — "Fotoğraf gönder" placeholder'ı balonda çıkmasın.
+        let prompt = typed.isEmpty ? "a photo of you right now" : typed
+        // Kullanıcı GERÇEK bir tarif yazdıysa mesajı göster; boşsa gösterme.
+        if !typed.isEmpty { messages.append(Message(role: .user, content: typed)) }
         updateCache()
         NotificationScheduler.shared.noteUserSent(character: character)
         inputText = ""
         isImageArmed = false
         errorMessage = nil
 
-        // Kısa, rastgele bir gecikmeden sonra bulanık balon "gelir" — botun az
-        // önce kendi kararıyla bir foto gönderdiği hissi (bkz. kullanıcı talebi:
-        // "whoosh" giriş animasyonu, ChatView'daki .transition ile eşleşir).
         Task {
-            let delay = Double.random(in: 0.5...1.0)
-            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            await handleWakeUpIfAsleep()
+            // "Fotoğraf hazırlıyor" hissi: kısa yazıyor balonu → sonra bulanık
+            // foto balonu. Foto isteğine METİN cevabı verilmez (foto + açılınca
+            // gelen caption yanıttır).
+            try? await Task.sleep(nanoseconds: UInt64(TypingTiming.randomStartDelay() * 1_000_000_000))
+            showsTypingBubble = true
+            store?.setTyping(character.id, true)
+            try? await Task.sleep(nanoseconds: 900_000_000)
+            showsTypingBubble = false
+            store?.setTyping(character.id, false)
             withAnimation(.spring(response: 0.45, dampingFraction: 0.72)) {
-                messages.append(Message(role: .assistant, content: "", pendingImagePrompt: text))
+                messages.append(Message(role: .assistant, content: "", pendingImagePrompt: prompt))
             }
             updateCache()
+            // Açılmamış (kilitli) foto'yu SUNUCUDA sakla — üretmeden çıkıp girse
+            // bile "üret" balonu olarak geri gelsin (bkz. chat/index.ts photoMessage).
+            await service.savePhotoMessage(character: character, prompt: prompt, url: nil)
         }
     }
 
@@ -751,6 +776,15 @@ final class ChatViewModel {
                 generatingImageMessageIDs.remove(messageID)
                 handleTokenBalance(imageResult.tokenBalance)
                 updateCache()
+
+                // Üretilen fotoğrafı SUNUCUDA sakla: aynı prompt'lu "açılmamış"
+                // (image_pending) satır gerçek görsele (kind=image) çevrilir; yoksa
+                // yeni image satırı eklenir (bkz. chat/index.ts photoMessage). Böylece
+                // hem açılmamış hem açılmış foto reload sonrası doğru durumda görünür.
+                // Caption turundan ÖNCE saklanır ki sıralama doğru olsun.
+                await service.savePhotoMessage(
+                    character: character, prompt: prompt, url: imageResult.url.absoluteString
+                )
 
                 // İsteğe bağlı metin tepkisi — sırayla, fotoğraftan SONRA gelir.
                 // `imageResult.redirected` true ise (orijinal istek reddedilip
@@ -794,6 +828,12 @@ final class ChatViewModel {
                 generatingImageMessageIDs.remove(messageID)
                 if isInsufficientTokensError(error) {
                     presentInsufficientTokensPaywall()   // uyarı yok, paywall aç
+                } else if isNoPhotoError(error) {
+                    // Havuzda gönderilebilir foto yok — bekleyen balonu kaldır ve
+                    // kullanıcıya net bir hata göster (Grok'tan üretim YOK).
+                    messages.removeAll { $0.id == messageID }
+                    updateCache()
+                    errorMessage = String(localized: "Şu an sana gönderebileceğim bir fotoğraf yok.")
                 } else {
                     errorMessage = error.localizedDescription
                 }

@@ -171,20 +171,25 @@ struct MainTabView: View {
         .fullScreenCover(isPresented: $showPaywall) { OnboardingPaywallView() }
         .task {
             if let result = await StreakService.claim(), result.granted {
-                streakResult = result
+                withAnimation(.easeInOut(duration: 0.3)) { streakResult = result }
             }
         }
-        .fullScreenCover(item: Binding(
-            get: { streakResult.map { IdentifiableStreakResult(result: $0) } },
-            set: { _ in streakResult = nil }
-        )) { wrapped in
-            StreakPopupView(result: wrapped.result) {
-                streakResult = nil
-                // `setBalance` (not `refresh`) — streak grants trigger the
-                // same "+N tokens" badge animation as any other gain.
-                if let balance = wrapped.result.balance { tokenStore.setBalance(balance) }
+        // fullScreenCover alttan kayıyor ve kapanışta karartma sert biçimde
+        // yok oluyordu. Ortalı modal için: karartma + kart BİRLİKTE opacity +
+        // hafif scale ile yumuşakça açılıp kapanan bir overlay (bkz. kullanıcı
+        // talebi: "opacity gidişi smooth olsun").
+        .overlay {
+            if let result = streakResult {
+                StreakPopupView(result: result) {
+                    let balance = result.balance
+                    withAnimation(.easeInOut(duration: 0.26)) { streakResult = nil }
+                    // `setBalance` (not `refresh`) — streak grants trigger the
+                    // same "+N tokens" badge animation as any other gain.
+                    if let balance { tokenStore.setBalance(balance) }
+                }
+                .transition(.opacity)
+                .zIndex(20)
             }
-            .presentationBackground(.clear)
         }
     }
 }

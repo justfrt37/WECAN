@@ -11,8 +11,8 @@ struct GalleryView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var yourPhotos: [URL] = []
 
-    private let columns = [GridItem(.flexible(), spacing: 13),
-                           GridItem(.flexible(), spacing: 13)]
+    private let columns = [GridItem(.flexible(), spacing: 16),
+                           GridItem(.flexible(), spacing: 16)]
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -131,17 +131,20 @@ struct GalleryView: View {
             if yourPhotos.isEmpty {
                 noPhotosYetState
             } else {
-                LazyVGrid(columns: columns, spacing: 13) {
+                LazyVGrid(columns: columns, spacing: 16) {
                     ForEach(yourPhotos, id: \.self) { url in
-                        CachedImage(url: url) { image in
-                            image.resizable().scaledToFill()
-                        } placeholder: {
-                            AppColor.card
-                        }
-                        .frame(height: 200)
-                        .frame(maxWidth: .infinity)
-                        .clipped()
-                        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                        // Taşmaya karşı bağışık hücre (bkz. CharacterProfileView):
+                        // Color.clear çıpa + görsel overlay + clipShape → foto asla
+                        // komşuya taşmaz, aradaki boşluk korunur.
+                        Color.clear
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 200)
+                            .overlay {
+                                CachedImage(url: url) { image in
+                                    image.resizable().scaledToFill()
+                                } placeholder: { AppColor.card }
+                            }
+                            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
                     }
                 }
             }

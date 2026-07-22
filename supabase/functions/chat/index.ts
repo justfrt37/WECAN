@@ -671,6 +671,10 @@ Deno.serve(async (req: Request) => {
       const kind: string = String(body.injectProactive.kind ?? "");
       const text: string = String(body.injectProactive.text ?? "");
       const createIfMissing: boolean = body.injectProactive.createIfMissing === true;
+      // Saklanacak mesajın DB kind'i: üretilmiş foto ("image") kalıcılaştırılırken
+      // "image" gelir; aksi halde "text" (bkz. ChatService.injectProactiveMessage).
+      const messageKind: string = typeof body.injectProactive.messageKind === "string"
+        ? body.injectProactive.messageKind : "text";
       if (!text.trim()) return json({ injected: false, conversationId: convo?.id ?? null });
       if (!convo) {
         if (!createIfMissing) return json({ injected: false, conversationId: null });
@@ -682,7 +686,7 @@ Deno.serve(async (req: Request) => {
         convo = ins.data!;
       }
       await db.from("messages").insert([
-        { conversation_id: convo.id, role: "assistant", content: text, kind: "text" },
+        { conversation_id: convo.id, role: "assistant", content: text, kind: messageKind },
       ]);
       const proactiveUpdate: Record<string, unknown> = { updated_at: new Date().toISOString() };
       // ghosted → kullanıcı yazana kadar sustur (bkz. NotificationScheduler eligibility).
@@ -691,6 +695,34 @@ Deno.serve(async (req: Request) => {
       if (kind === "sleepyGoodbye") proactiveUpdate.woken_up_at = null;
       await db.from("conversations").update(proactiveUpdate).eq("id", convo.id);
       return json({ injected: true, conversationId: convo.id });
+    }
+
+    // === FOTO MESAJI MODU (photoMessage) ===
+    // Foto balonunun KALICI durumunu sunucuda tutar (bkz. kullanıcı talebi:
+    // "açılmamış foto da tutulmalı"). İki durum:
+    //  - url YOK → "kilitli/açılmamış" foto (kind=image_pending, content=prompt):
+    //    kullanıcı isteği attı ama henüz üretmedi. Chate tekrar girince yine
+    //    "üret" balonu olarak görünür.
+    //  - url VAR → üretildi: aynı prompt'lu en son pending satırı gerçek görsele
+    //    çevir (kind=image, content=url); pending yoksa yeni image satırı ekle.
+    if (body.photoMessage && typeof body.photoMessage === "object") {
+      if (!convo) return json({ ok: false, conversationId: null });
+      const prompt: string = String(body.photoMessage.prompt ?? "");
+      const url: string | null = typeof body.photoMessage.url === "string" ? body.photoMessage.url : null;
+      if (url) {
+        const { data: pend } = await db.from("messages")
+          .select("id").eq("conversation_id", convo.id).eq("kind", "image_pending").eq("content", prompt)
+          .order("created_at", { ascending: false }).limit(1);
+        if (pend && pend[0]) {
+          await db.from("messages").update({ content: url, kind: "image" }).eq("id", pend[0].id);
+        } else {
+          await db.from("messages").insert({ conversation_id: convo.id, role: "assistant", content: url, kind: "image" });
+        }
+      } else {
+        await db.from("messages").insert({ conversation_id: convo.id, role: "assistant", content: prompt, kind: "image_pending" });
+      }
+      await db.from("conversations").update({ updated_at: new Date().toISOString() }).eq("id", convo.id);
+      return json({ ok: true, conversationId: convo.id });
     }
 
     // === GEÇMİŞ MODU — clientHistory yoksa ===
@@ -953,8 +985,15 @@ Deno.serve(async (req: Request) => {
       ? await classifySleepAgreement(userMessage!, reply)
       : false;
 
-    // 4) Mesajları kaydet — clientHistory modunda istemci kendi saklıyor, DB'ye yazma
-    if (!useClientHistory) {
+    // 4) Mesajları kaydet. imageReactionChat = fotoğraf-altı metin tepkisi:
+    // kullanıcı promptu ZATEN foto isteği turunda (normal send) kaydedildi,
+    // burada TEKRAR user mesajı yazma (aksi halde geçmişte çift "Fotoğraf
+    // gönder" görünür) — sadece asistan caption'ı sakla.
+    if (imageReactionChat) {
+      await db.from("messages").insert([
+        { conversation_id: conversationId, role: "assistant", content: reply, kind: "text" },
+      ]);
+    } else {
       await db.from("messages").insert([
         { conversation_id: conversationId, role: "user", content: userMessage!, kind: "text" },
         { conversation_id: conversationId, role: "assistant", content: reply, kind: "text" },

@@ -24,16 +24,11 @@ enum DevAccess {
         "9bd6b9c6-a498-42dd-a337-33a70100117f",
     ]
 
-    // TEMP TESTING (2026-07-12) — forced true to show dev panels to every
-    // user while testing Civitai image-gen swap. REVERT to the UID-gated
-    // check below once testing is done. Note: server-side dev-* edge
-    // functions still independently check devUserIDs from the JWT, so
-    // actual dev actions (token add/remove etc.) will still fail for
-    // non-dev UIDs even with the panel visible — this only affects
-    // client-side visibility.
+    /// Dev panelleri yalnızca allowlist'teki dev anonim uid'lerine gösterilir
+    /// (sunucudaki dev-* fonksiyonları da JWT'den aynı uid'leri bağımsızca
+    /// doğrular — bu yalnızca istemci görünürlüğünü kontrol eder).
     static var isDev: Bool {
-        return true
-        // guard let uid = UserDefaultsManager.shared.userId else { return false }
-        // return devUserIDs.contains(uid)
+        guard let uid = UserDefaultsManager.shared.userId else { return false }
+        return devUserIDs.contains(uid)
     }
 }

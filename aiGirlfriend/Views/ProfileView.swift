@@ -19,6 +19,8 @@ struct ProfileView: View {
 
     // Ayarlar (eski SettingsView'den buraya taşındı)
     @State private var notificationsOn = false
+    /// uid kopyalandı → ikon kısa süre ✓ olur (bkz. avatarCard).
+    @State private var didCopyUID = false
 
     // TODO: gerçek URL'lerle değiştir (App Store / gizlilik / koşullar).
     private let shareURL = URL(string: "https://apps.apple.com/app/id0000000000")!
@@ -81,12 +83,24 @@ struct ProfileView: View {
             // TEMP TESTING (2026-07-12) — Supabase auth UID'sini gösterir
             // (DB satırlarıyla eşleştirme için). Dokununca kopyalar.
             if let uid = UserDefaultsManager.shared.userId {
-                Text(uid)
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.4))
-                    .onTapGesture {
-                        UIPasteboard.general.string = uid
+                Button {
+                    UIPasteboard.general.string = uid
+                    withAnimation { didCopyUID = true }
+                    Task {
+                        try? await Task.sleep(nanoseconds: 1_500_000_000)
+                        withAnimation { didCopyUID = false }
                     }
+                } label: {
+                    HStack(spacing: 6) {
+                        Text(uid)
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(.white.opacity(0.4))
+                        Image(systemName: didCopyUID ? "checkmark" : "doc.on.doc")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(didCopyUID ? Color(hex: 0x22C55E) : .white.opacity(0.55))
+                    }
+                }
+                .buttonStyle(.plain)
             }
         }
         .padding(.vertical, 24)

@@ -25,7 +25,7 @@ private let relationshipLevels: [RelationshipLevel] = [
     .init(id: 7,  title: String(localized: "Lovers"),           blurb: String(localized: "You're passionately bound to each other.")),
     .init(id: 8,  title: String(localized: "Committed"),        blurb: String(localized: "You dream of the future together.")),
     .init(id: 9,  title: String(localized: "Engaged"),          blurb: String(localized: "The proposal is done, the big day approaches.")),
-    .init(id: 10, title: String(localized: "Soulmates"),        blurb: String(localized: "You complete each other — the highest level.")),
+    .init(id: 10, title: String(localized: "Soulmates"),        blurb: String(localized: "You complete each other, the highest level.")),
 ]
 
 struct RelationshipLevelsView: View {

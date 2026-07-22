@@ -43,8 +43,8 @@ struct CachedImage<Content: View, Placeholder: View>: View {
         uiImage = url.flatMap { ImageCache.shared.image(for: $0) }
         guard uiImage == nil, let url else { return }
         guard let (data, _) = try? await URLSession.shared.data(from: url),
-              let img = UIImage(data: data) else { return }
-        ImageCache.shared.insert(img, for: url)
+              // ImageCache içinde ekran boyutuna KÜÇÜLTÜLÜR (RAM tasarrufu).
+              let img = ImageCache.shared.insert(data: data, for: url) else { return }
         if self.url == url { uiImage = img }
     }
 }

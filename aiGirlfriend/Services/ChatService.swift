@@ -61,6 +61,9 @@ private struct ChatRequest: Codable {
 private struct WireMessage: Codable {
     let role: String
     let content: String
+    /// "text" | "image" | "voice" — üretilmiş foto mesajları reload sonrası
+    /// yeniden görünsün diye (bkz. Message.fromServer). Eski satırlarda nil.
+    let kind: String?
 }
 
 private struct ChatResponse: Codable {
@@ -87,6 +90,9 @@ struct ChatHistory {
     let messages: [Message]
     let level: Int
     let xp: Int
+    /// Güncel seviyenin ilerleme oranı (0..1) — SUNUCUDA hesaplanır. Sohbet
+    /// açılışında üst bardaki halka + seviye doğru göstersin diye döner.
+    let levelProgress: Double?
 }
 
 struct ChatReply {
@@ -154,6 +160,9 @@ struct ChatService {
         let kind: String
         let text: String
         let createIfMissing: Bool
+        /// Saklanacak mesajın DB `kind`'i ("text" | "image"). Üretilmiş fotoğraf
+        /// mesajlarını kalıcılaştırmak için "image" gönderilir (bkz. generatePendingImage).
+        let messageKind: String?
     }
     private struct InjectProactiveRequest: Codable {
         let characterId: String
@@ -172,7 +181,7 @@ struct ChatService {
     /// (liked / firstHello) için true — silinmiş sohbeti DİRİLTMEMEK için diğer
     /// bildirimlerde false (var olmayan sohbete yazmaz). Dönen: mesaj eklendi mi.
     @discardableResult
-    func injectProactiveMessage(character: Character, kind: String, text: String, createIfMissing: Bool) async -> Bool {
+    func injectProactiveMessage(character: Character, kind: String, text: String, createIfMissing: Bool, messageKind: String = "text") async -> Bool {
         var request = URLRequest(url: Config.chatFunctionURL)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -182,7 +191,7 @@ struct ChatService {
         guard let body = try? JSONEncoder().encode(InjectProactiveRequest(
             characterId: character.id.uuidString.lowercased(),
             systemPrompt: character.systemPrompt,
-            injectProactive: InjectProactivePayload(kind: kind, text: text, createIfMissing: createIfMissing)
+            injectProactive: InjectProactivePayload(kind: kind, text: text, createIfMissing: createIfMissing, messageKind: messageKind)
         )) else { return false }
         request.httpBody = body
         guard let (data, response) = try? await URLSession.shared.data(for: request),
@@ -192,13 +201,47 @@ struct ChatService {
         return decoded?.injected ?? false
     }
 
+    private struct PhotoMessagePayload: Codable {
+        let prompt: String
+        let url: String?
+    }
+    private struct PhotoMessageRequest: Codable {
+        let characterId: String
+        let systemPrompt: String
+        let photoMessage: PhotoMessagePayload
+    }
+
+    /// Foto balonunun kalıcı durumunu sunucuya yazar (bkz. chat/index.ts
+    /// photoMessage). `url == nil` → "açılmamış/kilitli" foto sakla (kullanıcı
+    /// isteği attı, henüz üretmedi); `url != nil` → o pending satırı gerçek
+    /// görsele çevir. Böylece açılmamış foto da chate tekrar girince görünür.
+    @discardableResult
+    func savePhotoMessage(character: Character, prompt: String, url: String?) async -> Bool {
+        var request = URLRequest(url: Config.chatFunctionURL)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let bearer = UserDefaultsManager.shared.accessToken ?? Config.supabaseAnonKey
+        request.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
+        request.setValue(Config.supabaseAnonKey, forHTTPHeaderField: "apikey")
+        guard let body = try? JSONEncoder().encode(PhotoMessageRequest(
+            characterId: character.id.uuidString.lowercased(),
+            systemPrompt: character.systemPrompt,
+            photoMessage: PhotoMessagePayload(prompt: prompt, url: url)
+        )) else { return false }
+        request.httpBody = body
+        guard let (_, response) = try? await URLSession.shared.data(for: request),
+              let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode)
+        else { return false }
+        return true
+    }
+
     /// Preset karakter: sunucudan geçmiş yükle.
     func loadHistory(character: Character) async throws -> ChatHistory {
         let resp = try await call(character: character, userMessage: nil)
         let messages = (resp.history ?? []).map {
-            Message(role: ChatRole(rawValue: $0.role) ?? .assistant, content: $0.content)
+            Message.fromServer(role: $0.role, content: $0.content, kind: $0.kind, createdAt: Date())
         }
-        return ChatHistory(messages: messages, level: resp.level ?? 1, xp: resp.xp ?? 0)
+        return ChatHistory(messages: messages, level: resp.level ?? 1, xp: resp.xp ?? 0, levelProgress: resp.levelProgress)
     }
 
     /// Preset karakter: yeni mesaj gönder.

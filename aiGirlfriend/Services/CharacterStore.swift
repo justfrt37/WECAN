@@ -106,10 +106,11 @@ final class CharacterStore {
             characters = Character.samples
         }
 
-        // Tüm görselleri splash'te önceden indir ve cache'le; feed'de
-        // "yükleniyor" görünmesin.
-        var urls = characters.flatMap { [$0.photoURL, $0.avatarURL].compactMap { $0 } }
-        urls += characters.flatMap { $0.galleryURLs }
+        // Feed'de anında görünmesi gereken görselleri (kart foto + avatar)
+        // splash'te önceden indir. Galeri fotoğrafları splash'te YÜKLENMEZ —
+        // sadece profil açıldığında talep üzerine gelir (bkz. talep: "görünmeyen
+        // fotolar bile RAM tutuyor"). Tümünü önden yüklemek RAM'i şişiriyordu.
+        let urls = characters.flatMap { [$0.photoURL, $0.avatarURL].compactMap { $0 } }
         await ImageCache.shared.prefetch(Array(Set(urls)))
 
         isLoaded = true
@@ -162,8 +163,7 @@ final class CharacterStore {
             // desc → asc (görüntüleme/sayım sırası)
             let convMsgs = Array((byConv[state.id] ?? []).reversed())
             let messages: [Message] = convMsgs.map {
-                Message(role: ChatRole(rawValue: $0.role) ?? .assistant,
-                        content: $0.content, createdAt: $0.date ?? Date())
+                Message.fromServer(role: $0.role, content: $0.content, kind: $0.kind, createdAt: $0.date ?? Date())
             }
             let existing = LocalConversationStore.shared.load(for: state.characterID)
             let stored = LocalConversationStore.Stored(

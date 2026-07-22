@@ -120,6 +120,11 @@ struct ChatView: View {
             viewModel.store = store
             viewModel.tokenStore = tokenStore
             viewModel.isVisible = true
+            // Bakiyeyi tazele — non-PRO'da token rozeti gizli, ama metin mesajı
+            // (PRO gerekmez, sadece token) göndermeden önceki ön-kontrol
+            // (hasTokensOrPaywall) doğru bakiyeyi görsün; bayat 0 yüzünden
+            // token'ı olan non-PRO kullanıcı yanlışlıkla paywall'a düşmesin.
+            Task { await tokenStore.refresh() }
             await viewModel.loadHistory()
             if !didPrefill, let prefillText, !prefillText.isEmpty {
                 viewModel.inputText = prefillText
@@ -502,6 +507,9 @@ struct ChatView: View {
             // programatik kaydırma — ve yalnızca kullanıcı DİPTEYSE (bkz. isNearBottom).
             .coordinateSpace(name: "chatScroll")
             .scrollIndicators(.hidden)
+            // Dibe konumlanana kadar gizli — açılışta "üstten dibe snap" görünmesin
+            // (bkz. onAppear, kullanıcı talebi: "direkt en aşağıdan açılmalı").
+            .opacity(readyToAutoScroll ? 1 : 0)
             .onPreferenceChange(ChatBottomOffsetKey.self) { contentBottomY in
                 // İçerik alt kenarı görünür alanın dibine yakınsa "dipte" say.
                 // Uzaktaysa (yukarı kaydırılmış) yeni mesaj dibe ZORLAMAZ.
@@ -521,11 +529,20 @@ struct ChatView: View {
             }
             .onAppear {
                 Task {
-                    // İçerik otursun; geçmiş varsa animasyonsuz dibe konumlan,
-                    // sonra otomatik-kaydırmayı aç.
-                    try? await Task.sleep(nanoseconds: 350_000_000)
+                    // "Direkt en aşağıdan açıl" (bkz. kullanıcı talebi): mesaj
+                    // listesi dibe konumlanana KADAR gizli kalır (opacity 0),
+                    // sonra dipte yumuşak fade-in yapar — böylece önce üstü görüp
+                    // sonra sert biçimde dibe zıplama (snap) OLMAZ.
+                    // Mesajlar yüklenene kadar bekle (en fazla ~600ms), sonra
+                    // animasyonsuz dibe konumlan ve görünür yap.
+                    for _ in 0..<15 {
+                        if !viewModel.messages.isEmpty { break }
+                        try? await Task.sleep(nanoseconds: 40_000_000)
+                    }
                     scrollToBottomInstant(proxy)
-                    readyToAutoScroll = true
+                    try? await Task.sleep(nanoseconds: 50_000_000)
+                    scrollToBottomInstant(proxy)   // layout oturduktan sonra kesin dibe
+                    withAnimation(.easeOut(duration: 0.2)) { readyToAutoScroll = true }
                 }
             }
         }
@@ -816,9 +833,13 @@ private struct ChatBubble: View {
                 // clipped), tam hâli sadece tam ekran görünümde (onTapImage).
                 // İlk gelişte bulanık + "Tap to view" — ilk dokunuş sadece
                 // bulanıklığı açar, sonraki dokunuş tam ekranı açar.
+                // Aspect ratio KORUNARAK gösterilir: üretilen fotolar 9:16 —
+                // balon da 9:16 kutu + scaledToFit → foto KIRPILMAZ/GERİLMEZ,
+                // tam hâli doğru oranıyla görünür (bkz. kullanıcı talebi). Tam
+                // hâli yine tam ekranda da açılır (onTapImage).
                 ZStack {
                     CachedImage(url: imageURL) { img in
-                        img.resizable().scaledToFill()
+                        img.resizable().scaledToFit()
                     } placeholder: {
                         // Foto açılırken (henüz yüklenmediyse) progress dönsün.
                         ZStack {
@@ -826,8 +847,7 @@ private struct ChatBubble: View {
                             ProgressView().tint(.white)
                         }
                     }
-                    .frame(width: 220, height: 260)
-                    .clipped()
+                    .frame(width: 220, height: 390)
                     .blur(radius: imageRevealed ? 0 : 26)
 
                     if !imageRevealed {
@@ -839,7 +859,7 @@ private struct ChatBubble: View {
                             .background(.white, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                     }
                 }
-                .frame(width: 220, height: 260)
+                .frame(width: 220, height: 390)
                 .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                 .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(.white.opacity(0.1), lineWidth: 1))
                 .onTapGesture {
@@ -880,6 +900,14 @@ private struct ChatBubble: View {
         // eski "tap to view" gizlilik bulanıklığını korurlar.
         .onChange(of: message.pendingImagePrompt) { old, new in
             if old != nil && new == nil { imageRevealed = true }
+        }
+        .onAppear {
+            // Geçmişten yüklenen foto (sunucuda kind=image olarak kayıtlı = zaten
+            // üretilmiş/görülmüş, bkz. Message.fromServer / generatePendingImage)
+            // AÇIK gelsin — chate tekrar girince "Tap to view" bulanıklığına
+            // DÖNMESİN (bkz. kullanıcı talebi). Taze foto ilk render'da imageURL'siz
+            // (pending) olduğundan burada etkilenmez; üretilince onChange revatlar.
+            if message.imageURL != nil { imageRevealed = true }
         }
     }
 
@@ -973,7 +1001,7 @@ private struct PendingImageBubble: View {
             CachedImage(url: backdropURL) { img in
                 img.resizable().scaledToFill()
             } placeholder: { AppColor.card }
-            .frame(width: 220, height: 260)
+            .frame(width: 220, height: 390)
             .clipped()
             .blur(radius: 26)
 
@@ -999,7 +1027,7 @@ private struct PendingImageBubble: View {
                 .background(.white, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
         }
-        .frame(width: 220, height: 260)
+        .frame(width: 220, height: 390)
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(.white.opacity(0.1), lineWidth: 1))
         .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
@@ -1027,14 +1055,11 @@ private struct PendingVoiceBubble: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            // Öndeki eleman (mikrofon / maliyet rozeti) SABİT genişlikte bir
-            // yuvada — kalp rozetine basıp mikrofona geçince balon boyutu
-            // DEĞİŞMESİN (bkz. kullanıcı talebi).
+            // Öndeki eleman (mikrofon / maliyet rozeti). Kilitli↔üretim
+            // geçişinde balon boyutu değişmesin diye SABİT 58 yuvada; ANCAK
+            // hazırlanırken SADECE mikrofon görünür (dalga yok, kompakt).
             Group {
                 if isPreparing || isGenerating {
-                    // Kayıt ikonu balonun İÇİNDE yanıp söner (önce ~3 sn hazırlanıyor,
-                    // sonra dokununca üretim) — bittiğinde WhatsApp tarzı sesli mesaja
-                    // dönüşür (bkz. kullanıcı talebi).
                     Image(systemName: "mic.fill")
                         .font(.system(size: 22))
                         .foregroundStyle(AppColor.pink)
@@ -1044,11 +1069,9 @@ private struct PendingVoiceBubble: View {
                                 blink = true
                             }
                         }
-                        // Kilitli aşamada mikrofon kaybolunca sıfırla — satın almaya
-                        // basıp üretim başlayınca tekrar görününce yeniden yanıp sönsün.
                         .onDisappear { blink = false }
                 } else {
-                    // PLAY tuşunun yerinde maliyet rozeti — beyaz zemin, sayı + kalp.
+                    // Maliyet rozeti — beyaz zemin, sayı + coin.
                     HStack(spacing: 3) {
                         Text("\(coinCost)")
                             .font(.system(size: 14, weight: .heavy))
@@ -1061,14 +1084,20 @@ private struct PendingVoiceBubble: View {
                     .transition(.scale(scale: 0.5).combined(with: .opacity))
                 }
             }
-            .frame(width: 58, alignment: .leading)
+            .frame(width: isPreparing ? nil : 58, alignment: .leading)
 
-            // Dekoratif dalga-formu (soluk, WhatsApp görünümü). Süre YAZISI YOK —
-            // süre yalnızca ses açılıp geldiğinde (VoiceMessageBubble) gösterilir
-            // (bkz. kullanıcı talebi: "kalp varken sağda süresi görünmesin").
-            HStack(spacing: 3) {
-                ForEach(0..<14, id: \.self) { _ in
-                    Capsule().fill(.white.opacity(0.28)).frame(width: 2.5, height: 10)
+            // Dalga formu:
+            //  - Hazırlanırken: YOK (sadece mikrofon yanıp söner, bkz. kullanıcı talebi).
+            //  - Üretilirken (ses gelene kadar): mikrofona (sola) DOĞRU AKAN
+            //    animasyonlu dalgalar.
+            //  - Kilitli (ücret): statik dekoratif dalga (WhatsApp görünümü).
+            if isGenerating {
+                IncomingVoiceWave()
+            } else if !isPreparing {
+                HStack(spacing: 3) {
+                    ForEach(0..<14, id: \.self) { _ in
+                        Capsule().fill(.white.opacity(0.28)).frame(width: 2.5, height: 10)
+                    }
                 }
             }
         }
@@ -1077,6 +1106,26 @@ private struct PendingVoiceBubble: View {
         .background(AppColor.card, in: RoundedRectangle(cornerRadius: 18))
         .contentShape(RoundedRectangle(cornerRadius: 18))
         .onTapGesture { if !isGenerating && !isPreparing { onTap() } }
+    }
+}
+
+/// Sesli mesaj ÜRETİLİRKEN sağda gösterilen, mikrofona (sola) doğru akan canlı
+/// ses dalgaları — "ses geliyor" hissi (bkz. kullanıcı talebi). TimelineView ile
+/// sürekli animasyon; zirve zamanla sola kayar (i arttıkça faz artar → tepe
+/// düşük index'e = sola doğru ilerler).
+private struct IncomingVoiceWave: View {
+    var body: some View {
+        TimelineView(.animation) { timeline in
+            let t = timeline.date.timeIntervalSinceReferenceDate
+            HStack(spacing: 3) {
+                ForEach(0..<14, id: \.self) { i in
+                    let norm = 0.5 + 0.5 * sin(t * 7 + Double(i) * 0.55)
+                    Capsule()
+                        .fill(AppColor.pink.opacity(0.35 + 0.55 * norm))
+                        .frame(width: 2.5, height: 6 + 12 * norm)
+                }
+            }
+        }
     }
 }
 

@@ -68,6 +68,8 @@ final class PurchaseService {
     private let apiKey = ""
 
     private(set) var isConfigured = false
+    // Non-PRO test için .none (bkz. kullanıcı talebi). PRO test etmek istersen
+    // DEBUG'ta tekrar .pro yapabilirsin.
     var tier: SubscriptionTier = .none
     /// Eski `isPro` çağrı yerleri (CreateCharacterView, LikesView, GalleryView,
     /// PaywallHostView) hiç değişmeden derlenmeye devam etsin diye korunuyor.

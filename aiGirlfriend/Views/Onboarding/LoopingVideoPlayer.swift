@@ -61,11 +61,23 @@ final class LoopingVideoUIView: UIView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) kullanılmıyor") }
 
+    // View pencereden çıkınca (ör. onboarding tamamlanıp ekran kaldırılınca, adım
+    // değişince) player'ı DURDUR — arka planda video çözme/bellek tüketmesin
+    // (bkz. kullanıcı talebi: "RAM'de kalmasın"). Geri geldiğinde devam eder.
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        if window == nil { queuePlayer.pause() } else { queuePlayer.play() }
+    }
+
+    // Uygulama öne gelince SADECE hâlâ ekrandaysa devam et — ekran-dışı (kaldırılmış
+    // ama henüz dealloc olmamış) bir player'ı yeniden başlatma.
     @objc private func resume() {
-        queuePlayer.play()
+        if window != nil { queuePlayer.play() }
     }
 
     deinit {
         NotificationCenter.default.removeObserver(self)
+        queuePlayer.pause()
+        queuePlayer.removeAllItems()   // AVPlayerItem/decoder kaynaklarını bırak
     }
 }

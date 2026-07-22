@@ -302,38 +302,43 @@ interface CuratedPhoto {
   url: string;
   description: string | null;
   mood: string | null;
+  is_private?: boolean;
 }
 
-// DEV-uploaded real photos (see supabase/functions/dev-create-character) —
-// "most of the time use images from their existing photos" — only when NONE
-// of them are even close to what was asked do we fall through to actually
-// generating a new image (bkz. Deno.serve handler below). No embedding/
-// similarity utility exists in this project, so this mirrors the existing
-// classifyPrivacy pattern: one cheap Grok text call, not a vision call.
+// Kullanıcı talebi: karakterin bir sohbet-foto havuzu VARSA foto ÜRETME — bu
+// havuzdan SEÇ. LLM en uygun fotoyu seçer; ancak havuz boş DEĞİLSE her durumda
+// bir foto döner (LLM "yakın değil" dese ya da kredi/hatayla çökse bile rastgele
+// seçilir) — böylece asla gereksiz üretime düşülmez ve seçim LLM kredisine bağlı kalmaz.
 async function pickCuratedPhoto(userPrompt: string, photos: CuratedPhoto[]): Promise<CuratedPhoto | null> {
+  if (photos.length === 0) return null;
   const described = photos.filter((p) => p.description && p.description.trim());
-  if (described.length === 0) return null;
+  const pool = described.length ? described : photos;
+  const rand = () => pool[Math.floor(Math.random() * pool.length)];
+
+  if (pool.length === 1) return pool[0];       // tek foto → sormaya gerek yok
+  if (described.length === 0) return rand();    // açıklama yok → LLM eşleştiremez
 
   const listing = described.map((p, i) => `${i + 1}. ${p.description}${p.mood ? ` (mood: ${p.mood})` : ""}`).join("\n");
-  const raw = await callGrokText(
-    [
-      {
-        role: "system",
-        content:
-          "You are picking which existing photo (from a fixed list) best satisfies a user's " +
-          "photo request in a chat app. Only pick one if it's a genuinely close match to what " +
-          "was asked (same rough scene/outfit/activity/angle) — err on the side of NOT matching " +
-          "if it's not close. Reply with ONLY the number of the best match, or the single word " +
-          "NONE if nothing is close enough. No other text.",
-      },
-      { role: "user", content: `Photos available:\n${listing}\n\nUser's request: "${userPrompt}"` },
-    ],
-    10
-  );
-  const trimmed = raw.trim();
-  const n = parseInt(trimmed, 10);
-  if (!isNaN(n) && n >= 1 && n <= described.length) return described[n - 1];
-  return null;
+  try {
+    const raw = await callGrokText(
+      [
+        {
+          role: "system",
+          content:
+            "You pick which existing photo (from a fixed numbered list) best fits a user's photo " +
+            "request in a chat app. ALWAYS pick the closest one — reply with ONLY its number and " +
+            "nothing else. There is always a valid answer; never reply with words.",
+        },
+        { role: "user", content: `Photos available:\n${listing}\n\nUser's request: "${userPrompt}"` },
+      ],
+      10
+    );
+    const n = parseInt(raw.trim(), 10);
+    if (!isNaN(n) && n >= 1 && n <= described.length) return described[n - 1];
+  } catch (e) {
+    console.error("pickCuratedPhoto LLM failed, random fallback:", String(e));
+  }
+  return rand(); // LLM uygunsuz/başarısız → yine de havuzdan seç (ÜRETME)
 }
 
 /// Grok'u "fotoğraf yönetmeni" gibi kullanarak kullanıcının isteğini + alan
@@ -634,63 +639,42 @@ Deno.serve(async (req: Request) => {
     // through to actual generation if nothing close enough exists. Every
     // other (virtual/user-created) character has zero rows here and this is
     // a no-op, so existing behavior is unchanged for them.
-    const { data: curatedPhotos } = await db
-      .from("character_photos")
-      .select("id, url, description, mood")
+    // Kullanıcının bu karakterle GERÇEK ilişki seviyesi (foto seviye-kilidi).
+    // Karakterin global relationship_level'ı DEĞİL — o çoğu satırda 0/null olup
+    // seviye-1 fotoları eleyerek havuzu boşaltıyor ve gereksiz üretime düşürüyordu.
+    const { data: convLevelRows } = await db
+      .from("conversations")
+      .select("relationship_level")
+      .eq("user_id", uid)
       .eq("character_id", characterId)
-      .lte("min_relationship_level", character.relationship_level ?? 0);
-    const curatedMatch = curatedPhotos?.length
-      ? await pickCuratedPhoto(userPrompt, curatedPhotos as CuratedPhoto[])
-      : null;
+      .order("updated_at", { ascending: false })
+      .limit(1);
+    const userLevel: number = convLevelRows?.[0]?.relationship_level ?? 1;
 
-    if (curatedMatch) {
-      photoUrl = curatedMatch.url;
-      isPrivate = await classifyPrivacy(userPrompt);
-    } else {
-      const imagePrompt = await composeImagePrompt({
-        appearance: appearanceContext({
-          name: character.name,
-          profession: character.profession,
-          tagline: character.tagline,
-          builderSelections: character.builder_selections ?? null,
-        }),
-        category,
-        userPrompt,
-        hasBaseline: baselineImageUrl !== null,
-        context: conversationContext(history, summary) + currentActivityContext(currentActivity),
-      });
+    // Sohbet için ayrılmış küratörlü foto havuzu: show_in_chat + KATALOG (user_id
+    // null, kullanıcı-üretimi değil) + kullanıcının seviyesine uygun. Havuz VARSA
+    // foto ÜRETİLMEZ, buradan seçilir (bkz. pickCuratedPhoto, kullanıcı talebi).
+    const { data: catalogPhotos } = await db
+      .from("character_photos")
+      .select("id, url, description, mood, is_private, show_in_chat")
+      .eq("character_id", characterId)
+      .is("user_id", null)                       // katalog (kullanıcı-üretimi DEĞİL)
+      .lte("min_relationship_level", userLevel);
+    // Küratör bazı fotoları özellikle "sohbette gönderilebilir" (show_in_chat)
+    // işaretlediyse ONLARI kullan; hiç işaretlenmemişse (ör. Brooke — 36 açıklamalı
+    // katalog fotosu var ama show_in_chat=false) TÜM katalog havuzunu kullan.
+    const designated = (catalogPhotos ?? []).filter((p: { show_in_chat?: boolean }) => p.show_in_chat === true);
+    const pool = (designated.length ? designated : (catalogPhotos ?? [])) as CuratedPhoto[];
+    const curatedMatch = pool.length ? await pickCuratedPhoto(userPrompt, pool) : null;
 
-      try {
-        const [bytes, privacyResult] = await Promise.all([
-          fetchGeneratedImageBytes(imagePrompt, baselineImageUrl),
-          classifyPrivacy(imagePrompt),
-        ]);
-        photoUrl = await uploadGeneratedImage(bytes);
-        isPrivate = privacyResult;
-      } catch (e) {
-        console.error("chat-image generation failed, trying safe fallback prompt:", String(e));
-        try {
-          const safePrompt = await buildSafeFallbackPrompt(userPrompt, imagePrompt);
-          // Keep trying WITH the baseline face on the toned-down prompt first —
-          // only drop it (face will NOT match) if the safe prompt also fails
-          // with the baseline attached. See fetchGeneratedImageBytes note above.
-          let bytes: Uint8Array;
-          try {
-            bytes = await fetchGeneratedImageBytes(safePrompt, baselineImageUrl);
-          } catch (baselineErr) {
-            if (!baselineImageUrl) throw baselineErr;
-            console.error("chat-image safe fallback (with baseline) also failed — falling back to referenceless generation, face will NOT match:", String(baselineErr));
-            bytes = await generateWithoutBaseline(safePrompt);
-          }
-          photoUrl = await uploadGeneratedImage(bytes);
-          isPrivate = false; // toned-down by construction
-          redirected = true;
-        } catch (e2) {
-          console.error("chat-image safe fallback also failed:", String(e2));
-          return json({ error: "image_generation_failed" }, 502);
-        }
-      }
+    // Kullanıcı talebi: Grok'tan foto ÜRETME. SADECE havuzdan seç; havuzda
+    // uygun/hiç foto yoksa (ya da seçilemezse) HATA dön — üretime ASLA düşme.
+    if (!curatedMatch) {
+      return json({ error: "no_photo_available" }, 422);
     }
+    photoUrl = curatedMatch.url;
+    // Gizlilik bilgisi foto satırında (küratör ayarladı) → classifyPrivacy GEREKMEZ.
+    isPrivate = curatedMatch.is_private === true;
 
     // Konuşmayı bul ya da oluştur (chat/add-character-note ile aynı desen).
     let { data: convo } = await db

@@ -223,8 +223,8 @@ struct CharacterProfileView: View {
 
     // MARK: Fotoğraflar (ilgi alanları altında, 2 sütun, aşağıya kadar)
 
-    private let photoColumns = [GridItem(.flexible(), spacing: 12),
-                                GridItem(.flexible(), spacing: 12)]
+    private let photoColumns = [GridItem(.flexible(), spacing: 16),
+                                GridItem(.flexible(), spacing: 16)]
 
     private var photosSection: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -232,30 +232,37 @@ struct CharacterProfileView: View {
                 .font(.system(size: 13, weight: .bold))
                 .tracking(0.5)
                 .foregroundStyle(.white.opacity(0.8))
-            LazyVGrid(columns: photoColumns, spacing: 12) {
+            LazyVGrid(columns: photoColumns, spacing: 16) {
                 ForEach(Array(images.enumerated()), id: \.offset) { idx, url in
                     let locked = idx > 0 && !PurchaseService.shared.isPro
-                    ZStack {
-                        CachedImage(url: url) { image in
-                            image.resizable().scaledToFill()
-                        } placeholder: { AppColor.card }
-                        .frame(height: 240)
+                    // TAŞMAYA KARŞI BAĞIŞIK hücre: boyut çıpası olarak Color.clear
+                    // (sütun genişliğini doldurur, 240 yüksekliğinde); görsel bir
+                    // OVERLAY olarak çizilir ve `clipShape` HER ŞEYİ hücre sınırına
+                    // kırpar → scaledToFill/blur asla komşuya taşmaz, aradaki 16pt
+                    // boşluk korunur (bkz. "sağlı sollu birbirine giriyor" hatası).
+                    Color.clear
                         .frame(maxWidth: .infinity)
-                        .clipped()
-                        .blur(radius: locked ? 18 : 0)
-
-                        if locked {
-                            Color.black.opacity(0.25)
-                            Image(systemName: "lock.fill")
-                                .font(.system(size: 26))
-                                .foregroundStyle(.white)
-                                .shadow(color: .black.opacity(0.5), radius: 6, y: 3)
+                        .frame(height: 240)
+                        .overlay {
+                            CachedImage(url: url) { image in
+                                image.resizable().scaledToFill()
+                            } placeholder: { AppColor.card }
+                            .blur(radius: locked ? 18 : 0)
                         }
-                    }
-                    .frame(height: 240)
-                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                    .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                    .onTapGesture { if locked { showPaywall = true } }
+                        .overlay {
+                            if locked {
+                                ZStack {
+                                    Color.black.opacity(0.25)
+                                    Image(systemName: "lock.fill")
+                                        .font(.system(size: 26))
+                                        .foregroundStyle(.white)
+                                        .shadow(color: .black.opacity(0.5), radius: 6, y: 3)
+                                }
+                            }
+                        }
+                        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                        .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                        .onTapGesture { if locked { showPaywall = true } }
                 }
             }
         }

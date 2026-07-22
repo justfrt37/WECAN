@@ -57,6 +57,25 @@ struct Message: Identifiable, Codable, Hashable {
         self.pendingVoiceRequest = pendingVoiceRequest
     }
 
+    /// Sunucudan gelen bir satırdan (role/content/kind) görüntülenebilir Message
+    /// kurar. `kind == "image"` → üretilmiş fotoğraf (sunucu-barındırmalı URL,
+    /// content = URL) `imageURL`'e döner; böylece sohbete tekrar girince foto
+    /// yeniden görünür (bkz. "resimler görünmüyor" hatası). Ses (`voice`)
+    /// cihazda saklandığından reload'da geri gelmez, metin gibi düşer.
+    static func fromServer(role: String, content: String, kind: String?, createdAt: Date) -> Message {
+        let r = ChatRole(rawValue: role) ?? .assistant
+        if kind == "image", let url = URL(string: content) {
+            return Message(role: r, content: "", createdAt: createdAt, imageURL: url)
+        }
+        // "Açılmamış/kilitli" foto — kullanıcı isteği attı ama henüz üretmedi.
+        // Reload'da yine "üret" (pending) balonu olarak görünür; content = üretim
+        // prompt'u (bkz. chat/index.ts photoMessage, "açılmamış foto tutulmalı").
+        if kind == "image_pending" {
+            return Message(role: r, content: "", createdAt: createdAt, pendingImagePrompt: content)
+        }
+        return Message(role: r, content: content, createdAt: createdAt)
+    }
+
     var isUser: Bool { role == .user }
     var isVoice: Bool { voiceLocalPath != nil }
     var isUserPhoto: Bool { localImagePath != nil }

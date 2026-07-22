@@ -120,8 +120,7 @@ struct ChatListView: View {
 
             // ChatView anında açılsın diye geçmişi bellek-içi önbelleğe al (asc).
             let displayMessages: [Message] = convMsgs.reversed().map {
-                Message(role: ChatRole(rawValue: $0.role) ?? .assistant,
-                        content: $0.content, createdAt: $0.date ?? Date())
+                Message.fromServer(role: $0.role, content: $0.content, kind: $0.kind, createdAt: $0.date ?? Date())
             }
             store.chatCache[ch.id] = displayMessages
 

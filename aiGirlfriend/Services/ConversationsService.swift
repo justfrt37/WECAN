@@ -29,7 +29,7 @@ struct LastMessage: Codable {
     let kind: String?
 
     var isUser: Bool { role == "user" }
-    var isImage: Bool { kind == "image" }
+    var isImage: Bool { kind == "image" || kind == "image_pending" }
     var isVoice: Bool { kind == "voice" }
 
     var date: Date? {

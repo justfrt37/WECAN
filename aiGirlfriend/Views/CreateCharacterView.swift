@@ -1452,9 +1452,15 @@ struct CreateCharacterView: View {
     /// üzerinden açar — chat kendi lokal stack'imizde değil, gerçek stack'te
     /// push edilsin ki geri tuşu "hazır" ekranına değil, sohbetler listesine dönsün.
     private func goToChat(with character: Character) {
-        store.pendingTab = .chat
-        store.pendingMeetRequest = MeetRequest(character: character, prefillText: "")
+        // ÖNCE create sihirbazını kapat, kapanma animasyonu bitip bellekten
+        // düştükten SONRA sohbete geç. Eskiden pendingMeetRequest dismiss'ten
+        // ÖNCE set ediliyordu → cover chat'in üstünde asılı kalıp arka planda
+        // tutuluyordu (bkz. kullanıcı talebi: "chat açılınca kapanmalı").
         dismiss()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            store.pendingTab = .chat
+            store.pendingMeetRequest = MeetRequest(character: character, prefillText: "")
+        }
     }
 
     /// "See character": gerçek fotoğrafı üretir + karakteri oluşturur, sonra
@@ -1705,6 +1711,18 @@ struct CreateCharacterView: View {
             if let tokenBalance { tokenStore.setBalance(tokenBalance) }
             withAnimation { created = c }
             store.characters.append(c)
+            // Yeni karakter, kullanıcı hiç mesaj atmasa bile Sohbetler listesinde
+            // görünsün (bkz. kullanıcı talebi): onboarding'deki gibi sunucuya
+            // kalıcı bir ilk-selam ekle → konuşma+mesaj oluşur, liste gösterir.
+            // Chat ilk açıldığında "yazıyor" animasyonuyla gelsin diye de işaretle.
+            let helloLine = FirstHelloContent.randomLine()
+            store.pendingFirstHello = (c.id, helloLine)
+            Task {
+                await ChatService().injectProactiveMessage(
+                    character: c, kind: "firstHello", text: helloLine, createIfMissing: true
+                )
+                store.conversationsVersion &+= 1
+            }
             return
         case .insufficientTokens(let tokenBalance):
             // PRO ama coin yetmedi (sunucu 402) → bakiyeyi güncelle + coin mağazası.

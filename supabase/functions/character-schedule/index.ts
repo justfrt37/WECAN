@@ -14,9 +14,18 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type",
 };
 
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+
 const XAI_API_KEY = Deno.env.get("XAI_API_KEY") ?? "";
 const XAI_URL = "https://api.x.ai/v1/chat/completions";
 const MODEL = "grok-4-1-fast-non-reasoning";
+
+// Üretilen rutini KALICI yazmak için (service-role → RLS baypas).
+const db = createClient(
+  Deno.env.get("SUPABASE_URL")!,
+  Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+  { auth: { persistSession: false } },
+);
 
 function userIdFromJWT(authHeader: string | null): string | null {
   if (!authHeader) return null;
@@ -143,7 +152,26 @@ Deno.serve(async (req: Request) => {
       return json({ error: "invalid_schedule_shape" }, 502);
     }
 
-    return json({ schedule: { weekday: parsed.weekday, weekend: parsed.weekend } });
+    const schedule = { weekday: parsed.weekday, weekend: parsed.weekend };
+
+    // Üretilen rutini, VARSA kullanıcının bu karakterle konuşmasına KALICI yaz
+    // (conversations.schedule, migration 009). Böylece her açılışta yeniden
+    // ÜRETİLMEZ — hydrateConversations bunu geri okur, ensureGenerated atlar
+    // (bkz. "her açılışta rutin üretimi → aşırı LLM isteği" sorunu). Konuşma
+    // YOKSA OLUŞTURMA (hayalet sohbet olmasın); mesajlaşınca oluşan konuşmaya
+    // bir sonraki üretimde yazılır. Best-effort: yazma başarısız olsa da rutini döndür.
+    try {
+      const { data: convo } = await db.from("conversations").select("id")
+        .eq("user_id", uid).eq("character_id", characterId)
+        .order("updated_at", { ascending: false }).limit(1);
+      if (convo && convo[0]) {
+        await db.from("conversations").update({ schedule }).eq("id", convo[0].id);
+      }
+    } catch (persistErr) {
+      console.error("schedule persist err:", String(persistErr));
+    }
+
+    return json({ schedule });
   } catch (e) {
     console.error(String(e));
     return json({ error: String(e) }, 500);
