@@ -1,18 +1,22 @@
 //
 //  GeneratedPhotoService.swift
 //  Kullanıcının bir karakterle sohbette ürettiği ÖZEL fotoğrafları çeker.
-//  `generated_photos` tablosu RLS ile auth.uid()'e göre filtrelenir — bu
-//  yüzden anon key ile çağrılırsa boş döner, gerçek kullanıcı JWT'si gerekir.
+//  Artık `character_photos` tablosunda (user_id dolu satırlar — bkz. migration
+//  013, eski `generated_photos`'ın yerini aldı). RLS user_id = auth.uid()'e
+//  göre filtreler — bu yüzden anon key ile çağrılırsa boş döner, gerçek
+//  kullanıcı JWT'si gerekir.
 //
 
 import Foundation
 
 struct GeneratedPhotoService {
     func fetch(characterId: UUID) async throws -> [URL] {
-        guard let accessToken = UserDefaultsManager.shared.accessToken else { return [] }
+        guard let accessToken = UserDefaultsManager.shared.accessToken,
+              let userId = UserDefaultsManager.shared.userId else { return [] }
 
-        let endpoint = "\(Config.supabaseURL)/rest/v1/generated_photos" +
+        let endpoint = "\(Config.supabaseURL)/rest/v1/character_photos" +
             "?select=url,created_at&character_id=eq.\(characterId.uuidString.lowercased())" +
+            "&user_id=eq.\(userId)&show_in_gallery=eq.true" +
             "&order=created_at.desc"
         guard let url = URL(string: endpoint) else { throw URLError(.badURL) }
 

@@ -245,7 +245,7 @@ struct CharacterProfileView: View {
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(AppColor.pinkSoft)
             }
-            Text(character.tagline)
+            Text(character.localizedTagline)
                 .font(.system(size: 15, weight: .medium))
                 .lineSpacing(4)
                 .foregroundStyle(.white.opacity(0.9))

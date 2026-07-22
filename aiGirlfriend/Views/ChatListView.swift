@@ -334,7 +334,7 @@ private struct ChatHistoryRow: View {
             }
                 .foregroundStyle(hasUnread ? .white : .white.opacity(0.6))
         } else {
-            Text(item.character.tagline)
+            Text(item.character.localizedTagline)
                 .foregroundStyle(.white.opacity(0.5))
         }
     }

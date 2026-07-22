@@ -47,12 +47,10 @@ struct ProfileView: View {
                 .ignoresSafeArea()
         )
         .sheet(isPresented: $showPaywall) { PaywallHostView() }
-        .sheet(isPresented: $showHelp) { HelpSupportView() }
         // CharacterStore is already injected ambiently at MainTabView's root —
         // no need to re-inject it here, same as every other CreateCharacterView call site.
         .sheet(isPresented: $showDevCreateCharacter) { CreateCharacterView(devMode: .create) }
         .sheet(isPresented: $showDevEditCharacter) { DevEditCharacterPickerView() }
-        .task { notificationsOn = await currentNotificationStatus() }
         #if DEBUG
         .sheet(isPresented: $dbgSettings) { NavigationStack { SettingsView() } }
         #endif

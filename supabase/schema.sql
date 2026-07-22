@@ -24,7 +24,6 @@ create table if not exists characters (
   interests        jsonb not null default '[]'::jsonb,  -- ilgi alanları (emoji+metin)
   relationship_level int not null default 0,            -- ilişki seviyesi (0 başlar, artar)
   gallery_urls     jsonb not null default '[]'::jsonb,  -- profildeki kaydırılabilir resimler
-  chat_photos      jsonb not null default '[]'::jsonb,  -- kızın sohbette gönderebileceği hazır fotolar
   created_at  timestamptz not null default now()
 );
 
@@ -40,10 +39,13 @@ alter table characters
   add column if not exists interests jsonb not null default '[]'::jsonb,
   add column if not exists relationship_level int not null default 0,
   add column if not exists gallery_urls jsonb not null default '[]'::jsonb,
-  add column if not exists chat_photos jsonb not null default '[]'::jsonb,
   -- DEV-curated characters only (bkz. dev-create-character) — per-character
   -- ElevenLabs override; null keeps the default role+vibe map.
-  add column if not exists voice_id text;
+  add column if not exists voice_id text,
+  -- Locale -> tagline text map ({"tr": "...", "en": "...", ...}); `tagline`
+  -- itself stays the Turkish canonical text and the fallback for missing
+  -- locales. See supabase/functions/_shared/tagline-i18n.ts.
+  add column if not exists tagline_i18n jsonb not null default '{}'::jsonb;
 
 -- Karakter görselleri için public storage bucket'ı
 insert into storage.buckets (id, name, public)
@@ -57,8 +59,12 @@ drop policy if exists "characters_public_read" on characters;
 create policy "characters_public_read" on characters
   for select to anon, authenticated using (true);
 
--- Karaktere ait sohbette gönderilebilecek fotoğraflar (galeri = Storage'daki dosyalar).
--- "Kız foto gönderir" = buradan seviyeye/PRO'ya uygun bir kayıt seçilir.
+-- TÜM karakter fotoğraflarının tek kataloğu — chat pool, profil/avatar fotosu,
+-- galeri fotoları VE kullanıcıya özel sohbette üretilen fotolar (bkz. migration
+-- 013). show_in_chat/show_in_gallery/show_as_profile_picture nerede
+-- gösterileceğini, is_generated/is_uploaded kaynağını belirler. user_id/
+-- conversation_id NULL ise herkese açık katalog satırı; doluysa yalnız o
+-- kullanıcıya ait özel (sohbette üretilmiş) foto — RLS ikisini ayırır.
 create table if not exists character_photos (
   id           uuid primary key default gen_random_uuid(),
   character_id uuid references characters(id) on delete cascade,
@@ -72,15 +78,32 @@ create table if not exists character_photos (
   -- kullanıcının fotoğraf isteğiyle karşılaştırır (bkz. dev-create-character,
   -- chat-image/index.ts pickCuratedPhoto).
   description  text,
+  is_generated boolean not null default false,       -- AI ile mi üretildi
+  is_uploaded  boolean not null default false,       -- gerçek/dev-yüklenen mi
+  show_in_gallery         boolean not null default false,
+  show_in_chat            boolean not null default false,
+  show_as_profile_picture boolean not null default false,
+  -- NULL = herkese açık katalog satırı. Doluysa yalnız bu kullanıcıya özel
+  -- (sohbette bota ürettirdiği) foto — eski generated_photos tablosunun yerini alır.
+  user_id         uuid references auth.users(id) on delete cascade,
+  conversation_id uuid references conversations(id) on delete cascade,
+  is_private   boolean not null default false,       -- kullanıcıya özel fotonun mahremiyet sınıflandırması
+  reacted      boolean not null default false,       -- bot bu fotoya sohbet içinde tepki verdi mi
   created_at   timestamptz not null default now()
 );
 create index if not exists character_photos_char_idx
   on character_photos(character_id, min_relationship_level);
+create index if not exists character_photos_user_idx
+  on character_photos(user_id, character_id);
 
 alter table character_photos enable row level security;
 drop policy if exists "character_photos_public_read" on character_photos;
-create policy "character_photos_public_read" on character_photos
-  for select to anon, authenticated using (true);
+-- Katalog satırları (user_id NULL) herkese açık.
+create policy "character_photos_catalog_read" on character_photos
+  for select to anon, authenticated using (user_id is null);
+-- Kullanıcıya özel satırlar yalnız sahibine açık.
+create policy "character_photos_owner_read" on character_photos
+  for select to authenticated using (user_id = auth.uid());
 
 -- conversations: kullanıcı yalnızca kendi sohbetlerini okuyabilir (chat listesi).
 drop policy if exists "conversations_own_read" on conversations;
@@ -92,7 +115,6 @@ create table if not exists conversations (
   id          uuid primary key default gen_random_uuid(),
   user_id     uuid,                       -- Supabase Auth user id
   character_id uuid references characters(id),
-  title       text,
   -- eski turların özetlenmiş hali (katmanlı bellek: "özet bellek")
   summary     text default '',
   -- şimdiye kadar kaç eski mesajın özete sıkıştırıldığı (Edge Function takip eder)

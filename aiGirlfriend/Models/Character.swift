@@ -9,7 +9,8 @@ import Foundation
 struct Character: Identifiable, Codable, Hashable {
     let id: UUID
     var name: String
-    var tagline: String          // kısa tanıtım
+    var tagline: String          // kısa tanıtım (kanonik, Türkçe — bkz. localizedTagline)
+    var taglineI18n: [String: String]  // dil kodu -> tagline (bkz. supabase/functions/_shared/tagline-i18n.ts)
     var systemPrompt: String     // karakterin persona promptu (sunucuya gönderilir)
     var avatarSymbol: String     // SF Symbol (görsel yoksa yedek)
 
@@ -26,7 +27,6 @@ struct Character: Identifiable, Codable, Hashable {
     var interests: [String]      // ilgi alanları (emoji + metin)
     var relationshipLevel: Int   // ilişki seviyesi (0 başlar, artar)
     var galleryURLs: [URL]       // profildeki kaydırılabilir resimler
-    var chatPhotos: [URL]        // kızın sohbette gönderebileceği hazır fotoğraflar
     var personalityRole: String  // flirty | distant | shy | playful | devoted | crazy | ex
     var vibe: String             // Sweet | Mysterious | Energetic | Elegant — builder_selections.vibe
     var createdBy: String?       // kullanıcı tarafından oluşturulmuşsa kullanıcı ID'si
@@ -39,6 +39,7 @@ struct Character: Identifiable, Codable, Hashable {
 
     private enum CodingKeys: String, CodingKey {
         case id, name, tagline
+        case taglineI18n = "tagline_i18n"
         case systemPrompt = "system_prompt"
         case avatarSymbol = "avatar_symbol"
         case age, city, country, profession, category
@@ -47,7 +48,6 @@ struct Character: Identifiable, Codable, Hashable {
         case interests
         case relationshipLevel = "relationship_level"
         case galleryURLs = "gallery_urls"
-        case chatPhotos = "chat_photos"
         case personalityRole = "personality_role"
         case createdBy = "created_by"
         case voiceId = "voice_id"
@@ -69,6 +69,7 @@ struct Character: Identifiable, Codable, Hashable {
         id: UUID,
         name: String,
         tagline: String,
+        taglineI18n: [String: String] = [:],
         systemPrompt: String,
         avatarSymbol: String = "person.crop.circle.fill",
         age: Int? = nil,
@@ -81,7 +82,6 @@ struct Character: Identifiable, Codable, Hashable {
         interests: [String] = [],
         relationshipLevel: Int = 0,
         galleryURLs: [URL] = [],
-        chatPhotos: [URL] = [],
         personalityRole: String = "flirty",
         vibe: String = "Sweet",
         createdBy: String? = nil,
@@ -90,6 +90,7 @@ struct Character: Identifiable, Codable, Hashable {
         self.id = id
         self.name = name
         self.tagline = tagline
+        self.taglineI18n = taglineI18n
         self.systemPrompt = systemPrompt
         self.avatarSymbol = avatarSymbol
         self.age = age
@@ -102,7 +103,6 @@ struct Character: Identifiable, Codable, Hashable {
         self.interests = interests
         self.relationshipLevel = relationshipLevel
         self.galleryURLs = galleryURLs
-        self.chatPhotos = chatPhotos
         self.personalityRole = personalityRole
         self.vibe = vibe
         self.createdBy = createdBy
@@ -115,6 +115,7 @@ struct Character: Identifiable, Codable, Hashable {
         id = try c.decode(UUID.self, forKey: .id)
         name = try c.decode(String.self, forKey: .name)
         tagline = (try? c.decode(String.self, forKey: .tagline)) ?? ""
+        taglineI18n = (try? c.decode([String: String].self, forKey: .taglineI18n)) ?? [:]
         systemPrompt = (try? c.decode(String.self, forKey: .systemPrompt)) ?? ""
         avatarSymbol = (try? c.decode(String.self, forKey: .avatarSymbol)) ?? "person.crop.circle.fill"
         age = try? c.decodeIfPresent(Int.self, forKey: .age)
@@ -127,7 +128,6 @@ struct Character: Identifiable, Codable, Hashable {
         interests = (try? c.decode([String].self, forKey: .interests)) ?? []
         relationshipLevel = (try? c.decode(Int.self, forKey: .relationshipLevel)) ?? 0
         galleryURLs = (try? c.decode([URL].self, forKey: .galleryURLs)) ?? []
-        chatPhotos = (try? c.decode([URL].self, forKey: .chatPhotos)) ?? []
         personalityRole = (try? c.decode(String.self, forKey: .personalityRole)) ?? "flirty"
         // Önce düz `vibe` anahtarına bak (kendi disk önbelleğimizin formatı) —
         // yoksa sunucunun iç içe `builder_selections.vibe`'ına düş.
@@ -163,6 +163,14 @@ struct Character: Identifiable, Codable, Hashable {
     var nameWithAge: String {
         if let age { return "\(name), \(age)" }
         return name
+    }
+
+    /// Cihazın dilinde tagline — taglineI18n'de karşılık yoksa (çeviri
+    /// eksik/başarısız, ya da desteklenmeyen bir dil — bkz.
+    /// ConversationLanguage.supported) kanonik `tagline`'a düşer.
+    var localizedTagline: String {
+        let code = Locale.current.language.languageCode?.identifier ?? "en"
+        return taglineI18n[code] ?? tagline
     }
 }
 

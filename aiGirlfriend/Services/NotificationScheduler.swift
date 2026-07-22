@@ -30,18 +30,20 @@ final class NotificationScheduler {
         (Self.roleIntervalHours[role] ?? Self.roleIntervalHours["flirty"]!) * 3600
     }
 
-    // MARK: - Liked You (once daily, untalked catalog bots, persisted in LikedByStore)
+    // MARK: - Liked You (every ~15-30 min, untalked catalog bots, persisted in LikedByStore)
 
     private static let likedYouIDPrefix = "notif.liked."
 
-    /// Günde bir kere çağrılır (bkz. LikedByStore.hasPickedToday) — seçilen bot
-    /// LikedByStore'a kalıcı olarak eklenir (bkz. LikesView), bir daha asla
-    /// tekrar seçilmez. Zaten seçilmiş botlar `eligible`den hariç tutulur.
+    /// Called on every foreground (bkz. LikedByStore.isEligibleForPick) — fires
+    /// at most once per random 15-30 min window. Seçilen bot LikedByStore'a
+    /// kalıcı olarak eklenir (bkz. LikesView), bir daha asla tekrar seçilmez.
+    /// Zaten seçilmiş botlar `eligible`den hariç tutulur.
     func rescheduleLikedYou(characters: [Character]) {
-        guard !LikedByStore.hasPickedToday() else { return }
+        guard LikedByStore.isEligibleForPick() else { return }
         center.removePendingNotificationRequests(withIdentifiers: [Self.likedYouIDPrefix + "0"])
         let alreadyLiked = LikedByStore.likedCharacterIDs()
-        let hour = Int.random(in: 9...22)
+        let delay = TimeInterval.random(in: 15 * 60...30 * 60)
+        let fireAt = Date().addingTimeInterval(delay)
         let eligible = characters.filter { character in
             guard character.createdBy == nil,
                   LocalConversationStore.shared.load(for: character.id) == nil,
@@ -52,27 +54,23 @@ final class NotificationScheduler {
             // change ever attaches a schedule to untalked catalog bots, this stays
             // correct rather than silently ignoring it.
             if let schedule = LocalConversationStore.shared.load(for: character.id)?.schedule,
-               let block = ScheduleLookup.currentBlock(schedule: schedule, date: Calendar.current.date(
-                   bySettingHour: hour, minute: 0, second: 0, of: Date()
-               ) ?? Date()),
+               let block = ScheduleLookup.currentBlock(schedule: schedule, date: fireAt),
                block.isSleep {
                 return false
             }
             return true
         }
         guard let bot = eligible.randomElement() else { return }
-        LikedByStore.recordLike(bot.id)
-        scheduleLikedYou(bot: bot, slotIndex: 0, hour: hour)
+        LikedByStore.recordLike(bot.id, nextPickDelay: delay)
+        scheduleLikedYou(bot: bot, slotIndex: 0, delay: delay)
     }
 
-    private func scheduleLikedYou(bot: Character, slotIndex: Int, hour: Int) {
+    private func scheduleLikedYou(bot: Character, slotIndex: Int, delay: TimeInterval) {
         let content = UNMutableNotificationContent()
         content.title = String(localized: "One girl liked you 👀")
         content.userInfo = ["type": NotificationKind.liked.rawValue, "characterId": bot.id.uuidString]
 
-        var dateComponents = DateComponents()
-        dateComponents.hour = hour
-        let trigger = UNCalendarNotificationTrigger(dateMatching: dateComponents, repeats: false)
+        let trigger = UNTimeIntervalNotificationTrigger(timeInterval: delay, repeats: false)
         let request = UNNotificationRequest(
             identifier: Self.likedYouIDPrefix + "\(slotIndex)", content: content, trigger: trigger
         )
@@ -309,8 +307,10 @@ final class NotificationScheduler {
     /// level-8 bot is ~8x as likely as a level-1 one) over active,
     /// non-ghosted, non-blocked, under-cap bots — deliberately NO sleep-
     /// schedule check, the fiction is she's texting despite the hour. Time
-    /// and bot are locked in for the day once picked (mirrors
-    /// LikedByStore.hasPickedToday) so re-foregrounding doesn't reroll it.
+    /// and bot are locked in for the day once picked so re-foregrounding
+    /// doesn't reroll it. (Liked You, elsewhere in this file, now uses a
+    /// much shorter 15-30 min window instead of a daily pick — see
+    /// LikedByStore.isEligibleForPick.)
     func rescheduleMissedYou(characters: [Character]) {
         guard !hasPickedMissedYouToday else { return }
         let eligible = characters.filter { character in

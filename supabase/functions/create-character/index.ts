@@ -19,6 +19,7 @@
 //     yukarıdaki generateImageOnly çağrısından aldığı gerçek üretilmiş URL'dir.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { translateTagline } from "../_shared/tagline-i18n.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -290,6 +291,9 @@ Deno.serve(async (req: Request) => {
       } catch (_) {}
     }
 
+    let taglineI18n: Record<string, string> = { tr: bio };
+    try { taglineI18n = await translateTagline(bio, XAI_API_KEY); } catch (e) { console.error("tagline translation failed:", e); }
+
     // 2) System prompt — role-aware
     const langRule = "Her zaman Türkçe konuş. Kullanıcı başka dilde yazarsa veya başka dil isterse o dile geç; aksi takdirde SADECE Türkçe.";
     // Not: "kısa ve soğuk cevap ver" gibi doğrudan üslup talimatları modeli robotik/
@@ -320,6 +324,7 @@ Deno.serve(async (req: Request) => {
     const { data, error } = await db.from("characters").insert({
       name,
       tagline: bio,
+      tagline_i18n: taglineI18n,
       system_prompt: systemPrompt,
       avatar_symbol: "sparkles",
       age,
@@ -339,6 +344,21 @@ Deno.serve(async (req: Request) => {
     }).select("*").single();
 
     if (error) return json({ error: error.message }, 500);
+
+    // Mirror into character_photos, the single catalog for every photo this
+    // character has (see migration 013). photoUrl doubles as both the
+    // profile picture and (today's) sole gallery entry — same url, one row.
+    if (photoUrl) {
+      const { error: photoErr } = await db.from("character_photos").insert({
+        character_id: data.id,
+        url: photoUrl,
+        is_generated: true,
+        show_as_profile_picture: true,
+        show_in_gallery: true,
+      });
+      if (photoErr) console.error("character_photos insert failed:", photoErr.message);
+    }
+
     return json(data);
   } catch (e) {
     return json({ error: String(e) }, 500);

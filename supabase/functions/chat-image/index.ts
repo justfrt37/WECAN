@@ -32,18 +32,32 @@ const IMAGE_MODEL = "grok-imagine-image";
 const IMAGE_RESOLUTION = "2k";
 const IMAGE_ASPECT_RATIO = "9:16"; // docs.x.ai ile doğrulandı (2026-07): desteklenen değerlerden biri
 
-// TEMP TESTING — Civitai cost/quality comparison (2026-07-12). Swaps the
-// actual image-generation call (only) from Grok Imagine to Civitai's Flux2
-// Klein — prompt composition above still uses XAI_API_KEY/Grok text,
-// unchanged. Reads the real CIVITAI_API Supabase secret — DELETE this block
-// and flip USE_CIVITAI back to false (or remove entirely) if reverting to
-// the xAI image path, or revert straight from git history.
-const USE_CIVITAI_FOR_TESTING = true;
+// TEMP TESTING — Civitai cost/quality comparison (2026-07-12, engine updated
+// 2026-07-13). Swaps the actual image-generation call (only) from Grok
+// Imagine to Civitai's Flux1 Kontext (dev) — prompt composition above still
+// uses XAI_API_KEY/Grok text, unchanged. Reads the real CIVITAI_API Supabase
+// secret — DELETE this block and flip USE_CIVITAI back to false (or remove
+// entirely) if reverting to the xAI image path, or revert straight from git
+// history.
+//
+// Engine history: Flux2 Klein editImage (strength-dial img2img) and SDXL
+// createVariant were both tried and dropped — neither could hold face
+// identity across a real pose/outfit/location change (see
+// architecture_civitai memory). Flux1 Kontext dev is Civitai's only
+// image-gen input built around a reference `images` array for actual
+// identity-preserving edits (confirmed via their OpenAPI schema — no
+// engine on this API exposes real IPAdapter/InstantID) and tested
+// noticeably better on both face-lock and skin realism (chat-image-civitai-test).
+const USE_CIVITAI_FOR_TESTING = false;
 const CIVITAI_API_TOKEN_TEMP = Deno.env.get("CIVITAI_API") ?? "";
 const CIVITAI_ORCHESTRATION_URL = "https://orchestration.civitai.com/v2/consumer/workflows?wait=60";
-const CIVITAI_MODEL_URN = "urn:air:sdxl:checkpoint:civitai:139562@798204"; // RealVisXL V5.0 Lightning
-const CIVITAI_WIDTH = 768;
-const CIVITAI_HEIGHT = 1344; // closest clean SDXL portrait resolution to 9:16
+const CIVITAI_ENGINE = "flux1-kontext";
+const CIVITAI_MODEL = "dev";
+const CIVITAI_ASPECT_RATIO = "9:16";
+// Schema-enforced hard cap on Flux1Kontext's `prompt` field (1000 chars) —
+// the six-field composed prompt can run past that, so it's clamped before
+// the API call (composeImagePrompt's own output/logging is untouched).
+const KONTEXT_PROMPT_MAX_LEN = 1000;
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -78,6 +92,8 @@ interface BuilderSelections {
   nose_shape?: string;
   skin_tone?: string;
   body_type?: string;
+  ethnicity?: string;
+  wardrobe_pool?: string[];
 }
 
 // Görüntü içinde ASLA yazı/metin/logo olmasın — hem talimat metninde hem de
@@ -336,6 +352,80 @@ async function pickCuratedPhoto(userPrompt: string, photos: CuratedPhoto[]): Pro
   return null;
 }
 
+interface ShotTemplate {
+  id: string;
+  tier: string;
+  category: string;
+  positive: string;
+  negative: string;
+  description: string;
+  mood: string | null;
+  tags: string[];
+}
+
+// Second-tier fallback, BELOW the already-rendered character_photos pool
+// (pickCuratedPhoto above) and ABOVE fresh from-scratch generation: the
+// character's full ~300-shot template library (290 shared generic shots +
+// up to ~10 profession/interest shots specific to this character — see
+// photo_library/ in the repo root and shot_templates table). Same
+// numbered-list Grok-pick pattern as pickCuratedPhoto, just against
+// `description` instead of a rendered photo's caption, since nothing has
+// been rendered for these yet.
+async function pickShotTemplate(userPrompt: string, templates: ShotTemplate[]): Promise<ShotTemplate | null> {
+  if (templates.length === 0) return null;
+  const listing = templates.map((t, i) => `${i + 1}. ${t.description}${t.mood ? ` (mood: ${t.mood})` : ""}`).join("\n");
+  const raw = await callGrokText(
+    [
+      {
+        role: "system",
+        content:
+          "You are picking which shot template (from a fixed list) best matches a user's " +
+          "photo request in a chat app. Only pick one if it's a genuinely close match to what " +
+          "was asked (same rough scene/outfit/activity/angle/tier of explicitness) — err on the " +
+          "side of NOT matching if it's not close. Reply with ONLY the number of the best match, " +
+          "or the single word NONE if nothing is close enough. No other text.",
+      },
+      { role: "user", content: `Shot templates available:\n${listing}\n\nUser's request: "${userPrompt}"` },
+    ],
+    10
+  );
+  const trimmed = raw.trim();
+  const n = parseInt(trimmed, 10);
+  if (!isNaN(n) && n >= 1 && n <= templates.length) return templates[n - 1];
+  return null;
+}
+
+// Fills a shot_templates row's {TRIGGER}/{TRAITS}/{WARDROBE} placeholders
+// (see photo_library/generate_shots.py) using THIS character's real fields.
+// {TRIGGER} is a LoRA-training concept (photo_library's local ComfyUI
+// pipeline) that means nothing to Civitai's hosted API, so it's dropped —
+// identity here comes from the existing baselineImageUrl image-reference
+// mechanism instead (bkz. fetchCivitaiImageBytes).
+function fillShotTemplate(positive: string, character: {
+  name: string;
+  age: number | null;
+  builderSelections: BuilderSelections | null;
+}): string {
+  const bs = character.builderSelections;
+  const traits = bs
+    ? [
+        character.age ? `${character.age} years old` : null,
+        bs.ethnicity,
+        bs.skin_tone ? `${bs.skin_tone} skin` : null,
+        bs.eye_color && bs.eye_shape ? `${bs.eye_color} ${bs.eye_shape} eyes` : null,
+        bs.hairstyle && bs.hair_color ? `${bs.hairstyle} ${bs.hair_color} hair` : null,
+      ].filter(Boolean).join(", ")
+    : character.name;
+  const wardrobePool = bs?.wardrobe_pool;
+  const wardrobe = wardrobePool && wardrobePool.length > 0
+    ? wardrobePool[Math.floor(Math.random() * wardrobePool.length)]
+    : "an outfit that fits the scene";
+  return positive
+    .replace(/\{TRIGGER\},\s*/, "")
+    .replace("{TRAITS}", traits || character.name)
+    .replace("{WARDROBE}", wardrobe);
+}
+
 /// Grok'u "fotoğraf yönetmeni" gibi kullanarak kullanıcının isteğini + alan
 /// talimatlarını 6 etiketli alandan oluşan TEK bir görsel-üretim promptuna
 /// dönüştürür (CAMERA DETAILS / LIGHTING / SUBJECT / OUTFIT / POSE / LOCATION).
@@ -518,35 +608,22 @@ async function civitaiPollUntilDone(workflowId: string): Promise<Record<string, 
 }
 
 async function fetchCivitaiImageBytes(prompt: string, baselineImageUrl: string | null): Promise<Uint8Array> {
-  // REVERTED (2026-07-13) — SDXL createVariant's strength knob couldn't
-  // deliver both prompt-adherence and face-lock at any single value (0.55
-  // ignored the prompt, 0.8 ignored the baseline identity — proven via
-  // side-by-side test). Flux2 editImage held real face consistency across
-  // a full pose/outfit/location change in testing, so it's the backend
-  // staying live for now. SDXL code path left in place below (unused) in
-  // case a per-character LoRA approach gets tested later.
-  const input: Record<string, unknown> = baselineImageUrl
-    ? {
-        engine: "flux2",
-        model: "klein",
-        modelVersion: "4b",
-        operation: "editImage",
-        prompt,
-        width: CIVITAI_WIDTH,
-        height: CIVITAI_HEIGHT,
-        images: [baselineImageUrl],
-        quantity: 1,
-      }
-    : {
-        engine: "flux2",
-        model: "klein",
-        modelVersion: "4b",
-        operation: "createImage",
-        prompt,
-        width: CIVITAI_WIDTH,
-        height: CIVITAI_HEIGHT,
-        quantity: 1,
-      };
+  // REVERTED (2026-07-13) — both SDXL createVariant and Flux2 Klein editImage
+  // are strength-dial img2img with no real identity mechanism; neither held
+  // face consistency across a full pose/outfit/location change in testing.
+  // Flux1 Kontext dev is the only Civitai image-gen input built around a
+  // reference `images` array for actual identity-preserving edits (confirmed
+  // via their OpenAPI schema — no engine here exposes real IPAdapter/
+  // InstantID) and tested clearly better on face-lock + skin realism.
+  const clampedPrompt = prompt.length > KONTEXT_PROMPT_MAX_LEN ? prompt.slice(0, KONTEXT_PROMPT_MAX_LEN) : prompt;
+  const input: Record<string, unknown> = {
+    engine: CIVITAI_ENGINE,
+    model: CIVITAI_MODEL,
+    prompt: clampedPrompt,
+    aspectRatio: CIVITAI_ASPECT_RATIO,
+    quantity: 1,
+    ...(baselineImageUrl ? { images: [baselineImageUrl] } : {}),
+  };
 
   const r = await fetch(CIVITAI_ORCHESTRATION_URL, {
     method: "POST",
@@ -555,7 +632,9 @@ async function fetchCivitaiImageBytes(prompt: string, baselineImageUrl: string |
   });
   if (!r.ok) throw new Error(`Civitai ${r.status}: ${await r.text()}`);
   let d = await r.json();
-  if (d.status === "processing" && d.id) d = await civitaiPollUntilDone(d.id);
+  // Civitai returns several in-flight statuses (seen: "preparing", "processing")
+  // before "succeeded"/"failed" — poll on anything that isn't a terminal state.
+  if (d.status !== "succeeded" && d.status !== "failed" && d.id) d = await civitaiPollUntilDone(d.id);
   if (d.status !== "succeeded") throw new Error(`Civitai job failed: ${JSON.stringify(d).slice(0, 500)}`);
 
   const imgUrl = (d as any)?.steps?.[0]?.output?.images?.[0]?.url;
@@ -608,7 +687,7 @@ Deno.serve(async (req: Request) => {
 
     const { data: character, error: charErr } = await db
       .from("characters")
-      .select("name, profession, tagline, category, builder_selections, photo_url, avatar_url, relationship_level")
+      .select("name, age, profession, tagline, category, builder_selections, photo_url, avatar_url, relationship_level")
       .eq("id", characterId)
       .maybeSingle();
     if (charErr || !character) return json({ error: "character not found" }, 400);
@@ -638,56 +717,115 @@ Deno.serve(async (req: Request) => {
       .from("character_photos")
       .select("id, url, description, mood")
       .eq("character_id", characterId)
+      .eq("show_in_chat", true)
+      .is("user_id", null)
       .lte("min_relationship_level", character.relationship_level ?? 0);
     const curatedMatch = curatedPhotos?.length
       ? await pickCuratedPhoto(userPrompt, curatedPhotos as CuratedPhoto[])
       : null;
 
+    // Second tier: no rendered character_photos matched — check this
+    // character's full shot template library (290 shared + her own
+    // profession/interest bonus shots, shot_templates table) before falling
+    // all the way through to a from-scratch composed prompt. If one matches,
+    // generate it via Civitai (this tier ALWAYS uses Civitai, independent of
+    // USE_CIVITAI_FOR_TESTING — the template library was built around that
+    // pipeline) and save the result into character_photos so future similar
+    // asks hit the curated pool directly instead of regenerating.
+    let templateMatch: ShotTemplate | null = null;
+    if (!curatedMatch) {
+      const { data: templates } = await db
+        .from("shot_templates")
+        .select("id, tier, category, positive, negative, description, mood, tags")
+        .or(`character_id.is.null,character_id.eq.${characterId}`);
+      templateMatch = templates?.length
+        ? await pickShotTemplate(userPrompt, templates as ShotTemplate[])
+        : null;
+    }
+
     if (curatedMatch) {
       photoUrl = curatedMatch.url;
       isPrivate = await classifyPrivacy(userPrompt);
     } else {
-      const imagePrompt = await composeImagePrompt({
-        appearance: appearanceContext({
-          name: character.name,
-          profession: character.profession,
-          tagline: character.tagline,
-          builderSelections: character.builder_selections ?? null,
-        }),
-        category,
-        userPrompt,
-        hasBaseline: baselineImageUrl !== null,
-        context: conversationContext(history, summary) + currentActivityContext(currentActivity),
-      });
+      // Set true only on a successful template-tier render — a failure here
+      // (e.g. Civitai job error) falls through to the normal from-scratch
+      // compose+generate path below instead of failing the whole request.
+      let generatedFromTemplate = false;
+      let templatePhotoUrl: string | null = null;
 
-      try {
-        const [bytes, privacyResult] = await Promise.all([
-          fetchGeneratedImageBytes(imagePrompt, baselineImageUrl),
-          classifyPrivacy(imagePrompt),
-        ]);
-        photoUrl = await uploadGeneratedImage(bytes);
-        isPrivate = privacyResult;
-      } catch (e) {
-        console.error("chat-image generation failed, trying safe fallback prompt:", String(e));
+      if (templateMatch) {
         try {
-          const safePrompt = await buildSafeFallbackPrompt(userPrompt, imagePrompt);
-          // Keep trying WITH the baseline face on the toned-down prompt first —
-          // only drop it (face will NOT match) if the safe prompt also fails
-          // with the baseline attached. See fetchGeneratedImageBytes note above.
-          let bytes: Uint8Array;
-          try {
-            bytes = await fetchGeneratedImageBytes(safePrompt, baselineImageUrl);
-          } catch (baselineErr) {
-            if (!baselineImageUrl) throw baselineErr;
-            console.error("chat-image safe fallback (with baseline) also failed — falling back to referenceless generation, face will NOT match:", String(baselineErr));
-            bytes = await generateWithoutBaseline(safePrompt);
-          }
+          const filledPrompt = fillShotTemplate(templateMatch.positive, {
+            name: character.name,
+            age: character.age ?? null,
+            builderSelections: character.builder_selections ?? null,
+          });
+          const bytes = await fetchCivitaiImageBytes(filledPrompt, baselineImageUrl);
+          templatePhotoUrl = await uploadGeneratedImage(bytes);
+          generatedFromTemplate = true;
+
+          const { error: photoInsErr } = await db.from("character_photos").insert({
+            character_id: characterId,
+            url: templatePhotoUrl,
+            description: templateMatch.description,
+            mood: templateMatch.mood,
+            tags: templateMatch.tags,
+            min_relationship_level: 0,
+            is_generated: true,
+            show_in_chat: true,
+          });
+          if (photoInsErr) console.error("character_photos insert (from shot template) failed:", photoInsErr.message);
+        } catch (e) {
+          console.error("shot-template Civitai generation failed, falling back to fresh compose:", String(e));
+        }
+      }
+
+      if (generatedFromTemplate && templatePhotoUrl) {
+        photoUrl = templatePhotoUrl;
+        isPrivate = templateMatch!.tier !== "sfw";
+      } else {
+        const imagePrompt = await composeImagePrompt({
+          appearance: appearanceContext({
+            name: character.name,
+            profession: character.profession,
+            tagline: character.tagline,
+            builderSelections: character.builder_selections ?? null,
+          }),
+          category,
+          userPrompt,
+          hasBaseline: baselineImageUrl !== null,
+          context: conversationContext(history, summary) + currentActivityContext(currentActivity),
+        });
+
+        try {
+          const [bytes, privacyResult] = await Promise.all([
+            fetchGeneratedImageBytes(imagePrompt, baselineImageUrl),
+            classifyPrivacy(imagePrompt),
+          ]);
           photoUrl = await uploadGeneratedImage(bytes);
-          isPrivate = false; // toned-down by construction
-          redirected = true;
-        } catch (e2) {
-          console.error("chat-image safe fallback also failed:", String(e2));
-          return json({ error: "image_generation_failed" }, 502);
+          isPrivate = privacyResult;
+        } catch (e) {
+          console.error("chat-image generation failed, trying safe fallback prompt:", String(e));
+          try {
+            const safePrompt = await buildSafeFallbackPrompt(userPrompt, imagePrompt);
+            // Keep trying WITH the baseline face on the toned-down prompt first —
+            // only drop it (face will NOT match) if the safe prompt also fails
+            // with the baseline attached. See fetchGeneratedImageBytes note above.
+            let bytes: Uint8Array;
+            try {
+              bytes = await fetchGeneratedImageBytes(safePrompt, baselineImageUrl);
+            } catch (baselineErr) {
+              if (!baselineImageUrl) throw baselineErr;
+              console.error("chat-image safe fallback (with baseline) also failed — falling back to referenceless generation, face will NOT match:", String(baselineErr));
+              bytes = await generateWithoutBaseline(safePrompt);
+            }
+            photoUrl = await uploadGeneratedImage(bytes);
+            isPrivate = false; // toned-down by construction
+            redirected = true;
+          } catch (e2) {
+            console.error("chat-image safe fallback also failed:", String(e2));
+            return json({ error: "image_generation_failed" }, 502);
+          }
         }
       }
     }
@@ -708,14 +846,16 @@ Deno.serve(async (req: Request) => {
       convo = ins.data!;
     }
 
-    const { error: insErr } = await db.from("generated_photos").insert({
+    const { error: insErr } = await db.from("character_photos").insert({
       conversation_id: convo.id,
       character_id: characterId,
       user_id: uid,
       url: photoUrl,
       is_private: isPrivate,
+      is_generated: true,
+      show_in_gallery: true,
     });
-    if (insErr) console.error("generated_photos insert failed:", insErr.message);
+    if (insErr) console.error("character_photos (private) insert failed:", insErr.message);
 
     const charge = await chargeOrReject(uid, 25, "photo");
     return json({ url: photoUrl, redirected, tokenBalance: charge.ok ? charge.balance : undefined });

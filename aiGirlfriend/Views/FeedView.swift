@@ -7,20 +7,32 @@ import SwiftUI
 
 struct FeedView: View {
     @Environment(CharacterStore.self) private var store
+    @State private var order: [UUID] = []
     @State private var currentIndex = 0
     @State private var dragOffset = CGSize.zero
     @State private var showTutorial = !UserDefaultsManager.shared.hasSeenSwipeTutorial
     @State private var meetCandidate: Character?
 
-    /// Zaten sohbete başlanmış (yerel bir konuşma kaydı olan) karakterler
-    /// Discover'da tekrar gösterilmez — aynı tanım NotificationScheduler'ın
-    /// Liked You uygunluk kontrolüyle birebir aynı (bkz. LikedByStore).
+    /// Discover is a simple queue of every non-blocked character. Swiping
+    /// either direction just moves that character to the back of the queue
+    /// for this session — nothing is permanently hidden, and it has no tie
+    /// to whether a conversation exists.
     private var characters: [Character] {
-        store.characters.filter {
-            !BlockedCharactersStore.isBlocked($0.id) &&
-            !PassedCharactersStore.isPassed($0.id) &&
-            LocalConversationStore.shared.load(for: $0.id) == nil
-        }
+        let byID = Dictionary(uniqueKeysWithValues: store.characters.map { ($0.id, $0) })
+        return order.compactMap { byID[$0] }
+    }
+
+    /// Keeps `order` in sync with the live catalog: drops blocked/removed
+    /// ids, appends newly-arrived ones at the back, preserves existing order.
+    private func syncOrder() {
+        let liveIDs = store.characters
+            .filter { !BlockedCharactersStore.isBlocked($0.id) }
+            .map(\.id)
+        let liveSet = Set(liveIDs)
+        var next = order.filter { liveSet.contains($0) }
+        let known = Set(next)
+        next.append(contentsOf: liveIDs.filter { !known.contains($0) })
+        order = next
     }
 
     var body: some View {
@@ -97,12 +109,14 @@ struct FeedView: View {
         .ignoresSafeArea()
         .background(AppColor.bg)
         .onAppear {
+            syncOrder()
             currentIndex = 0
             store.currentCharacterID = characters.first?.id
         }
-        .onChange(of: characters) { _, chars in
-            if currentIndex >= chars.count { currentIndex = 0 }
-            store.currentCharacterID = chars.isEmpty ? nil : chars[currentIndex].id
+        .onChange(of: store.characters) { _, _ in
+            syncOrder()
+            if currentIndex >= characters.count { currentIndex = 0 }
+            store.currentCharacterID = characters.isEmpty ? nil : characters[currentIndex].id
         }
     }
 
@@ -111,10 +125,10 @@ struct FeedView: View {
             Image(systemName: "checkmark.circle.fill")
                 .font(.system(size: 50))
                 .foregroundStyle(AppColor.pink.opacity(0.85))
-            Text("You're all caught up!")
+            Text("Nobody here yet!")
                 .font(.title3.bold())
                 .foregroundStyle(.white)
-            Text("You've started chatting with everyone in Discover. Check back later for new people.")
+            Text("Check back later for new people to discover.")
                 .font(.subheadline)
                 .multilineTextAlignment(.center)
                 .foregroundStyle(.white.opacity(0.6))
@@ -197,26 +211,22 @@ struct FeedView: View {
                 } else {
                     meetCandidate = current
                 }
-            } else if dir == -1, let current {
-                // Kart hemen `characters`ten düşsün (PassedCharactersStore
-                // filtreye giriyor) — önceden HİÇBİR yere kaydedilmiyordu,
-                // "nope" görsel olarak ilerliyordu ama karakter asla
-                // kaybolmuyordu (deste döngüsünde tekrar tekrar çıkıyordu;
-                // tek karakter kalmışsa hep AYNI kart görünüyordu).
-                PassedCharactersStore.pass(current.id)
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.36) {
+                // Reorder only once the card has fully flown off-screen —
+                // mutating `order` immediately on release would swap
+                // `characters[currentIndex]`'s identity (and thus the
+                // dragged card's content) to the next character mid-flight,
+                // since it's a computed property over `order`. Waiting until
+                // here means the already-preloaded "next" card underneath
+                // just becomes the new top card with no visible content swap.
+                if let current, let idx = order.firstIndex(of: current.id) {
+                    order.remove(at: idx)
+                    order.append(current.id)
+                }
                 dragOffset = .zero
                 guard !characters.isEmpty else { return }
-                // Beğenide (dir==1) kart hâlâ destede — bir sonrakine geç.
-                // Nope'ta (dir==-1) kart zaten listeden düştü, aynı index
-                // artık bir sonraki karta işaret ediyor — TEKRAR ilerletme
-                // (ilerletirse bir kart atlanır).
-                if dir == 1 {
-                    currentIndex = (currentIndex + 1) % characters.count
-                } else if currentIndex >= characters.count {
-                    currentIndex = 0
-                }
+                if currentIndex >= characters.count { currentIndex = 0 }
                 store.currentCharacterID = characters[currentIndex].id
             }
         } else {

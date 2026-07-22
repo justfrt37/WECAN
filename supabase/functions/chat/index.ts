@@ -194,7 +194,7 @@ const MEDIA_REQUEST_RULE =
   "doğal bir şekilde ima et — ör. \"o düğmeye bas da göndereyim\" gibi).";
 
 // Fires once per photo, only the first time a private/intimate generated
-// photo is downloaded (server checks generated_photos.reacted — see the
+// photo is downloaded (server checks character_photos.reacted — see the
 // photoDownloadReaction branch below). Written in English per project
 // convention for instructional prompts.
 const PHOTO_DOWNLOAD_REACTION_RULE =
@@ -659,7 +659,7 @@ Deno.serve(async (req: Request) => {
       if (!photoURL) return json({ reply: null });
 
       const { data: photoRow } = await db
-        .from("generated_photos")
+        .from("character_photos")
         .select("id, is_private, reacted")
         .eq("url", photoURL)
         .eq("user_id", uid)
@@ -708,7 +708,7 @@ Deno.serve(async (req: Request) => {
         conversationId
       );
 
-      await db.from("generated_photos").update({ reacted: true }).eq("id", photoRow.id);
+      await db.from("character_photos").update({ reacted: true }).eq("id", photoRow.id);
 
       return json({ reply: reactionReply });
     }
@@ -779,7 +779,7 @@ Deno.serve(async (req: Request) => {
       system += sleepRule(personalityRole, currentLevel);
     }
     if (!useClientHistory && convo.summary && convo.summary.trim() !== "") {
-      system += `\n\n[Önceki konuşmalarınızın özeti]\n${stripVoiceTags(convo.summary)}`;
+      system += `\n\n[Summary of your previous conversations — reference naturally, reply in the user's language regardless]\n${stripVoiceTags(convo.summary)}`;
     }
 
     // ÖNEMLİ (prompt caching): timeContext/currentActivity HER turda değişir —
@@ -916,22 +916,29 @@ Deno.serve(async (req: Request) => {
 
       if (toFold && toFold.length > 0) {
         const convoText = toFold
-          .map((m) => `${m.role === "user" ? "Kullanıcı" : "Sen"}: ${stripVoiceTags(m.content)}`)
+          .map((m) => `${m.role === "user" ? "User" : "You"}: ${stripVoiceTags(m.content)}`)
           .join("\n");
         const summaryPrompt: WireMessage[] = [
           {
             role: "system",
             content:
-              "Bir sohbet özeti güncelliyorsun. Karakterin İLERİDE hatırlaması " +
-              "gereken kalıcı bilgileri çıkar: kullanıcının adı, tercihleri, " +
-              "ilişki durumu/önemli anlar, söz verilen şeyler, devam eden konular. " +
-              "Kısa madde madde yaz. Önceki özeti koru, yenileri ekle.",
+              "You maintain a running conversation summary for an AI companion character, in English " +
+              "regardless of what language the conversation itself was in. It has two parts, and you must " +
+              "keep BOTH updated — not just the user side:\n\n" +
+              "USER — facts and intents: name, preferences, relationship status/key moments, promises made, " +
+              "ongoing topics, what the user seems to want from the character.\n\n" +
+              "BOT — established behavior: the tone/persona choices the character has actually settled into " +
+              "in this conversation (e.g. teasing vs. gentle, pet names used, boundaries respected, running " +
+              "jokes or bits, commitments the character made) — so future turns stay consistent with how the " +
+              "character has already been behaving, not just generic persona instructions.\n\n" +
+              "Short bullet points under each heading. Keep prior summary content, fold in what's new, drop " +
+              "anything superseded or no longer relevant.",
           },
           {
             role: "user",
             content:
-              `Önceki özet:\n${convo.summary || "(yok)"}\n\n` +
-              `Yeni konuşma:\n${convoText}\n\nGüncellenmiş özet:`,
+              `Previous summary:\n${convo.summary || "(none)"}\n\n` +
+              `New conversation turns:\n${convoText}\n\nUpdated summary (USER / BOT):`,
           },
         ];
         try {
