@@ -44,6 +44,14 @@ enum OnboardingCharacter: String, Equatable {
         case .second: return "onb4Video"
         }
     }
+
+    /// Onboarding sonunda doğrudan chat'ine girilecek backend karakterinin adı.
+    var chatCharacterName: String {
+        switch self {
+        case .red: return "Scarlet"
+        case .second: return "Maya"
+        }
+    }
 }
 
 @Observable
@@ -71,6 +79,10 @@ final class OnboardingStore {
     /// Akışın mevcut adımı — kalıcı DEĞİL (her açılışta baştan).
     var step: OnboardingStep = .name
 
+    /// Onboarding biter bitmez doğrudan açılacak chat karakterinin adı
+    /// (ONB5'te set edilir, MainTabView görününce tüketilir). Kalıcı değil.
+    var pendingChatCharacterName: String?
+
     private let defaults: UserDefaults
 
     init(defaults: UserDefaults = .standard) {
@@ -79,23 +91,6 @@ final class OnboardingStore {
         userName = defaults.string(forKey: Keys.userName) ?? ""
         selectedCharacter = defaults.string(forKey: Keys.character).flatMap(OnboardingCharacter.init)
         answers = defaults.array(forKey: Keys.answers) as? [Int] ?? []
-
-        #if DEBUG
-        // Geliştirme kolaylığı: belirli bir onboarding adımını doğrudan açmak
-        // için launch env değişkeni (ör. simülatörde ekran doğrulaması).
-        //   SIMCTL_CHILD_OB_START_STEP=socialProof xcrun simctl launch ...
-        if let forced = ProcessInfo.processInfo.environment["OB_START_STEP"] {
-            switch forced {
-            case "name":            step = .name
-            case "socialProof":     step = .socialProof
-            case "characterSelect": step = .characterSelect
-            case "questions":       step = .questions
-            case "finalTease":      step = .finalTease
-            case "paywall":         step = .paywall
-            default:                break
-            }
-        }
-        #endif
     }
 
     func complete() {

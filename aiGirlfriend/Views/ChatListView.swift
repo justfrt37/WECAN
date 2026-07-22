@@ -20,18 +20,28 @@ struct ChatListView: View {
     @State private var items: [ChatItem] = []
     @State private var isLoading = true
     @State private var searchText = ""
+    /// Şu an açık (swipe ile "Sil" görünen) tek satır — biri açılınca diğeri
+    /// kapanır; başka yere dokununca nil'e çekilip hepsi kapanır.
+    @State private var openRowID: UUID?
 
     private let service = ConversationsService()
-
-    /// Sohbet listesinin diskteki önbelleği — sekme her açıldığında sunucu
-    /// cevabını beklemeden ANINDA bir önceki durumu gösterir, arkada tazeler.
-    private let cacheURL: URL = FileManager.default
-        .urls(for: .cachesDirectory, in: .userDomainMask)[0]
-        .appendingPathComponent("chatlist_cache.json")
 
     private var filtered: [ChatItem] {
         guard !searchText.isEmpty else { return items }
         return items.filter { $0.character.name.localizedCaseInsensitiveContains(searchText) }
+    }
+
+    /// Sohbeti listeden kaldır + SUNUCU kaydını sil (bkz. ChatMaintenance).
+    /// "Sıfır yerel": artık disk önbelleği / tombstone yok — sunucu silme +
+    /// no-create-on-open zaten dirilmeyi engelliyor (bkz. chat/index.ts).
+    private func deleteItem(_ item: ChatItem, animated: Bool = true) {
+        if animated {
+            withAnimation { items.removeAll { $0.character.id == item.character.id } }
+        } else {
+            // Basılı tut → "bam" anında sil, animasyon yok (bkz. kullanıcı talebi).
+            items.removeAll { $0.character.id == item.character.id }
+        }
+        Task { await ChatMaintenance.clearChat(character: item.character, store: store) }
     }
 
     var body: some View {
@@ -39,6 +49,8 @@ struct ChatListView: View {
             LinearGradient(colors: [AppColor.bg, AppColor.bg2, AppColor.bg],
                            startPoint: .top, endPoint: .bottom)
                 .ignoresSafeArea()
+                // Açık bir "Sil" satırı varken boş bir yere dokununca kapansın.
+                .onTapGesture { if openRowID != nil { openRowID = nil } }
 
             // Başlık + arama + "ALL MESSAGES" SABİT kalır; yalnızca mesaj
             // listesi (ALL MESSAGES'ın altındaki kısım) kayar.
@@ -55,17 +67,31 @@ struct ChatListView: View {
                 } else {
                     allMessagesLabel
                     ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 0) {
+                        // VStack (Lazy DEĞİL) — kasıtlı: LazyVStack görünmeyen
+                        // satırların yüksekliğini TAHMİN ediyor, tahmin şaşınca
+                        // satırlar arasında boşluklar oluşuyordu (bkz. kullanıcı
+                        // ekran görüntüsü). Sohbet listesi kısa, hepsini ölçmek ucuz.
+                        VStack(alignment: .leading, spacing: 0) {
                             ForEach(filtered) { item in
-                                NavigationLink(value: item.character) {
+                                // Sola çekince "Sil" butonu belirir + AÇIK kalır
+                                // (açmadan chat'i açmaz); basılı tutunca menüde de
+                                // "Sil" var (bkz. kullanıcı talebi).
+                                SwipeToDeleteRow(
+                                    id: item.character.id,
+                                    openRowID: $openRowID,
+                                    onTap: { store.pendingChatCharacter = item.character },
+                                    onDelete: { deleteItem(item) }
+                                ) {
                                     ChatHistoryRow(item: item,
-                                                   isTyping: store.typingCharacterIDs.contains(item.character.id))
+                                                   isTyping: store.typingCharacterIDs.contains(item.character.id),
+                                                   // Basılı tut menüsündeki "Sil" → animasyonsuz, anında.
+                                                   onDelete: { deleteItem(item, animated: false) })
                                 }
-                                .buttonStyle(.plain)
                             }
                         }
                         .padding(.bottom, 100) // tab bar boşluğu
                     }
+                    .scrollIndicators(.hidden)
                 }
             }
         }
@@ -75,79 +101,53 @@ struct ChatListView: View {
     }
 
     private func load() async {
-        // Diskteki önbellekten ANINDA göster — sadece ilk (soğuk) yüklemede;
-        // typing-değişikliği gibi sonraki tetiklemelerde zaten canlı veri var.
-        if items.isEmpty, let cached = loadCachedItems(), !cached.isEmpty {
-            items = cached
-            isLoading = false
-        }
-
+        // "Sıfır yerel": TEK kaynak sunucu. Disk önbelleği / yerel-birleşim /
+        // tombstone YOK — yalnızca sunucudaki konuşmalar + mesajlar gösterilir.
         async let convsT = service.fetchConversations()
         async let msgsT = service.fetchAllMessages()
         let (convs, msgs) = await (convsT, msgsT)
 
-        // Mesajları konuşmaya göre grupla (desc sıralı geldi).
+        // Mesajları konuşmaya göre grupla (desc sıralı geldi — en yeni önce).
         var byConv: [UUID: [LastMessage]] = [:]
         for m in msgs { byConv[m.conversationID, default: []].append(m) }
 
         items = convs.compactMap { conv in
             guard let ch = store.characters.first(where: { $0.id == conv.characterID }) else { return nil }
             let convMsgs = byConv[conv.id] ?? []
-            let localStored = LocalConversationStore.shared.load(for: conv.characterID)
+            // Yalnızca gerçekten mesajı olan sohbetler listelenir — boş (yalnız
+            // durum) satır hayalet sohbet gibi görünmesin.
+            guard !convMsgs.isEmpty else { return nil }
 
-            // Yerel depo VARSA baz alınır — sunucu hiçbir zaman görmediği bildirim
-            // enjeksiyonlarını (jealousy/ghosted/liked) da içerir; `ReadTracker.seen`
-            // de zaten bu yerel sayıma göre tutuluyor (bkz. ChatViewModel.markReadNow).
-            let displayMessages: [Message]
-            let unread: Int
-            if let localStored, !localStored.messages.isEmpty {
-                displayMessages = localStored.messages
-                let assistantCount = localStored.messages.filter { $0.role == .assistant }.count
-                unread = max(0, assistantCount - ReadTracker.seen(conv.characterID))
-            } else {
-                displayMessages = convMsgs.reversed().map {
-                    Message(role: ChatRole(rawValue: $0.role) ?? .assistant,
-                            content: $0.content, createdAt: $0.date ?? Date())
-                }
-                let assistantCount = convMsgs.filter { !$0.isUser }.count
-                unread = max(0, assistantCount - ReadTracker.seen(conv.characterID))
+            // ChatView anında açılsın diye geçmişi bellek-içi önbelleğe al (asc).
+            let displayMessages: [Message] = convMsgs.reversed().map {
+                Message(role: ChatRole(rawValue: $0.role) ?? .assistant,
+                        content: $0.content, createdAt: $0.date ?? Date())
             }
-            // Sohbet geçmişini önbelleğe al → ChatView anında açılır, bildirimle
-            // gelen mesajı da görür (bayat sunucu-only önbellekle ezilmesin diye).
             store.chatCache[ch.id] = displayMessages
 
-            let last: LastMessage? = displayMessages.last.map {
+            let assistantCount = convMsgs.filter { !$0.isUser }.count
+            let unread = max(0, assistantCount - ReadTracker.seen(conv.characterID))
+            // Önizleme en yeni mesajdan (convMsgs desc → .first) — sunucudaki
+            // `kind` (text/image/voice) korunur, WhatsApp tarzı önizleme için.
+            let last: LastMessage? = convMsgs.first.map {
                 LastMessage(conversationID: conv.id, content: $0.content,
-                            role: $0.role.rawValue, createdAt: Self.iso8601.string(from: $0.createdAt),
-                            kind: $0.imageURL != nil ? "image" : "text")
+                            role: $0.role, createdAt: $0.createdAt, kind: $0.kind)
             }
             return ChatItem(character: ch, conversationID: conv.id,
                             last: last, unread: unread, updatedAt: conv.updatedAt)
         }
+
         items.sort { lhs, rhs in
             let lhsDate = parseISO8601(lhs.last?.createdAt) ?? parseISO8601(lhs.updatedAt) ?? .distantPast
             let rhsDate = parseISO8601(rhs.last?.createdAt) ?? parseISO8601(rhs.updatedAt) ?? .distantPast
             return lhsDate > rhsDate
         }
+        // Karakter başına TEK satır (aynı karaktere ait birden çok konuşma
+        // olabilir) — sıralama sonrası ilk (en yeni) tutulur.
+        var seenCharacterIDs = Set<UUID>()
+        items = items.filter { seenCharacterIDs.insert($0.character.id).inserted }
         isLoading = false
-        saveCachedItems(items)
     }
-
-    private func loadCachedItems() -> [ChatItem]? {
-        guard let data = try? Data(contentsOf: cacheURL) else { return nil }
-        return try? JSONDecoder().decode([ChatItem].self, from: data)
-    }
-
-    private func saveCachedItems(_ items: [ChatItem]) {
-        guard let data = try? JSONEncoder().encode(items) else { return }
-        try? data.write(to: cacheURL, options: .atomic)
-    }
-
-    private static let iso8601: ISO8601DateFormatter = {
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return f
-    }()
 
     // MARK: Header
 
@@ -203,10 +203,6 @@ struct ChatListView: View {
             Text("No chats yet")
                 .font(.title3.bold())
                 .foregroundStyle(.white)
-            Text("Message someone you liked in Discover to start chatting 💬")
-                .font(.subheadline)
-                .multilineTextAlignment(.center)
-                .foregroundStyle(.white.opacity(0.6))
         }
         .frame(maxWidth: .infinity)
         .padding(.top, 60)
@@ -218,6 +214,7 @@ struct ChatListView: View {
 private struct ChatHistoryRow: View {
     let item: ChatItem
     let isTyping: Bool
+    var onDelete: () -> Void = {}
     @Environment(CharacterStore.self) private var store
     @State private var showProfile = false
     @State private var addSheetKind: NoteKind?
@@ -226,9 +223,10 @@ private struct ChatHistoryRow: View {
 
     private var hasUnread: Bool { item.unread > 0 }
 
-    init(item: ChatItem, isTyping: Bool) {
+    init(item: ChatItem, isTyping: Bool, onDelete: @escaping () -> Void = {}) {
         self.item = item
         self.isTyping = isTyping
+        self.onDelete = onDelete
         _isBlocked = State(initialValue: BlockedCharactersStore.isBlocked(item.character.id))
     }
 
@@ -281,7 +279,8 @@ private struct ChatHistoryRow: View {
             }
         }
         .padding(.horizontal, 20)
-        .padding(.vertical, 10)
+        // Sabit satır yüksekliği — tüm satırlar tekdüze olsun, boşluk oluşmasın.
+        .frame(height: 72)
         .background(hasUnread ? AppColor.pink.opacity(0.08) : .clear)
         .contextMenu {
             Button { showProfile = true } label: { Label("View Profile", systemImage: "person.circle") }
@@ -289,7 +288,8 @@ private struct ChatHistoryRow: View {
             Button { addSheetKind = .behavior } label: { Label("Add Behavior", systemImage: "face.smiling") }
             Button(role: .destructive) {
                 Task { await ChatMaintenance.clearChat(character: item.character, store: store) }
-            } label: { Label("Clear Chat", systemImage: "trash") }
+            } label: { Label("Clear Chat", systemImage: "eraser") }
+            Button(role: .destructive) { onDelete() } label: { Label("Sil", systemImage: "trash") }
             if isBlocked {
                 Button {
                     BlockedCharactersStore.unblock(item.character.id)
@@ -321,10 +321,17 @@ private struct ChatHistoryRow: View {
                 .foregroundStyle(AppColor.pink)
         } else if let last = item.last {
             Group {
-                if last.isImage {
+                if last.isVoice {
+                    // WhatsApp gibi: 🎤 Sesli mesaj
+                    HStack(spacing: 4) {
+                        Image(systemName: "mic.fill")
+                        Text(last.isUser ? "You: \(String(localized: "Voice message"))" : String(localized: "Voice message"))
+                    }
+                } else if last.isImage {
+                    // WhatsApp gibi: 📷 Fotoğraf
                     HStack(spacing: 4) {
                         Image(systemName: "camera.fill")
-                        Text(last.isUser ? "You: \(String(localized: "Image"))" : String(localized: "Image"))
+                        Text(last.isUser ? "You: \(String(localized: "Photo"))" : String(localized: "Photo"))
                     }
                 } else if last.isUser {
                     Text("You: \(last.content)")
@@ -341,6 +348,8 @@ private struct ChatHistoryRow: View {
 
     @ViewBuilder
     private var rightAccessory: some View {
+        // Okunmamış sayısı rozeti kalır; "okundu" (checkmark) ikonu kaldırıldı
+        // (bkz. kullanıcı talebi: saat altında ikon olmasın).
         if hasUnread {
             Text("\(item.unread)")
                 .font(.system(size: 11, weight: .bold))
@@ -348,11 +357,87 @@ private struct ChatHistoryRow: View {
                 .frame(minWidth: 20, minHeight: 20)
                 .padding(.horizontal, 5)
                 .background(AppColor.pink, in: Capsule())
-        } else if let last = item.last, last.isUser {
-            Image(systemName: "checkmark.message.fill")
-                .font(.system(size: 12))
-                .foregroundStyle(.white.opacity(0.4))
         }
+    }
+}
+
+/// Sola çekince "Sil" butonu beliren satır sarmalayıcı. List kullanmadan
+/// (özel stil + chevron'suz NavigationLink korunsun diye) kendi swipe'ı:
+/// - Yatay-baskın sürükleme sola açar/sağa kapatır (simultaneousGesture → dikey
+///   scroll ve dokunma-ile-açma çakışmaz).
+/// - Sil butonu içeriğin SAĞINDA, kapalıyken ekran dışında (clipped).
+private struct SwipeToDeleteRow<Content: View>: View {
+    let id: UUID
+    @Binding var openRowID: UUID?
+    let onTap: () -> Void
+    let onDelete: () -> Void
+    @ViewBuilder var content: () -> Content
+
+    @State private var offset: CGFloat = 0
+    @State private var lastOffset: CGFloat = 0
+    private let deleteWidth: CGFloat = 88
+    private let rowHeight: CGFloat = 72
+
+    private var isOpen: Bool { offset < 0 }
+
+    var body: some View {
+        GeometryReader { geo in
+            HStack(spacing: 0) {
+                content()
+                    .frame(width: geo.size.width)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        // Açıkken dokunmak KAPATIR (chat'i açmaz); kapalıyken açar.
+                        if isOpen { close() }
+                        else { openRowID = nil; onTap() }
+                    }
+                Button {
+                    onDelete()
+                } label: {
+                    VStack(spacing: 4) {
+                        Image(systemName: "trash.fill").font(.system(size: 18, weight: .semibold))
+                        Text("Sil").font(.system(size: 12, weight: .bold))
+                    }
+                    .foregroundStyle(.white)
+                    .frame(width: deleteWidth)
+                    .frame(maxHeight: .infinity)
+                    .background(Color.red)
+                }
+                .buttonStyle(.plain)
+            }
+            .offset(x: offset)
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 15)
+                    .onChanged { v in
+                        // Yalnızca yatay-baskın hareket — dikey scroll'a karışma.
+                        guard abs(v.translation.width) > abs(v.translation.height) else { return }
+                        offset = min(0, max(-deleteWidth, lastOffset + v.translation.width))
+                    }
+                    .onEnded { v in
+                        guard abs(v.translation.width) > abs(v.translation.height) else { return }
+                        let shouldOpen = offset < -deleteWidth / 2
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                            offset = shouldOpen ? -deleteWidth : 0
+                        }
+                        lastOffset = offset
+                        // Bu satır açıldıysa "tek açık satır" yap → diğerleri kapanır.
+                        if shouldOpen { openRowID = id }
+                        else if openRowID == id { openRowID = nil }
+                    }
+            )
+        }
+        .frame(height: rowHeight)
+        .clipped()
+        // Başka bir satır açıldı (ya da hepsi kapatıldı) → bunu kapat.
+        .onChange(of: openRowID) { _, newID in
+            if newID != id, offset != 0 { close() }
+        }
+    }
+
+    private func close() {
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { offset = 0 }
+        lastOffset = 0
+        if openRowID == id { openRowID = nil }
     }
 }
 

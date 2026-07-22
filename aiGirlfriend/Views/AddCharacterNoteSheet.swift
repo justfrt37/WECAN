@@ -27,11 +27,14 @@ struct AddCharacterNoteSheet: View {
 
     @Environment(\.dismiss) private var dismiss
     @State private var text = ""
+    /// Sheet, sabit .medium yerine İÇERİĞİNE göre boyutlanır — ölçülen içerik
+    /// yüksekliği + nav bar payı (bkz. kullanıcı talebi: aşağıda büyük boşluk kalmasın).
+    @State private var contentHeight: CGFloat = 220
     private let service = ChatService()
 
     var body: some View {
         NavigationStack {
-            ZStack {
+            ZStack(alignment: .top) {
                 AppColor.bg.ignoresSafeArea()
                 VStack(spacing: 16) {
                     Group {
@@ -62,14 +65,26 @@ struct AddCharacterNoteSheet: View {
                                                        startPoint: .leading, endPoint: .trailing), in: Capsule())
                     }
                     .buttonStyle(.plain)
-                    Spacer()
                 }
-                .padding(20)
+                // Yukarıdan/aşağıdan ferah, eşit boşluk; Spacer YOK (yoksa sheet'i
+                // doldurup altta büyük boşluk bırakıyordu).
+                .padding(.horizontal, 20)
+                .padding(.vertical, 24)
+                // İçeriğin doğal yüksekliğini ölç → detent buna göre.
+                .background(
+                    GeometryReader { geo in
+                        Color.clear
+                            .onAppear { contentHeight = geo.size.height }
+                            .onChange(of: geo.size.height) { _, h in contentHeight = h }
+                    }
+                )
             }
             .navigationTitle(kind.title)
             .navigationBarTitleDisplayMode(.inline)
         }
-        .presentationDetents([.medium])
+        // Ölçülen içerik + inline nav bar payı (~56) kadar yükseklik.
+        .presentationDetents([.height(contentHeight + 56)])
+        .presentationDragIndicator(.visible)
     }
 
     /// Rejections (Grok injection detection) or network errors are swallowed

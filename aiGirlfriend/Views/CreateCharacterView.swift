@@ -137,35 +137,15 @@ struct CreateCharacterView: View {
 
     @Environment(\.dismiss) private var dismiss
     @Environment(CharacterStore.self) private var store
+    @Environment(TokenStore.self) private var tokenStore
 
     init(devMode: DevWizardMode? = nil) {
         self.devMode = devMode
     }
 
     // ── Step state ──
-    @State private var stepIndex = CreateCharacterView.initialStep()
-    @State private var phase: Phase = CreateCharacterView.initialPhase()
-
-    /// DEBUG: CC_PHASE=preview|loading ile doğrudan fotoğraf önizleme/"hazırlanıyor"
-    /// ekranını aç (SS almak için).
-    private static func initialPhase() -> Phase {
-        #if DEBUG
-        switch ProcessInfo.processInfo.environment["CC_PHASE"] {
-        case "preview", "loading": return .photoPreview
-        default: return .steps
-        }
-        #else
-        return .steps
-        #endif
-    }
-
-    /// DEBUG: CC_STEP env ile sihirbazı belirli adımda aç (SS almak için).
-    private static func initialStep() -> Int {
-        #if DEBUG
-        if let s = ProcessInfo.processInfo.environment["CC_STEP"], let i = Int(s) { return i }
-        #endif
-        return 0
-    }
+    @State private var stepIndex = 0
+    @State private var phase: Phase = .steps
 
     // ── DEV-only steps (bkz. devMode) — real device photo uploads +
     // ElevenLabs voice pick, layered onto the exact same wizard chrome. ──
@@ -229,11 +209,17 @@ struct CreateCharacterView: View {
     // üretilir (istek atılır) ve netleşir.
     @State private var photoRevealed = false
     @State private var generating = false
+    /// "See character"a en az bir kez basıldı mı — basıldıktan sonra (özellikle
+    /// PRO değilse paywall'da kilitli kalınca) sağ üstte tüm akışı kapatan çarpı
+    /// gösterilir (bkz. photoPreviewContent + kullanıcı talebi).
+    @State private var didAttemptReveal = false
     @State private var revealedImage: Image?  // gerçek fotoğraf (önceden indirilir)
     /// PRO olmayan kullanıcı "See character"a basınca açılır — gerçek üretim
     /// SADECE PRO ise başlar (bkz. reveal()). Paywall kapanınca PRO olduysa
     /// otomatik devam eder (bkz. onDismiss).
     @State private var showPaywall = false
+    /// PRO ama coin (100) yetmiyorsa açılan COIN mağazası (bkz. reveal / createCharacter).
+    @State private var showTokenStore = false
 
     private enum Phase { case steps, generatingPhoto, photoPreview, creating, ready }
 
@@ -266,29 +252,33 @@ struct CreateCharacterView: View {
             }
         }
         .tint(AppColor.pink)
-        #if DEBUG
-        .onAppear {
-            let env = ProcessInfo.processInfo.environment["CC_PHASE"]
-            if env == "loading" || env == "preview" {
-                if characterName.isEmpty { characterName = "Sena" }
-                if env == "loading" { generating = true }   // nabız/hazırlanıyor
-            }
-        }
-        #endif
-        .sheet(isPresented: $showPaywall, onDismiss: {
+        // PRO gerektiren her yerde onboarding paywall'ı (alttan fullscreen) açılır.
+        .fullScreenCover(isPresented: $showPaywall, onDismiss: {
             // Paywall kapandı — PRO oldularsa fotoğrafı hemen üret ve devam et.
             if PurchaseService.shared.isPro { reveal() }
         }) {
-            PaywallHostView()
+            OnboardingPaywallView()
+        }
+        // PRO ama coin yetmiyorsa: coin mağazası (paywall). Kapanınca yeterli
+        // coin varsa yaratmaya devam et.
+        .fullScreenCover(isPresented: $showTokenStore, onDismiss: {
+            if tokenStore.balance >= CreateCharacterView.creationCost { reveal() }
+        }) {
+            TokenStoreView(tokenStore: tokenStore)
         }
         .task { await prefillIfEditingDevCharacter() }
     }
+
+    /// Client tarafı gösterim/erken-kontrol için maliyet aynası — KAYNAK-DOĞRU
+    /// değer sunucudadır (create-character CREATION_COST), gerçek tahsil orada.
+    static let creationCost = 100
 
     /// Ortak duvar-saati nabzı (0..1). İki TimelineView(.animation) aynı display-link
     /// saatini okur → buton ve kenar birebir senkron yanıp söner.
     private func pulseOpacity(_ date: Date, base: Double, amp: Double) -> Double {
         let t = date.timeIntervalSinceReferenceDate
-        let s = (sin(t * 2 * .pi / 1.2) + 1) / 2   // periyot 1.2 sn
+        // Daha yavaş/yumuşak nabız — eskiden 1.2 sn (çok hızlı yanıp sönüyordu).
+        let s = (sin(t * 2 * .pi / 2.2) + 1) / 2   // periyot 2.2 sn
         return base - amp * s
     }
 
@@ -543,26 +533,12 @@ struct CreateCharacterView: View {
             }
             LinearGradient(colors: [.clear, .black.opacity(0.75)], startPoint: .center, endPoint: .bottom)
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text(p.label)
-                    .font(.system(size: 15, weight: .bold))
-                    .foregroundStyle(.white)
-                Text(p.description)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.white.opacity(0.85))
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .padding(10)
-
-            Text(Self.vibeLabel(p.vibe))
-                .font(.system(size: 10, weight: .bold))
-                .textCase(.uppercase)
+            // Sadece sol-alttaki başlık (bkz. kullanıcı talebi) — alt açıklama ve
+            // sol-üstteki vibe etiketi kaldırıldı.
+            Text(p.label)
+                .font(.system(size: 15, weight: .bold))
                 .foregroundStyle(.white)
-                .padding(.horizontal, 8).padding(.vertical, 4)
-                .background(AppColor.pink.opacity(0.4), in: Capsule())
-                .padding(8)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .padding(10)
         }
         .frame(height: height)
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
@@ -652,18 +628,21 @@ struct CreateCharacterView: View {
             ForEach(AppearanceOptions.eyeColors, id: \.self) { c in
                 let selected = selectedEyeColor == c
                 Button { selectedEyeColor = c } label: {
-                    ZStack(alignment: .leading) {
+                    ZStack(alignment: .bottomLeading) {
                         if let asset = BuilderImages.asset("eyecolor", c) {
                             Image(asset).resizable().scaledToFill()
                                 .frame(maxWidth: .infinity).frame(height: 96).clipped()
                         } else {
                             Color.white.opacity(0.06).frame(height: 96)
                         }
-                        LinearGradient(colors: [.black.opacity(0.55), .clear],
-                                       startPoint: .leading, endPoint: .center)
+                        // Yazı sol-ALTTA (bkz. kullanıcı talebi) — okunur kalsın diye
+                        // alttan koyu degrade.
+                        LinearGradient(colors: [.clear, .black.opacity(0.7)],
+                                       startPoint: .center, endPoint: .bottom)
                         Text(AppearanceOptions.tr(c))
                             .font(.system(size: 16, weight: .bold))
-                            .foregroundStyle(.white).padding(.leading, 16)
+                            .foregroundStyle(.white)
+                            .padding(.leading, 16).padding(.bottom, 12)
                     }
                     .frame(height: 96)
                     .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
@@ -1237,8 +1216,9 @@ struct CreateCharacterView: View {
                         RoundedRectangle(cornerRadius: 24)
                             .strokeBorder(AppColor.pink, lineWidth: generating ? 3 : 1.5)
                             .shadow(color: AppColor.pink.opacity(generating ? 0.8 : 0), radius: 8)
-                            // Buton ile aynı saatten → eş zamanlı yanıp söner.
-                            .opacity(generating ? pulseOpacity(tl.date, base: 1.0, amp: 0.8) : 0.5)
+                            // Buton ile aynı saatten → eş zamanlı, YUMUŞAK nabız
+                            // (amp düşük). Üretim bitince (generating=false) durur.
+                            .opacity(generating ? pulseOpacity(tl.date, base: 1.0, amp: 0.5) : 0.5)
                     }
                 }
                 .padding(.horizontal, 20)
@@ -1252,7 +1232,7 @@ struct CreateCharacterView: View {
                     Button {
                         goToChat(with: c)
                     } label: {
-                        Text("Continue")
+                        Text("Devam et")
                             .font(.system(size: 17, weight: .bold))
                             .foregroundStyle(.white)
                             .frame(maxWidth: .infinity).frame(height: 54)
@@ -1275,8 +1255,8 @@ struct CreateCharacterView: View {
                                     LinearGradient(colors: [AppColor.pink, AppColor.amber],
                                                    startPoint: .leading, endPoint: .trailing),
                                     in: Capsule())
-                                // Kenarlarla aynı saatten → eş zamanlı yanıp söner.
-                                .opacity(generating ? pulseOpacity(tl.date, base: 1.0, amp: 0.8) : 1.0)
+                                // Kenarlarla aynı saatten → eş zamanlı, YUMUŞAK nabız.
+                                .opacity(generating ? pulseOpacity(tl.date, base: 1.0, amp: 0.5) : 1.0)
                         }
                     }
                     .buttonStyle(.plain)   // disabled sistem karartması nabzı gizlemesin
@@ -1286,6 +1266,21 @@ struct CreateCharacterView: View {
                 }
             }
             Spacer()
+        }
+        // "See character"a ilk kez basıldıktan sonra sağ üstte çarpı — akışı
+        // KOMPLE kapatıp ana sayfaya döner (özellikle PRO değilken paywall'da
+        // kilitli kalınmasın diye, bkz. kullanıcı talebi).
+        .overlay(alignment: .topTrailing) {
+            if didAttemptReveal {
+                Button { dismiss() } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 36, height: 36)
+                        .background(.white.opacity(0.12), in: Circle())
+                }
+                .padding(.horizontal, 16).padding(.top, 8)
+            }
         }
     }
 
@@ -1467,10 +1462,18 @@ struct CreateCharacterView: View {
     /// olduğu için görsel başarısız olsa bile karakter mutlaka oluşturulur).
     private func reveal() {
         guard !generating && created == nil else { return }
+        didAttemptReveal = true   // artık sağ üstte "kapat" çarpısı görünür
         // DEV curated characters bypass the PRO gate entirely — this is an
         // internal tool, not a user-facing purchase flow.
         if devMode == nil {
+            // 1) PRO değilse önce PRO paywall.
             guard PurchaseService.shared.tier != .none else { showPaywall = true; return }
+            // 2) PRO ama coin (100) yetmiyorsa COIN mağazası (bkz. kullanıcı talebi).
+            //    Kesin/atomik tahsil sunucuda; bu erken kontrol UX için (boşuna
+            //    foto üretme + anında paywall). Sunucu yine 402 dönerse de yakalanır.
+            guard tokenStore.balance >= CreateCharacterView.creationCost else {
+                showTokenStore = true; return
+            }
         }
         generating = true
         photoGenError = nil
@@ -1697,20 +1700,35 @@ struct CreateCharacterView: View {
         )
 
         switch outcome {
-        case .success(let c):
+        case .success(let c, let tokenBalance):
+            // Yaratma sonrası kalan coin bakiyesini güncelle (sunucu döndü).
+            if let tokenBalance { tokenStore.setBalance(tokenBalance) }
             withAnimation { created = c }
             store.characters.append(c)
             return
-        case .rejected(let errorCode):
-            // Sunucu bilerek reddetti (abonelik yok / haftalık hak bitti) —
-            // ASLA yerel-sadece bir fallback karakter oluşturma, bu gating'i
-            // tamamen atlar (bkz. create-character/index.ts checkCreationAllowance).
+        case .insufficientTokens(let tokenBalance):
+            // PRO ama coin yetmedi (sunucu 402) → bakiyeyi güncelle + coin mağazası.
+            tokenStore.setBalance(tokenBalance)
             photoRevealed = true
-            photoGenError = errorCode == "weekly_limit_reached"
-                ? String(localized: "You've used all your character slots this week.")
-                : String(localized: "Subscribe to create characters.")
-            showPaywall = errorCode != "weekly_limit_reached"
+            showTokenStore = true
             return
+        case .rejected(let errorCode):
+            if errorCode == "weekly_limit_reached" {
+                // Haftalık slot bitti — paywall değil, bilgi mesajı.
+                photoRevealed = true
+                photoGenError = String(localized: "You've used all your character slots this week.")
+                return
+            }
+            // "Abonelik yok" reddi: kullanıcı ZATEN PRO ise (test/DEBUG override
+            // ya da sunucudaki subscriptions tablosu henüz senkron değil) paywall
+            // AÇMA — PRO'ya paywall gösterilmez (bkz. kullanıcı talebi). Bu durumda
+            // switch'ten çıkıp aşağıdaki yerel fallback ile karakteri oluştur.
+            if !PurchaseService.shared.isPro {
+                photoRevealed = true
+                photoGenError = String(localized: "Subscribe to create characters.")
+                showPaywall = true
+                return
+            }
         case .networkFailure:
             break // aşağıdaki yerel fallback'e düş
         }

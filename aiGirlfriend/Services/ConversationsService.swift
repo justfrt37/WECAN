@@ -23,13 +23,14 @@ struct LastMessage: Codable {
     let content: String
     let role: String
     let createdAt: String
-    /// "text" | "image" — DB `messages.kind` sütunuyla aynı. Yerel (cihaz)
-    /// mesajlarından türetilirken `Message.imageURL` varlığına göre elle
-    /// set edilir (bkz. ChatListView.load()).
+    /// "text" | "image" | "voice" — DB `messages.kind` sütunuyla aynı ("voice"
+    /// yereldir). Yerel (cihaz) mesajlarından türetilirken medya bayraklarına
+    /// göre elle set edilir (bkz. ChatListView.load()).
     let kind: String?
 
     var isUser: Bool { role == "user" }
     var isImage: Bool { kind == "image" }
+    var isVoice: Bool { kind == "voice" }
 
     var date: Date? {
         let f = ISO8601DateFormatter()
@@ -52,10 +53,50 @@ struct LastMessage: Codable {
     }
 }
 
+/// "Sıfır yerel" hidrasyonu için tam konuşma durumu — LocalConversationStore
+/// (bellek-içi) her açılışta buradan doldurulur (bkz. CharacterStore.
+/// hydrateConversations). Sunucu (migration 009) tek doğru kaynak.
+struct ConversationState: Codable {
+    let id: UUID
+    let characterID: UUID
+    let relationshipLevel: Int?
+    let levelProgress: Double?
+    let summary: String?
+    let summarizedCount: Int?
+    let schedule: CharacterSchedule?
+    let wokenUpAt: String?
+    let manualSleepAt: String?
+    let ghostedAt: String?
+    let detectedLanguage: String?
+    let updatedAt: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case characterID = "character_id"
+        case relationshipLevel = "relationship_level"
+        case levelProgress = "level_progress"
+        case summary
+        case summarizedCount = "summarized_count"
+        case schedule
+        case wokenUpAt = "woken_up_at"
+        case manualSleepAt = "manual_sleep_at"
+        case ghostedAt = "ghosted_at"
+        case detectedLanguage = "detected_language"
+        case updatedAt = "updated_at"
+    }
+}
+
 struct ConversationsService {
     /// Kullanıcının konuşmaları (en yeni üstte).
     func fetchConversations() async -> [ConversationSummary] {
         let url = "\(Config.supabaseURL)/rest/v1/conversations?select=id,character_id,updated_at&order=updated_at.desc"
+        return await get(url) ?? []
+    }
+
+    /// Tüm konuşma DURUMLARI (seviye/ilerleme/özet/rutin/uyku/dil) — bellek-içi
+    /// önbelleği sunucudan tazelemek için (bkz. CharacterStore.hydrateConversations).
+    func fetchConversationStates() async -> [ConversationState] {
+        let url = "\(Config.supabaseURL)/rest/v1/conversations?select=id,character_id,relationship_level,level_progress,summary,summarized_count,schedule,woken_up_at,manual_sleep_at,ghosted_at,detected_language,updated_at&order=updated_at.desc"
         return await get(url) ?? []
     }
 

@@ -34,6 +34,7 @@ struct GalleryView: View {
                 .padding(.top, 12)
                 .padding(.bottom, 24)
             }
+            .scrollIndicators(.hidden)
         }
         .task {
             yourPhotos = (try? await GeneratedPhotoService().fetch(characterId: character.id)) ?? []

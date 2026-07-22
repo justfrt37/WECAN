@@ -81,13 +81,40 @@ function stripVoiceTags(text: string): string {
 }
 
 // ─────────────────────────── İlişki seviyesi ───────────────────────────
-// XP terfi hesabı (eskiden burada) artık istemcide — bkz. RelationshipXP.swift.
-// Sunucu SADECE `conversations.relationship_level` değerini saklar/döner:
-// bu turun direktifi/foto uygunluğu için OKUNUR, istemcinin hesapladığı
-// güncel değer bir sonraki turda YAZILIR (`body.level`). Sunucu terfi
-// mantığını bilmez, sadece 1..MAX_LEVEL aralığına klemplenmiş bir tamsayı
-// olarak kabul eder.
+// XP / ilişki seviyesi terfi hesabı SUNUCUDA yapılır (istemci sadece gösterir,
+// kurcalayamaz). Model: `level_progress` = güncel seviyenin ne kadarı doldu (0..1).
+// HER mesajda ilerleme artar; dolunca seviye atlar (applyGain). İstemcinin
+// gönderdiği `body.level` ARTIK GÜVENİLMEZ — sunucu DB'deki değerden hesaplar.
 const MAX_LEVEL = 10;
+const MESSAGE_BATCH_SIZE = 5;
+
+// Bu seviyedeyken bir "tam tık"ın kattığı yüzde (0..100). Lv1-3 hızlı, Lv4+
+// konveks azalan eğri (RelationshipXP.swift ile birebir aynı).
+function gainPercent(level: number): number {
+  if (level <= 1) return 33;
+  if (level === 2) return 25;
+  if (level === 3) return 18;
+  const x = level - 2;
+  return Math.max(1, -0.125 * x * x + 8.125);
+}
+
+// Mesaj BAŞINA ilerleme oranı — batch (5) yerine her mesajda artsın diye
+// tam tık /MESSAGE_BATCH_SIZE. Pacing aynı kalır, ilerleme pürüzsüz artar.
+function perMessageFraction(level: number): number {
+  return (gainPercent(level) / 100) / MESSAGE_BATCH_SIZE;
+}
+
+// İlerlemeyi uygula; dolunca seviye atla (aynı anda birden fazla da olabilir).
+function applyRelationshipGain(
+  fraction: number, level: number, progress: number,
+): { level: number; progress: number } {
+  if (level >= MAX_LEVEL) return { level: MAX_LEVEL, progress: 0 };
+  let lvl = level;
+  let prog = progress + fraction;
+  while (prog >= 1 && lvl < MAX_LEVEL) { prog -= 1; lvl += 1; }
+  if (lvl >= MAX_LEVEL) return { level: MAX_LEVEL, progress: 0 };
+  return { level: lvl, progress: prog };
+}
 
 // Fetch role-aware intimacy directive from DB.
 // Checks character_level_overrides first, falls back to role_level_scripts.
@@ -501,15 +528,13 @@ Deno.serve(async (req: Request) => {
     // siler (messages/memories cascade ile birlikte gider), bir sonraki açılışta
     // sıfırdan (yeni bir "ilk selam" akışıyla) başlar.
     if (body.clearConversation === true) {
-      const { data: existing } = await db
-        .from("conversations")
-        .select("id")
+      // TÜM eşleşen conversation'ları sil (messages/memories cascade ile gider).
+      // maybeSingle KULLANMA — aynı user+character için birden çok satır varsa
+      // (eski dupe'lar) hata verip HİÇBİR ŞEY silmiyordu → mesajlar geri geliyordu.
+      await db.from("conversations")
+        .delete()
         .eq("user_id", uid)
-        .eq("character_id", characterId)
-        .maybeSingle();
-      if (existing) {
-        await db.from("conversations").delete().eq("id", existing.id);
-      }
+        .eq("character_id", characterId);
       return json({ ok: true });
     }
 
@@ -524,30 +549,29 @@ Deno.serve(async (req: Request) => {
     const interests: string[] = Array.isArray(character?.interests) ? character.interests : [];
     const exHistory: string | null = character?.ex_history ?? null;
 
-    // 1) Konuşmayı bul ya da oluştur (kullanıcı + karakter)
-    let { data: convo } = await db
+    // 1) Konuşmayı bul ya da oluştur (kullanıcı + karakter). maybeSingle KULLANMA —
+    // eski dupe'lar varsa hata verip convo=null oluyor ve HER mesajda YENİ bir
+    // conversation ekleniyordu (dupe'lar böyle çoğalıyordu). En güncel olanı al.
+    let { data: convoRows } = await db
       .from("conversations")
-      .select("id, summary, summarized_count, xp, relationship_level")
+      .select("id, summary, summarized_count, xp, relationship_level, level_progress, schedule, woken_up_at, manual_sleep_at, ghosted_at, detected_language")
       .eq("user_id", uid)
       .eq("character_id", characterId)
-      .maybeSingle();
-
-    if (!convo) {
-      const ins = await db
-        .from("conversations")
-        .insert({ user_id: uid, character_id: characterId })
-        .select("id, summary, summarized_count, xp, relationship_level")
-        .single();
-      convo = ins.data!;
-    }
-    const conversationId: string = convo.id;
+      .order("updated_at", { ascending: false })
+      .limit(1);
+    let convo = convoRows?.[0];
+    // NOT: conversation OLUŞTURMA burada YAPILMAZ. Sohbeti sadece AÇMAK (geçmiş
+    // modu) boş bir conversation yaratıyordu → silsen bile açınca/liste
+    // yenilenince yeniden oluşup "geri geliyordu" (bkz. kullanıcı talebi).
+    // Oluşturma, gerçekten mesaj yazılan/kaydedilen modlara ertelenir (aşağıda).
 
     const clientHistory: WireMessage[] | undefined = body.clientHistory;
-    const useClientHistory = Array.isArray(clientHistory);
-    const localSummary: string | undefined = body.localSummary;
-    // İstemcinin terfi hesabından çıkan güncel seviye — bu turdan SONRA yazılır,
-    // bu turun direktif/foto uygunluğu HALA eski `convo.relationship_level`'ı kullanır.
-    const clientLevel: number | undefined = Number.isInteger(body.level) ? body.level : undefined;
+    // "Sıfır yerel" geçişi: sunucu ARTIK tek doğru kaynak. clientHistory/localSummary
+    // (istemci hâlâ gönderiyor olabilir) YOK SAYILIR — bağlam DB'den kurulur, mesajlar
+    // DB'ye HER cevapta yazılır, özet DB'de tutulur. clientHistory yalnızca dil
+    // tespitinde (aşağıda) ipucu olarak kalır. Bkz. migration 009 / plan.
+    const useClientHistory = false;
+    const localSummary: string | undefined = undefined;
     // Zaman farkındalığı: son mesaj zamanı, istemcinin "şimdi"si ve saat dilimi
     // farkı (dakika) — hepsi epoch ms. Sadece varsa kullanılır (bkz. timeContext).
     const lastMessageAt: number | undefined = typeof body.lastMessageAt === "number" ? body.lastMessageAt : undefined;
@@ -636,20 +660,78 @@ Deno.serve(async (req: Request) => {
       return json({ summary, schedule });
     }
 
+    // === PROAKTİF ENJEKSİYON MODU (injectProactive) ===
+    // Bir asistan mesajını SUNUCUDA saklar (yerele yazmak yerine). İki kullanım:
+    //  1) Proaktif bildirim teslim edilince (ghosted/jealousy/missedYou/goodMorning/
+    //     sleepy/liked) — bkz. NotificationDelegate (Phase C).
+    //  2) Onboarding ilk-selam — kullanıcı bir karakteri seçince (createIfMissing:true).
+    // Silinmiş bir sohbeti DİRİLTMEMEK için, var olmayan sohbet + createIfMissing:false
+    // → hiçbir şey yapmaz (bkz. eski injectMessage kuralı).
+    if (body.injectProactive && typeof body.injectProactive === "object") {
+      const kind: string = String(body.injectProactive.kind ?? "");
+      const text: string = String(body.injectProactive.text ?? "");
+      const createIfMissing: boolean = body.injectProactive.createIfMissing === true;
+      if (!text.trim()) return json({ injected: false, conversationId: convo?.id ?? null });
+      if (!convo) {
+        if (!createIfMissing) return json({ injected: false, conversationId: null });
+        const ins = await db
+          .from("conversations")
+          .insert({ user_id: uid, character_id: characterId })
+          .select("id, summary, summarized_count, xp, relationship_level, level_progress, schedule, woken_up_at, manual_sleep_at, ghosted_at, detected_language")
+          .single();
+        convo = ins.data!;
+      }
+      await db.from("messages").insert([
+        { conversation_id: convo.id, role: "assistant", content: text, kind: "text" },
+      ]);
+      const proactiveUpdate: Record<string, unknown> = { updated_at: new Date().toISOString() };
+      // ghosted → kullanıcı yazana kadar sustur (bkz. NotificationScheduler eligibility).
+      if (kind === "ghosted") proactiveUpdate.ghosted_at = new Date().toISOString();
+      // sleepyGoodbye → uyandırma override'ını temizle (karakter gerçekten uyur).
+      if (kind === "sleepyGoodbye") proactiveUpdate.woken_up_at = null;
+      await db.from("conversations").update(proactiveUpdate).eq("id", convo.id);
+      return json({ injected: true, conversationId: convo.id });
+    }
+
     // === GEÇMİŞ MODU — clientHistory yoksa ===
     if (!useClientHistory && (!userMessage || userMessage.trim() === "")) {
+      // Sohbeti açmak conversation OLUŞTURMAZ — yoksa boş geçmiş dön.
+      if (!convo) {
+        return json({ conversationId: null, history: [], xp: 0, level: 1 });
+      }
       const { data: msgs } = await db
         .from("messages")
         .select("role, content, kind")
-        .eq("conversation_id", conversationId)
+        .eq("conversation_id", convo.id)
         .order("created_at", { ascending: true });
       return json({
-        conversationId,
+        conversationId: convo.id,
         history: msgs ?? [],
         xp: convo.xp ?? 0,
         level: convo.relationship_level ?? 1,
+        levelProgress: typeof convo.level_progress === "number" ? convo.level_progress : 0,
+        summary: convo.summary ?? "",
+        summarizedCount: convo.summarized_count ?? 0,
+        // "Sıfır yerel" durum alanları — istemci belleğe hidrasyon için (bkz. B1/B5).
+        schedule: convo.schedule ?? null,
+        wokenUpAt: convo.woken_up_at ?? null,
+        manualSleepAt: convo.manual_sleep_at ?? null,
+        ghostedAt: convo.ghosted_at ?? null,
+        detectedLanguage: convo.detected_language ?? null,
       });
     }
+
+    // Buradan sonrası (cevap / foto-tepki modları) gerçekten conversation
+    // GEREKTİRİR → yoksa ŞİMDİ oluştur (sadece burada, açılışta değil).
+    if (!convo) {
+      const ins = await db
+        .from("conversations")
+        .insert({ user_id: uid, character_id: characterId })
+        .select("id, summary, summarized_count, xp, relationship_level, level_progress, schedule, woken_up_at, manual_sleep_at, ghosted_at, detected_language")
+        .single();
+      convo = ins.data!;
+    }
+    const conversationId: string = convo.id;
 
     // === FOTOĞRAF İNDİRME TEPKİSİ MODU (photoDownloadReaction: true) ===
     // Kullanıcı özel/mahrem işaretli bir fotoğrafı cihazına indirdi. userMessage
@@ -879,23 +961,37 @@ Deno.serve(async (req: Request) => {
       ]);
     }
 
-    // 4b) Seviye güncelle — terfi hesabı istemcide yapıldı, sunucu sadece saklar.
-    // Bu turun direktif/foto uygunluğu zaten yukarıda eski `currentLevel` ile yapıldı;
-    // burada yazılan değer bir SONRAKİ turda kullanılacak.
-    const newLevel = clientLevel !== undefined
-      ? Math.min(MAX_LEVEL, Math.max(1, clientLevel))
-      : currentLevel;
+    // 4b) Seviye/ilerleme SUNUCUDA hesaplanır (istemci kurcalayamaz) — HER
+    // mesajda ilerleme artar, dolunca seviye atlar. Bu turun direktifi zaten
+    // yukarıda eski `currentLevel` ile yapıldı; yeni değerler bir sonraki tura
+    // ve cevapla istemciye yansır.
+    const currentProgress: number = typeof convo.level_progress === "number" ? convo.level_progress : 0;
+    const gained = applyRelationshipGain(perMessageFraction(currentLevel), currentLevel, currentProgress);
+    const newLevel = gained.level;
+    const newProgress = gained.progress;
 
+    // "Sıfır yerel": durum alanları da SUNUCUDA güncellenir.
+    // - detected_language: bu turda tespit edildiyse sakla (dil yapışkan olmalı).
+    // - ghosted_at: kullanıcı yazdı → temizle (eski noteUserSent yereli temizliyordu).
+    // - manual_sleep_at: sohbet içinde uykuya anlaşıldıysa (wentToSleep) şimdi olarak set.
+    // - woken_up_at: istemci uyuyan karakteri uyandırdıysa (body.wokeUp) şimdi.
+    const nowIso = new Date().toISOString();
+    const convoUpdate: Record<string, unknown> = {
+      updated_at: nowIso,
+      relationship_level: newLevel,
+      level_progress: newProgress,
+      ghosted_at: null,
+    };
+    if (detectedLanguage) convoUpdate.detected_language = detectedLanguage;
+    if (wentToSleep) convoUpdate.manual_sleep_at = nowIso;
+    if (body.wokeUp === true) convoUpdate.woken_up_at = nowIso;
     await db.from("conversations")
-      .update({
-        updated_at: new Date().toISOString(),
-        relationship_level: newLevel,
-      })
+      .update(convoUpdate)
       .eq("id", conversationId);
 
     // 5) Özetleme — sadece DB modunda (clientHistory modunda istemci geçmişi yönetiyor)
     if (useClientHistory) {
-      return json({ conversationId, reply, level: newLevel, wentToSleep, tokenBalance: tokenBalanceAfterCharge });
+      return json({ conversationId, reply, level: newLevel, levelProgress: newProgress, wentToSleep, tokenBalance: tokenBalanceAfterCharge });
     }
 
     const { count: total } = await db
@@ -953,7 +1049,7 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    return json({ conversationId, reply, level: newLevel, tokenBalance: tokenBalanceAfterCharge });
+    return json({ conversationId, reply, level: newLevel, levelProgress: newProgress, wentToSleep, tokenBalance: tokenBalanceAfterCharge });
   } catch (e) {
     console.error(String(e));
     return json({ error: String(e) }, 500);

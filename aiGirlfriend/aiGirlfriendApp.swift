@@ -27,7 +27,10 @@ struct aiGirlfriendApp: App {
         WindowGroup {
             Group {
                 if auth.isAuthenticated && store.isLoaded {
-                    if onboarding.isCompleted {
+                    // pendingChatCharacterName set ise (ONB5 bitti) MainTabView'e
+                    // geç — onboarding TAM DA seçilen chat görününce complete olur
+                    // (bkz. MainTabView.openPendingOnboardingChat).
+                    if onboarding.isCompleted || onboarding.pendingChatCharacterName != nil {
                         MainTabView()
                     } else {
                         OnboardingFlowView()

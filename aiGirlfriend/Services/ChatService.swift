@@ -69,6 +69,9 @@ private struct ChatResponse: Codable {
     let history: [WireMessage]?
     let xp: Int?
     let level: Int?
+    /// Güncel seviyenin ilerleme oranı (0..1) — SUNUCUDA hesaplanır (bkz.
+    /// chat/index.ts applyRelationshipGain). İstemci sadece gösterir.
+    let levelProgress: Double?
     let leveledUp: Bool?
     let photoUrl: String?
     let summary: String?   // özetleme modunda döner
@@ -88,7 +91,8 @@ struct ChatHistory {
 
 struct ChatReply {
     let reply: String
-    let level: Int      // sunucunun sakladığı (istemcinin bir önceki turda gönderdiği) seviye
+    let level: Int      // SUNUCUDA hesaplanan güncel seviye (istemci sadece gösterir)
+    let levelProgress: Double?   // güncel seviyenin ilerleme oranı (0..1), sunucudan
     let photoURL: URL?
     /// true ise karakter bu turda gerçekten uyumayı kabul etti (bkz.
     /// ChatViewModel.send, chat/index.ts classifySleepAgreement).
@@ -146,6 +150,48 @@ struct ChatService {
         return false
     }
 
+    private struct InjectProactivePayload: Codable {
+        let kind: String
+        let text: String
+        let createIfMissing: Bool
+    }
+    private struct InjectProactiveRequest: Codable {
+        let characterId: String
+        let systemPrompt: String
+        let injectProactive: InjectProactivePayload
+    }
+    private struct InjectProactiveResponse: Codable {
+        let injected: Bool?
+        let conversationId: String?
+    }
+
+    /// Bir asistan mesajını (proaktif bildirim satırı veya onboarding ilk-selamı)
+    /// SUNUCUDA saklar (bkz. chat/index.ts injectProactive). "Sıfır yerel":
+    /// mesaj artık yerele değil sunucuya yazılır → reinstall sonrası ve sohbet
+    /// listesinde sunucudan görünür. `createIfMissing` yalnızca ilk-temas
+    /// (liked / firstHello) için true — silinmiş sohbeti DİRİLTMEMEK için diğer
+    /// bildirimlerde false (var olmayan sohbete yazmaz). Dönen: mesaj eklendi mi.
+    @discardableResult
+    func injectProactiveMessage(character: Character, kind: String, text: String, createIfMissing: Bool) async -> Bool {
+        var request = URLRequest(url: Config.chatFunctionURL)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let bearer = UserDefaultsManager.shared.accessToken ?? Config.supabaseAnonKey
+        request.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
+        request.setValue(Config.supabaseAnonKey, forHTTPHeaderField: "apikey")
+        guard let body = try? JSONEncoder().encode(InjectProactiveRequest(
+            characterId: character.id.uuidString.lowercased(),
+            systemPrompt: character.systemPrompt,
+            injectProactive: InjectProactivePayload(kind: kind, text: text, createIfMissing: createIfMissing)
+        )) else { return false }
+        request.httpBody = body
+        guard let (data, response) = try? await URLSession.shared.data(for: request),
+              let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode)
+        else { return false }
+        let decoded = try? JSONDecoder().decode(InjectProactiveResponse.self, from: data)
+        return decoded?.injected ?? false
+    }
+
     /// Preset karakter: sunucudan geçmiş yükle.
     func loadHistory(character: Character) async throws -> ChatHistory {
         let resp = try await call(character: character, userMessage: nil)
@@ -163,6 +209,7 @@ struct ChatService {
         return ChatReply(
             reply: resp.reply ?? "",
             level: resp.level ?? level,
+            levelProgress: resp.levelProgress,
             photoURL: resp.photoUrl.flatMap(URL.init(string:)),
             wentToSleep: resp.wentToSleep ?? false,
             tokenBalance: resp.tokenBalance
@@ -207,6 +254,7 @@ struct ChatService {
         return ChatReply(
             reply: resp.reply ?? "",
             level: resp.level ?? level,
+            levelProgress: resp.levelProgress,
             photoURL: resp.photoUrl.flatMap(URL.init(string:)),
             wentToSleep: resp.wentToSleep ?? false,
             tokenBalance: resp.tokenBalance
@@ -247,6 +295,7 @@ struct ChatService {
         return ChatReply(
             reply: resp.reply ?? "",
             level: resp.level ?? level,
+            levelProgress: resp.levelProgress,
             photoURL: resp.photoUrl.flatMap(URL.init(string:)),
             wentToSleep: resp.wentToSleep ?? false,
             tokenBalance: resp.tokenBalance
@@ -395,6 +444,7 @@ struct ChatService {
     func clearConversation(character: Character) async throws {
         _ = try await perform(character: character, userMessage: nil, extra: .clear)
     }
+
 
     /// Eski mesajları özetle (yerel mod için istemci tarafı özetleme).
     func generateLocalSummary(

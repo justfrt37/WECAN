@@ -9,6 +9,21 @@ import SwiftUI
 
 struct OnboardingPaywallView: View {
     @Environment(OnboardingStore.self) private var onboarding
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
+
+    /// X (kapat) butonu 2 sn sonra belirir — kullanıcı önce paywall'ı görsün.
+    @State private var showClose = false
+
+    private let privacyURL = URL(string: "https://wecan.app/privacy")!
+    private let termsURL = URL(string: "https://wecan.app/terms")!
+
+    /// Kapatma: onboarding adımı olarak açıldıysa complete(), bir cover olarak
+    /// (PRO butonundan) açıldıysa dismiss() — ikisini de çağırmak güvenli.
+    private func close() {
+        dismiss()
+        onboarding.complete()
+    }
 
     /// Seçili paket — varsayılan yıllık (en avantajlı).
     private enum Plan { case weekly, yearly }
@@ -42,6 +57,10 @@ struct OnboardingPaywallView: View {
                 content
             }
         }
+        .task {
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            withAnimation(.easeIn(duration: 0.4)) { showClose = true }
+        }
     }
 
     // MARK: Üst bar (X + logo PRO)
@@ -50,13 +69,14 @@ struct OnboardingPaywallView: View {
         ZStack {
             OBBrandMarkPro()
             HStack {
-                Button { onboarding.complete() } label: {
+                Button { close() } label: {
                     Image(systemName: "xmark")
-                        .font(.system(size: 13, weight: .bold))
-                        .foregroundStyle(.white)
+                        .font(.system(size: 17, weight: .bold))
+                        .foregroundStyle(.white.opacity(0.55))
                         .frame(width: 30, height: 30)
-                        .background(Color.black.opacity(0.45), in: Circle())
                 }
+                .opacity(showClose ? 1 : 0)
+                .disabled(!showClose)
                 Spacer()
             }
         }
@@ -94,7 +114,7 @@ struct OnboardingPaywallView: View {
             }
             .padding(.top, 10)   // üste taşan tasarruf rozetine yer
 
-            Button { onboarding.complete() } label: {
+            Button { close() } label: {
                 HStack(spacing: 10) {
                     Image(systemName: "lock.open.fill").font(.system(size: 19, weight: .bold))
                     Text("Kilidi Aç").font(.system(size: 20, weight: .heavy))
@@ -104,10 +124,10 @@ struct OnboardingPaywallView: View {
                 .background(OBTheme.buttonGradient, in: RoundedRectangle(cornerRadius: 20))
             }
 
-            testimonial
+            legalRow
         }
         .padding(.horizontal, 20)
-        .padding(.bottom, 28)
+        .padding(.bottom, 10)   // buton yere daha yakın olsun
     }
 
     private func planCard(_ p: Plan, title: String, price: String, sub: String, badge: String?) -> some View {
@@ -145,20 +165,22 @@ struct OnboardingPaywallView: View {
         .buttonStyle(.plain)
     }
 
-    private var testimonial: some View {
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("★★★★★").font(.system(size: 13)).foregroundStyle(Color(hex: 0xFFC24B))
-                Text("@merlinpendragon").font(.system(size: 11)).foregroundStyle(.white.opacity(0.5))
-            }
-            Text("\"Plumm'a yakın başka bir uygulama aklıma gelmiyor… Gerçekten harika!\"")
-                .font(.system(size: 13)).italic()
-                .foregroundStyle(.white.opacity(0.8))
-                .frame(maxWidth: .infinity, alignment: .leading)
+    /// Butonun altındaki yasal linkler — Gizlilik, Koşullar, Geri Yükle.
+    private var legalRow: some View {
+        HStack(spacing: 16) {
+            Button("Gizlilik Politikası") { openURL(privacyURL) }
+            Button("Kullanım Koşulları") { openURL(termsURL) }
+            Button("Geri Yükle") { restore() }
         }
-        .padding(14)
-        .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
-        .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(.white.opacity(0.1), lineWidth: 1))
+        .font(.system(size: 11, weight: .medium))
+        .foregroundStyle(.white.opacity(0.5))
+        .buttonStyle(.plain)
+    }
+
+    private func restore() {
+        // TODO: RevenueCat bağlanınca gerçek "restore purchases". Şimdilik
+        // entitlement yenilemeyi tetikler (RevenueCat yoksa etkisiz).
+        Task { await PurchaseService.shared.refreshEntitlement() }
     }
 
     /// Video üstü karartma — metni okunur kılar.

@@ -52,19 +52,6 @@ struct ExploreView: View {
         .fullScreenCover(isPresented: $showCreate) {
             CreateCharacterView()
         }
-        #if DEBUG
-        // SS almak için: EXPLORE_PRESENT=create|profile ile açılışta ilgili
-        // ekranı otomatik sun (cliclick bu ortamda çalışmıyor).
-        .task {
-            switch ProcessInfo.processInfo.environment["EXPLORE_PRESENT"] {
-            case "create": showCreate = true
-            case "profile":
-                for _ in 0..<40 where filtered.isEmpty { try? await Task.sleep(nanoseconds: 100_000_000) }
-                profileCharacter = filtered.first
-            default: break
-            }
-        }
-        #endif
     }
 
     // MARK: Başlık
@@ -133,36 +120,41 @@ struct ExploreView: View {
         }
     }
 
-    /// "Kendi karakterinizi yaratın" kartı (şimdilik aksiyonsuz).
+    /// "Kendi karakterinizi yaratın" kartı — arka plan olarak "basılı tut"
+    /// (ONB5) ekranındaki görsel kullanılır; karta sığması için kırpılarak
+    /// doldurulur (bkz. kullanıcı talebi).
     private var createCard: some View {
-        VStack(spacing: 10) {
-            ZStack {
-                Circle()
-                    .fill(.white.opacity(0.15))
-                    .overlay(Circle().strokeBorder(.white.opacity(0.4), lineWidth: 1))
-                Image(systemName: "plus")
-                    .font(.system(size: 26, weight: .semibold))
+        ZStack {
+            Image(bundleResource: "onb5_bg", ext: "png")
+                .resizable()
+                .scaledToFill()
+
+            // Yazılar okunur kalsın diye koyu degrade scrim.
+            LinearGradient(colors: [.black.opacity(0.30), .black.opacity(0.65)],
+                           startPoint: .top, endPoint: .bottom)
+
+            VStack(spacing: 10) {
+                ZStack {
+                    Circle()
+                        .fill(.white.opacity(0.15))
+                        .overlay(Circle().strokeBorder(.white.opacity(0.4), lineWidth: 1))
+                    Image(systemName: "plus")
+                        .font(.system(size: 26, weight: .semibold))
+                        .foregroundStyle(.white)
+                }
+                .frame(width: 64, height: 64)
+
+                Text("Create your own character")
+                    .font(.system(size: 14, weight: .bold))
+                    .multilineTextAlignment(.center)
                     .foregroundStyle(.white)
             }
-            .frame(width: 64, height: 64)
-
-            Text("Create your own character")
-                .font(.system(size: 14, weight: .bold))
-                .multilineTextAlignment(.center)
-                .foregroundStyle(.white)
-            Text("An AI companion made for you")
-                .font(.system(size: 10, weight: .medium))
-                .multilineTextAlignment(.center)
-                .foregroundStyle(.white.opacity(0.8))
+            .padding(14)
+            .shadow(color: .black.opacity(0.5), radius: 6, y: 2)
         }
-        .padding(14)
         .frame(maxWidth: .infinity)
         .frame(height: 220)
-        .background(
-            LinearGradient(colors: [AppColor.pink.opacity(0.55), AppColor.amber.opacity(0.55)],
-                           startPoint: .topLeading, endPoint: .bottomTrailing),
-            in: RoundedRectangle(cornerRadius: 18)
-        )
+        .clipShape(RoundedRectangle(cornerRadius: 18))   // kırparak sığdır
         .overlay(
             RoundedRectangle(cornerRadius: 18)
                 .strokeBorder(.white.opacity(0.7), lineWidth: 1.5)

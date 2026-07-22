@@ -30,6 +30,7 @@ struct HelpSupportView: View {
                     }
                     .padding(20)
                 }
+                .scrollIndicators(.hidden)
             }
             .navigationTitle("Help & Support")
             .navigationBarTitleDisplayMode(.inline)

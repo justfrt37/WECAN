@@ -1,39 +1,37 @@
 //
 //  ProfileView.swift
-//  "Profil" sekmesi.
-//  Not: Uygulama sadece anonim girişle çalışıyor (kullanıcı adı/e-posta/katılım
-//  tarihi gibi gerçek bir kimlik verisi yok) — bu yüzden kimlik bölümü minimal
-//  tutuldu, uydurma isim/istatistik gösterilmiyor.
+//  "Profil" sekmesi. Ayarlar (bildirimler, uygulama kilidi, öner/değerlendir,
+//  yardım, gizlilik, koşullar, verileri sil) artık ayrı bir sayfa değil —
+//  hepsi bu sekmenin altına inline yerleştirildi.
+//  Not: Uygulama sadece anonim girişle çalışıyor (gerçek kimlik verisi yok) —
+//  kimlik bölümü minimal tutuldu.
 //
 
 import SwiftUI
+import StoreKit
 import UIKit
 import UserNotifications
 
 struct ProfileView: View {
     @Environment(TokenStore.self) private var tokenStore
-    @State private var showPaywall = false
-    @State private var devTier: SubscriptionTier = PurchaseService.shared.tier
-    @State private var showDevCreateCharacter = false
-    @State private var showDevEditCharacter = false
-    #if DEBUG
-    @State private var dbgSettings = ProcessInfo.processInfo.environment["PROFILE_ROUTE"] == "settings"
-    #endif
+    @Environment(\.requestReview) private var requestReview
+    @Environment(\.openURL) private var openURL
+
+    // Ayarlar (eski SettingsView'den buraya taşındı)
+    @State private var notificationsOn = false
+
+    // TODO: gerçek URL'lerle değiştir (App Store / gizlilik / koşullar).
+    private let shareURL = URL(string: "https://apps.apple.com/app/id0000000000")!
+    private let supportMailURL = URL(string: "mailto:destek@wecan.app")!
+    private let cardRadius: CGFloat = 18
 
     var body: some View {
         VStack(spacing: 0) {
             header
             ScrollView {
-                VStack(spacing: 18) {
+                VStack(spacing: 14) {
                     avatarCard
-                    proBanner
-                    settingsMenu
-                    // DEV-only, gated to the two dev uids (bkz. DevAccess) —
-                    // was shown to EVERYONE before (no gating existed).
-                    if DevAccess.isDev {
-                        devTokenTestPanel
-                        devCuratedCharacterPanel
-                    }
+                    settingsSection
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 4)
@@ -46,19 +44,12 @@ struct ProfileView: View {
                            startPoint: .top, endPoint: .bottom)
                 .ignoresSafeArea()
         )
-        .sheet(isPresented: $showPaywall) { PaywallHostView() }
-        // CharacterStore is already injected ambiently at MainTabView's root —
-        // no need to re-inject it here, same as every other CreateCharacterView call site.
-        .sheet(isPresented: $showDevCreateCharacter) { CreateCharacterView(devMode: .create) }
-        .sheet(isPresented: $showDevEditCharacter) { DevEditCharacterPickerView() }
-        #if DEBUG
-        .sheet(isPresented: $dbgSettings) { NavigationStack { SettingsView() } }
-        #endif
+        .task { notificationsOn = await currentNotificationStatus() }
     }
 
     // MARK: Başlık
 
-    private var header: some View {
+     private var header: some View {
         HStack {
             Text("Profile")
                 .font(.system(size: 22, weight: .bold))
@@ -87,9 +78,8 @@ struct ProfileView: View {
             Text("Guest User")
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(.white.opacity(0.7))
-            // TEMP TESTING (2026-07-12) — shows the Supabase auth UID so it
-            // can be cross-checked against DB rows while testing. Tap to
-            // copy. REVERT/remove once testing is done.
+            // TEMP TESTING (2026-07-12) — Supabase auth UID'sini gösterir
+            // (DB satırlarıyla eşleştirme için). Dokununca kopyalar.
             if let uid = UserDefaultsManager.shared.userId {
                 Text(uid)
                     .font(.system(size: 11, design: .monospaced))
@@ -111,191 +101,113 @@ struct ProfileView: View {
         )
     }
 
-    // MARK: PRO banner (RevenueCat iskeleti — bkz. PurchaseService)
+    // MARK: Ayarlar bölümü (inline)
 
-    @ViewBuilder
-    private var proBanner: some View {
-        if PurchaseService.shared.isPro {
-            activeSubscriptionBanner
-        } else {
-            goProBanner
-        }
-    }
-
-    private var activeSubscriptionBanner: some View {
-        HStack {
-            HStack(spacing: 6) {
-                Image(systemName: "crown.fill").font(.system(size: 14))
-                Text("You are \(PurchaseService.shared.tier.displayName)!")
-                    .font(.system(size: 16, weight: .bold))
-            }
-            .foregroundStyle(.white)
-            Spacer()
-        }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 16)
-        .background(
-            LinearGradient(colors: [Color(hex: 0xFFA726), Color(hex: 0xFF6F61)],
-                           startPoint: .top, endPoint: .bottom),
-            in: RoundedRectangle(cornerRadius: 20)
-        )
-    }
-
-    private var goProBanner: some View {
-        Button { showPaywall = true } label: {
+    private var settingsSection: some View {
+        VStack(spacing: 14) {
             HStack {
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "crown.fill").font(.system(size: 14))
-                        Text("Plumm PRO").font(.system(size: 16, weight: .bold))
-                    }
-                    .foregroundStyle(.white)
-                    Text("Unlimited chat, voice messages, and exclusive characters")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.85))
+                Text("Ayarlar")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.55))
+                Spacer()
+            }
+            .padding(.top, 6)
+
+            notificationsCard
+
+            ShareLink(item: shareURL) {
+                row("Arkadaşına Öner", trailingIcon: "square.and.arrow.up")
+            }
+            .buttonStyle(.plain)
+
+            Button { requestReview() } label: {
+                HStack {
+                    Text("Bizi Değerlendir")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundStyle(.white)
+                    Spacer()
+                    // Tek altın yıldız (bkz. kullanıcı talebi).
+                    Image(systemName: "star.fill")
+                        .font(.system(size: 16))
+                        .foregroundStyle(Color(hex: 0xFFC24B))
                 }
-                Spacer()
-                Text("Upgrade")
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundStyle(Color(hex: 0xFF6F61))
-                    .padding(.horizontal, 16)
-                    .frame(height: 36)
-                    .background(.white, in: RoundedRectangle(cornerRadius: 18))
+                .padding(.horizontal, 20)
+                .frame(height: 66)
+                .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: cardRadius))
+                .overlay(RoundedRectangle(cornerRadius: cardRadius).strokeBorder(.white.opacity(0.10), lineWidth: 1))
+                .contentShape(RoundedRectangle(cornerRadius: cardRadius))
             }
-            .padding(.horizontal, 18)
-            .padding(.vertical, 16)
-            .background(
-                LinearGradient(colors: [Color(hex: 0xFFA726), Color(hex: 0xFF6F61)],
-                               startPoint: .top, endPoint: .bottom),
-                in: RoundedRectangle(cornerRadius: 20)
-            )
-        }
-        .buttonStyle(.plain)
-    }
+            .buttonStyle(.plain)
 
-    // MARK: Ayarlar menüsü
-
-    private var settingsMenu: some View {
-        VStack(spacing: 0) {
-            NavigationLink { SettingsView() } label: { menuRow("gearshape.fill", "Settings", tint: Color(hex: 0x8E8E93)) }
-        }
-        .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 20))
-        .overlay(
-            RoundedRectangle(cornerRadius: 20).strokeBorder(.white.opacity(0.08), lineWidth: 1)
-        )
-    }
-
-
-    /// GEÇİCİ DEV PANELİ — RevenueCat/gerçek IAP kurulunca KALDIRILACAK (bkz.
-    /// DevTokenTools, dev-token-tools edge function). Token mekaniklerini
-    /// (harcama/kazanma, abonelik tier'ları) gerçek ödeme olmadan test etmeye
-    /// yarıyor — tier butonları GERÇEK bir ilk-kez-abone-olma gibi davranır:
-    /// hem `subscriptions` satırını hem o haftalık token miktarını basar.
-    private var devTokenTestPanel: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 8) {
-                Image(systemName: "hammer.fill").foregroundStyle(Color(hex: 0x9B59B6))
-                Text("DEV: Token Testing")
-                    .font(.system(size: 14, weight: .bold))
-                    .foregroundStyle(.white)
+            Button { openURL(supportMailURL) } label: {
+                row("Yardım & Destek", trailingIcon: "envelope.fill")
             }
-
-            HStack(spacing: 10) {
-                devActionButton("+1000 🪙") { await DevTokenTools.addTokens(into: tokenStore) }
-                devActionButton("-1000 🪙") { await DevTokenTools.removeTokens(from: tokenStore) }
-            }
-
-            Text("Subscription tier")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.5))
-
-            Picker("", selection: $devTier) {
-                Text("Off").tag(SubscriptionTier.none)
-                Text("Pro").tag(SubscriptionTier.pro)
-                Text("Pro+").tag(SubscriptionTier.proPlus)
-                Text("Max").tag(SubscriptionTier.max)
-            }
-            .pickerStyle(.segmented)
-            .onChange(of: devTier) { _, newTier in
-                Task { await DevTokenTools.setTier(newTier, tokenStore: tokenStore) }
-            }
-        }
-        .padding(16)
-        .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 20))
-        .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(.white.opacity(0.08), lineWidth: 1))
-    }
-
-    /// DEV-only — opens CreateCharacterView's dev mode (bkz.
-    /// CreateCharacterView.DevWizardMode, dev-create-character/
-    /// dev-update-character edge functions). Unlike devTokenTestPanel this
-    /// doesn't get deleted with RevenueCat; it stays as a permanent dev
-    /// tool, but only ever visible to the two dev uids.
-    private var devCuratedCharacterPanel: some View {
-        VStack(spacing: 10) {
-            devCuratedCharacterRow(icon: "wand.and.stars", title: "DEV: Create Curated Character") {
-                showDevCreateCharacter = true
-            }
-            devCuratedCharacterRow(icon: "pencil.and.list.clipboard", title: "DEV: Edit Existing Character") {
-                showDevEditCharacter = true
-            }
+            .buttonStyle(.plain)
         }
     }
 
-    private func devCuratedCharacterRow(icon: String, title: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 8) {
-                Image(systemName: icon).foregroundStyle(Color(hex: 0x9B59B6))
-                Text(title)
-                    .font(.system(size: 14, weight: .bold))
-                    .foregroundStyle(.white)
-                Spacer()
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.4))
-            }
-            .padding(16)
-            .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 20))
-            .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(.white.opacity(0.08), lineWidth: 1))
-        }
-        .buttonStyle(.plain)
-    }
-
-    private func devActionButton(_ title: String, action: @escaping () async -> Void) -> some View {
-        Button {
-            Task { await action() }
-        } label: {
-            Text(title)
-                .font(.system(size: 13, weight: .bold))
-                .foregroundStyle(.white)
-                .frame(maxWidth: .infinity).padding(.vertical, 10)
-                .background(AppColor.pink.opacity(0.25), in: RoundedRectangle(cornerRadius: 12))
-        }
-        .buttonStyle(.plain)
-    }
-
-    private func menuRow(_ icon: String, _ title: LocalizedStringKey, tint: Color) -> some View {
-        HStack(spacing: 14) {
-            rowIcon(icon, tint: tint)
-            Text(title)
-                .font(.system(size: 15, weight: .medium))
+    private var notificationsCard: some View {
+        HStack(spacing: 12) {
+            Text("Bildirimler")
+                .font(.system(size: 16, weight: .medium))
                 .foregroundStyle(.white)
             Spacer()
-            Image(systemName: "chevron.right")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.4))
+            // Sadece toggle — sağa doğru ok (konuştuğun kişilerin bildirim
+            // ayarları ekranına giden chevron) kaldırıldı (bkz. kullanıcı talebi).
+            Toggle("", isOn: $notificationsOn)
+                .labelsHidden()
+                .tint(AppColor.pink)
+                .onChange(of: notificationsOn) { _, wantsOn in
+                    Task { await handleNotificationToggle(wantsOn) }
+                }
         }
-        .padding(.horizontal, 18)
-        .frame(height: 54)
-        .contentShape(Rectangle())
+        .padding(.horizontal, 20)
+        .frame(height: 66)
+        .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: cardRadius))
+        .overlay(RoundedRectangle(cornerRadius: cardRadius).strokeBorder(.white.opacity(0.10), lineWidth: 1))
     }
 
-    private func rowIcon(_ icon: String, tint: Color) -> some View {
-        Image(systemName: icon)
-            .font(.system(size: 15))
-            .foregroundStyle(tint)
-            .frame(width: 32, height: 32)
-            .background(tint.opacity(0.15), in: RoundedRectangle(cornerRadius: 10))
+    private func row(_ title: String, trailingIcon: String? = nil, trailingTint: Color = .white.opacity(0.8)) -> some View {
+        HStack {
+            Text(title)
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(.white)
+            Spacer()
+            if let trailingIcon {
+                Image(systemName: trailingIcon)
+                    .font(.system(size: 16))
+                    .foregroundStyle(trailingTint)
+            }
+        }
+        .padding(.horizontal, 20)
+        .frame(height: 66)
+        .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: cardRadius))
+        .overlay(RoundedRectangle(cornerRadius: cardRadius).strokeBorder(.white.opacity(0.10), lineWidth: 1))
+        .contentShape(RoundedRectangle(cornerRadius: cardRadius))
     }
+
+    // MARK: Ayarlar aksiyonları
+
+    private func currentNotificationStatus() async -> Bool {
+        let settings = await UNUserNotificationCenter.current().notificationSettings()
+        return settings.authorizationStatus == .authorized
+    }
+
+    /// Açmaya çalışırsa iOS izni ister; kapatmaya çalışırsa (iOS uygulama içinden
+    /// izni geri alamadığı için) sistem Ayarları'na yönlendirir.
+    private func handleNotificationToggle(_ wantsOn: Bool) async {
+        if wantsOn {
+            let center = UNUserNotificationCenter.current()
+            let granted = (try? await center.requestAuthorization(options: [.alert, .sound, .badge])) ?? false
+            notificationsOn = granted
+        } else {
+            notificationsOn = false
+            if let url = URL(string: UIApplication.openSettingsURLString) {
+                await UIApplication.shared.open(url)
+            }
+        }
+    }
+
 }
 
 #Preview {

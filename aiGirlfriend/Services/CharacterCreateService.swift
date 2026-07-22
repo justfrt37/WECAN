@@ -70,13 +70,19 @@ struct CharacterCreateService {
     /// çağıran taraf (CreateCharacterView) reddedilince ASLA yerel-sadece
     /// bir fallback karakter oluşturmamalı, sunucunun gerçek kararını göstermeli.
     enum CreateOutcome {
-        case success(Character)
+        case success(Character, tokenBalance: Int?)
         case rejected(errorCode: String)
+        /// PRO ama coin yetmiyor (sunucu 402 + kalan bakiye) → coin paywall.
+        case insufficientTokens(tokenBalance: Int)
         case networkFailure
     }
 
     private struct RejectionBody: Decodable {
         let error: String
+    }
+
+    private struct TokenBalanceBody: Decodable {
+        let tokenBalance: Int?
     }
 
     func create(
@@ -142,9 +148,15 @@ struct CharacterCreateService {
             let code = (try? JSONDecoder().decode(RejectionBody.self, from: respData))?.error ?? "subscription_required"
             return .rejected(errorCode: code)
         }
+        if http.statusCode == 402 {
+            // PRO ama coin yetmiyor — kalan bakiyeyle birlikte (coin paywall için).
+            let bal = (try? JSONDecoder().decode(TokenBalanceBody.self, from: respData))?.tokenBalance ?? 0
+            return .insufficientTokens(tokenBalance: bal)
+        }
         guard (200..<300).contains(http.statusCode),
               let character = try? JSONDecoder().decode(Character.self, from: respData)
         else { return .networkFailure }
-        return .success(character)
+        let bal = (try? JSONDecoder().decode(TokenBalanceBody.self, from: respData))?.tokenBalance
+        return .success(character, tokenBalance: bal)
     }
 }

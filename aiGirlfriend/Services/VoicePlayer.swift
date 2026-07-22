@@ -12,10 +12,20 @@ import Observation
 @MainActor
 @Observable
 final class VoicePlayer: NSObject, AVAudioPlayerDelegate {
+    /// AKTİF (yüklü) mesaj — çalıyor VEYA duraklatılmış olabilir. Duraklatınca
+    /// player canlı kalır (kaldığı yerden devam + duruyorken sarma için).
     var speakingMessageID: UUID?
+    /// Şu an GERÇEKTEN çalıyor mu (duraklatılmış değil) — play/pause ikonu buna bakar.
+    var isPlaying: Bool = false
+    /// WhatsApp tarzı oynatma ilerlemesi (0...1) — çalan mesajın dalga-formu
+    /// bu orana kadar "dolu" gösterilir (bkz. VoiceMessageBubble).
+    var playbackProgress: Double = 0
+    /// Geçen süre (saniye) — çalarken süre yazısı bunu gösterir (WhatsApp gibi).
+    var playbackElapsed: Double = 0
 
     private let synth = AVSpeechSynthesizer()
     private var player: AVAudioPlayer?
+    private var progressTimer: Timer?
 
     func speak(_ text: String, id: UUID) {
         stop()
@@ -33,19 +43,71 @@ final class VoicePlayer: NSObject, AVAudioPlayerDelegate {
         synth.stopSpeaking(at: .immediate)
         player?.stop()
         player = nil
+        progressTimer?.invalidate()
+        progressTimer = nil
+        playbackProgress = 0
+        playbackElapsed = 0
+        isPlaying = false
         speakingMessageID = nil
+    }
+
+    /// Duraklat — player CANLI kalır (kaldığı yerden devam + duruyorken sarma
+    /// için). speakingMessageID korunur ki balon hâlâ "aktif" görünsün.
+    func pausePlayback() {
+        player?.pause()
+        isPlaying = false
+        progressTimer?.invalidate()
+        progressTimer = nil
+    }
+
+    /// Duraklatılmış sesi KALDIĞI YERDEN sürdürür (sıfırdan başlamaz).
+    func resumePlayback() {
+        guard let p = player else { return }
+        p.play()
+        isPlaying = true
+        startProgressTimer()
+    }
+
+    /// Çalan sesi verilen orana (0...1) atlatır — dalga-formu üzerinde
+    /// sürükleyerek ileri/geri sarma için (bkz. VoiceMessageBubble).
+    func seek(to fraction: Double) {
+        guard let p = player, p.duration > 0 else { return }
+        let clamped = min(1, max(0, fraction))
+        p.currentTime = clamped * p.duration
+        playbackElapsed = p.currentTime
+        playbackProgress = clamped
     }
 
     private func playData(_ data: Data) {
         do {
             try AVAudioSession.sharedInstance().setCategory(.playback, options: .duckOthers)
             try AVAudioSession.sharedInstance().setActive(true)
-            player = try AVAudioPlayer(data: data)
-            player?.delegate = self
-            player?.play()
+            let p = try AVAudioPlayer(data: data)
+            p.delegate = self
+            player = p
+            playbackProgress = 0
+            playbackElapsed = 0
+            isPlaying = true
+            p.play()
+            startProgressTimer()
         } catch {
             speakingMessageID = nil
         }
+    }
+
+    /// 20 fps'lik hafif bir zamanlayıcı — çalan sesin currentTime/duration
+    /// oranını yayınlar (bkz. playbackProgress). stop()/bitiş temizler.
+    private func startProgressTimer() {
+        progressTimer?.invalidate()
+        let t = Timer(timeInterval: 0.05, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, let p = self.player else { return }
+                self.playbackElapsed = p.currentTime
+                self.playbackProgress = p.duration > 0 ? min(1, p.currentTime / p.duration) : 0
+            }
+        }
+        RunLoop.main.add(t, forMode: .common)
+        progressTimer = t
     }
 
     private func speakOnDevice(_ text: String) {
@@ -60,7 +122,14 @@ final class VoicePlayer: NSObject, AVAudioPlayerDelegate {
     }
 
     nonisolated func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
-        Task { @MainActor in self.speakingMessageID = nil }
+        Task { @MainActor in
+            self.progressTimer?.invalidate()
+            self.progressTimer = nil
+            self.playbackProgress = 0
+            self.playbackElapsed = 0
+            self.isPlaying = false
+            self.speakingMessageID = nil
+        }
     }
 }
 
@@ -158,7 +227,22 @@ extension VoicePlayer {
 
     /// Kaydedilmiş bir sesli mesajı çalar. `synthesize` YOK burada — dosya
     /// yoksa/bozuksa gerçek bir hata, robot-sese düşmüyoruz.
+    /// Play/pause tuşu: aynı mesaj çalıyorsa DURAKLAT, duraklatılmışsa KALDIĞI
+    /// YERDEN SÜRDÜR, başka/yeni mesajsa baştan çal (bkz. kullanıcı talebi:
+    /// "durdurup yeniden başlattığımda sıfırdan başlamamalı").
+    func togglePlay(at relativePath: String, id: UUID) {
+        if speakingMessageID == id, player != nil {
+            if isPlaying { pausePlayback() } else { resumePlayback() }
+        } else {
+            playFile(at: relativePath, id: id)
+        }
+    }
+
     func playFile(at relativePath: String, id: UUID) {
+        // Aynı mesaj ZATEN çalıyorsa yeniden başlatma — hızlı çift-dokunuş /
+        // yeniden çizimde "iki tane ses" üst üste binmesin (bkz. kullanıcı
+        // talebi: "ses istediğimde iki tane ses geliyor").
+        if speakingMessageID == id, player?.isPlaying == true { return }
         stop()
         let url = VoicePlayer.voiceMessagesDirectory.appendingPathComponent(relativePath)
         guard let data = try? Data(contentsOf: url) else { return }

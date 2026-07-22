@@ -50,6 +50,11 @@ const WEEKLY_CHARACTER_LIMIT: Record<string, number> = {
   max: 10,
 };
 
+// Karakter yaratma maliyeti (coin/jeton) — KAYNAK-DOĞRU burada tutulur (bkz.
+// kullanıcı talebi: "bu bilgi backend'de tutulmalı"). charge_tokens ile atomik
+// tahsil edilir; yetmezse oluşturulan karakter geri alınır (delete).
+const CREATION_COST = 100;
+
 async function checkCreationAllowance(uid: string): Promise<{ ok: true } | { ok: false; error: string; limit?: number }> {
   const { data: sub } = await db
     .from("subscriptions")
@@ -348,6 +353,7 @@ Deno.serve(async (req: Request) => {
     // Mirror into character_photos, the single catalog for every photo this
     // character has (see migration 013). photoUrl doubles as both the
     // profile picture and (today's) sole gallery entry — same url, one row.
+    // (Cascades away along with the character row below if payment fails.)
     if (photoUrl) {
       const { error: photoErr } = await db.from("character_photos").insert({
         character_id: data.id,
@@ -359,7 +365,24 @@ Deno.serve(async (req: Request) => {
       if (photoErr) console.error("character_photos insert failed:", photoErr.message);
     }
 
-    return json(data);
+    // 100 coin ATOMİK tahsil (charge_tokens). Yetmezse oluşturulan karakteri
+    // geri al (delete) ve coin paywall için 402 + kalan bakiye dön.
+    const { data: charged } = await db.rpc("charge_tokens", {
+      p_user_id: uid,
+      p_amount: CREATION_COST,
+      p_reason: "character_creation",
+    });
+    if (charged !== true) {
+      await db.from("characters").delete().eq("id", data.id);
+      const { data: balRow } = await db
+        .from("token_balances").select("balance").eq("user_id", uid).maybeSingle();
+      return json({ error: "insufficient_tokens", tokenBalance: balRow?.balance ?? 0 }, 402);
+    }
+
+    // Yaratma sonrası: kalan bakiyeyi cevaba ekle (bkz. kullanıcı talebi).
+    const { data: balRow } = await db
+      .from("token_balances").select("balance").eq("user_id", uid).maybeSingle();
+    return json({ ...data, tokenBalance: balRow?.balance ?? null });
   } catch (e) {
     return json({ error: String(e) }, 500);
   }

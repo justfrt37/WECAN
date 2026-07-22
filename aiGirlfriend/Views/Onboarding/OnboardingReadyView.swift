@@ -1,7 +1,7 @@
 //
 //  OnboardingReadyView.swift
-//  ONB5 — "O bekliyor..." Onboarding'in son ekranı. Ekrana dokununca
-//  onboarding tamamlanır ve uygulamaya girilir.
+//  ONB5 — "O bekliyor..." Onboarding'in son ekranı. Butona BASILI TUTUNCA
+//  (progress ring dolar) seçilen kızın chat'ine yumuşak geçişle girilir.
 //  Pencil "ONB5" mockup'ının uygulama karşılığı.
 //
 
@@ -9,7 +9,9 @@ import SwiftUI
 
 struct OnboardingReadyView: View {
     @Environment(OnboardingStore.self) private var onboarding
-    @State private var pulse = false
+    @State private var holdProgress: CGFloat = 0
+    @State private var isHolding = false
+    private let holdDuration: Double = 0.6
 
     var body: some View {
         ZStack {
@@ -44,14 +46,26 @@ struct OnboardingReadyView: View {
                             .frame(width: 118, height: 118)
                             .overlay(Circle().stroke(.white.opacity(0.3), lineWidth: 1.5))
                             .shadow(color: .black.opacity(0.5), radius: 22, y: 6)
+
+                        // Basılı tutarken dolan ilerleme halkası.
+                        Circle()
+                            .trim(from: 0, to: holdProgress)
+                            .stroke(
+                                LinearGradient(colors: [Color(hex: 0xFFAF5C), Color(hex: 0xFF6F61)],
+                                               startPoint: .top, endPoint: .bottom),
+                                style: StrokeStyle(lineWidth: 5, lineCap: .round)
+                            )
+                            .frame(width: 118, height: 118)
+                            .rotationEffect(.degrees(-90))
+
                         Image(systemName: "hand.tap.fill")
                             .font(.system(size: 46))
                             .foregroundStyle(.white)
                     }
-                    .scaleEffect(pulse ? 1.06 : 0.94)
-                    .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: pulse)
+                    .scaleEffect(isHolding ? 1.12 : 1.0)
+                    .animation(.spring(response: 0.35, dampingFraction: 0.7), value: isHolding)
 
-                    Text("Görmek için Dokun")
+                    Text("Görmek için Basılı Tut")
                         .font(.system(size: 22, weight: .bold))
                         .foregroundStyle(.white.opacity(0.95))
                         .shadow(color: .black.opacity(0.7), radius: 6, y: 2)
@@ -61,14 +75,27 @@ struct OnboardingReadyView: View {
             .frame(maxWidth: .infinity)
         }
         .contentShape(Rectangle())
-        .onTapGesture { finish() }
-        .onAppear { pulse = true }
+        .onLongPressGesture(minimumDuration: holdDuration, maximumDistance: 80) { pressing in
+            isHolding = pressing
+            if pressing {
+                withAnimation(.linear(duration: holdDuration)) { holdProgress = 1 }
+            } else {
+                // Erken bırakıldı — halkayı geri sar.
+                withAnimation(.easeOut(duration: 0.25)) { holdProgress = 0 }
+            }
+        } perform: {
+            finish()
+        }
     }
 
     private func finish() {
-        // "O bekliyor"dan sonra paywall gelir (uygulamaya giriş paywall'dan).
-        withAnimation(.easeInOut(duration: 0.35)) {
-            onboarding.step = .paywall
+        // PAYWALL YOK. Karakter seçiliyse (kırmızı→Scarlet / diğeri→Maya) chat'i
+        // MainTabView açar ve onboarding TAM DA CHAT GÖRÜNÜNCE complete olur
+        // (bkz. MainTabView.openPendingOnboardingChat). Seçim yoksa direkt bitir.
+        if let name = onboarding.selectedCharacter?.chatCharacterName {
+            onboarding.pendingChatCharacterName = name
+        } else {
+            onboarding.complete()
         }
     }
 }

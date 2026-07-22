@@ -7,32 +7,21 @@ import SwiftUI
 
 struct FeedView: View {
     @Environment(CharacterStore.self) private var store
-    @State private var order: [UUID] = []
     @State private var currentIndex = 0
     @State private var dragOffset = CGSize.zero
     @State private var showTutorial = !UserDefaultsManager.shared.hasSeenSwipeTutorial
-    @State private var meetCandidate: Character?
 
-    /// Discover is a simple queue of every non-blocked character. Swiping
-    /// either direction just moves that character to the back of the queue
-    /// for this session — nothing is permanently hidden, and it has no tie
-    /// to whether a conversation exists.
+    /// Zaten sohbete başlanmış (yerel bir konuşma kaydı olan) karakterler
+    /// Discover'da tekrar gösterilmez — aynı tanım NotificationScheduler'ın
+    /// Liked You uygunluk kontrolüyle birebir aynı (bkz. LikedByStore).
     private var characters: [Character] {
-        let byID = Dictionary(uniqueKeysWithValues: store.characters.map { ($0.id, $0) })
-        return order.compactMap { byID[$0] }
-    }
-
-    /// Keeps `order` in sync with the live catalog: drops blocked/removed
-    /// ids, appends newly-arrived ones at the back, preserves existing order.
-    private func syncOrder() {
-        let liveIDs = store.characters
-            .filter { !BlockedCharactersStore.isBlocked($0.id) }
-            .map(\.id)
-        let liveSet = Set(liveIDs)
-        var next = order.filter { liveSet.contains($0) }
-        let known = Set(next)
-        next.append(contentsOf: liveIDs.filter { !known.contains($0) })
-        order = next
+        // Yalnızca backend'den gelen (store.characters) karakterler — sahte/dummy
+        // feed kaldırıldı (bkz. kullanıcı talebi: "backende ne geliyorsa onu göster").
+        store.characters.filter {
+            !BlockedCharactersStore.isBlocked($0.id) &&
+            !PassedCharactersStore.isPassed($0.id) &&
+            LocalConversationStore.shared.load(for: $0.id) == nil
+        }
     }
 
     var body: some View {
@@ -93,30 +82,18 @@ struct FeedView: View {
                     }
                 }
 
-                if let candidate = meetCandidate {
-                    MeetConfirmOverlay(
-                        character: candidate,
-                        onYes: {
-                            meetCandidate = nil
-                            store.pendingMeetRequest = MeetRequest(character: candidate, prefillText: IcebreakerPool.next())
-                        },
-                        onNo: { meetCandidate = nil }
-                    )
-                }
             }
             .frame(width: geo.size.width, height: geo.size.height)
         }
         .ignoresSafeArea()
         .background(AppColor.bg)
         .onAppear {
-            syncOrder()
             currentIndex = 0
             store.currentCharacterID = characters.first?.id
         }
-        .onChange(of: store.characters) { _, _ in
-            syncOrder()
-            if currentIndex >= characters.count { currentIndex = 0 }
-            store.currentCharacterID = characters.isEmpty ? nil : characters[currentIndex].id
+        .onChange(of: characters) { _, chars in
+            if currentIndex >= chars.count { currentIndex = 0 }
+            store.currentCharacterID = chars.isEmpty ? nil : chars[currentIndex].id
         }
     }
 
@@ -125,10 +102,10 @@ struct FeedView: View {
             Image(systemName: "checkmark.circle.fill")
                 .font(.system(size: 50))
                 .foregroundStyle(AppColor.pink.opacity(0.85))
-            Text("Nobody here yet!")
+            Text("You're all caught up!")
                 .font(.title3.bold())
                 .foregroundStyle(.white)
-            Text("Check back later for new people to discover.")
+            Text("You've started chatting with everyone in Discover. Check back later for new people.")
                 .font(.subheadline)
                 .multilineTextAlignment(.center)
                 .foregroundStyle(.white.opacity(0.6))
@@ -206,27 +183,28 @@ struct FeedView: View {
                 dragOffset = CGSize(width: dir * w * 1.6, height: t.height * 0.3)
             }
             if dir == 1, let current {
-                if UserDefaultsManager.shared.skipMeetConfirm {
-                    store.pendingMeetRequest = MeetRequest(character: current, prefillText: IcebreakerPool.next())
-                } else {
-                    meetCandidate = current
-                }
+                // "Tanışmak ister misin?" onayı KALDIRILDI — beğeninde doğrudan sohbete git.
+                store.pendingMeetRequest = MeetRequest(character: current, prefillText: IcebreakerPool.next())
+            } else if dir == -1, let current {
+                // Kart hemen `characters`ten düşsün (PassedCharactersStore
+                // filtreye giriyor) — önceden HİÇBİR yere kaydedilmiyordu,
+                // "nope" görsel olarak ilerliyordu ama karakter asla
+                // kaybolmuyordu (deste döngüsünde tekrar tekrar çıkıyordu;
+                // tek karakter kalmışsa hep AYNI kart görünüyordu).
+                PassedCharactersStore.pass(current.id)
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.36) {
-                // Reorder only once the card has fully flown off-screen —
-                // mutating `order` immediately on release would swap
-                // `characters[currentIndex]`'s identity (and thus the
-                // dragged card's content) to the next character mid-flight,
-                // since it's a computed property over `order`. Waiting until
-                // here means the already-preloaded "next" card underneath
-                // just becomes the new top card with no visible content swap.
-                if let current, let idx = order.firstIndex(of: current.id) {
-                    order.remove(at: idx)
-                    order.append(current.id)
-                }
                 dragOffset = .zero
                 guard !characters.isEmpty else { return }
-                if currentIndex >= characters.count { currentIndex = 0 }
+                // Beğenide (dir==1) kart hâlâ destede — bir sonrakine geç.
+                // Nope'ta (dir==-1) kart zaten listeden düştü, aynı index
+                // artık bir sonraki karta işaret ediyor — TEKRAR ilerletme
+                // (ilerletirse bir kart atlanır).
+                if dir == 1 {
+                    currentIndex = (currentIndex + 1) % characters.count
+                } else if currentIndex >= characters.count {
+                    currentIndex = 0
+                }
                 store.currentCharacterID = characters[currentIndex].id
             }
         } else {
@@ -250,7 +228,9 @@ private struct FeedCard: View {
 
     var body: some View {
         Color.clear
-            .overlay {
+            // Üstten hizala: scaledToFill taşan kısmı ALTTAN kırpsın, böylece
+            // yüz (üst kısım) tam görünür, ortadan kırpıp yüzü kesmez.
+            .overlay(alignment: .top) {
                 CachedImage(url: character.photoURL) { image in
                     image.resizable().scaledToFill()
                 } placeholder: {
@@ -273,7 +253,7 @@ private struct FeedCard: View {
                     actionRow
                         .padding(.horizontal, 16)
                 }
-                .padding(.bottom, safeBottom + tabBarSpace + 28)
+                .padding(.bottom, safeBottom + tabBarSpace + 35)
             }
             .fullScreenCover(isPresented: $showGallery) {
                 GalleryView(character: character)
