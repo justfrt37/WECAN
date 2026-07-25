@@ -7,17 +7,56 @@
 
 import SwiftUI
 import UIKit
+import ImageIO
 
 extension Image {
+    /// Decode edilen UIImage'ların küçük önbelleği — kaynak adına göre anahtarlı.
+    /// Eskiden `init` her body değerlendirmesinde (Explore kategori geçişleri,
+    /// ONB5 basılı-tut etkileşimi vb.) diskten TAM çözünürlükte yeniden decode
+    /// ediyordu; artık ilk seferde decode edilip burada tutulur.
+    private static let bundleImageCache = NSCache<NSString, UIImage>()
+
     /// Bundle'daki loose (asset catalog dışı) bir resim dosyasını yükler.
     /// Onboarding arka planları (onb3_bg.jpg, onb5_bg.png) için.
+    /// İlk çağrıda ekran için makul boyuta indirilip decode edilir ve önbelleğe
+    /// alınır; sonraki çağrılar önbellekten döner (yeniden decode yok).
     init(bundleResource name: String, ext: String) {
+        let key = "\(name).\(ext)" as NSString
+        if let cached = Image.bundleImageCache.object(forKey: key) {
+            self = Image(uiImage: cached)
+            return
+        }
         if let url = Bundle.main.url(forResource: name, withExtension: ext),
-           let ui = UIImage(contentsOfFile: url.path) {
+           let ui = Image.decodeDownsampled(at: url) {
+            Image.bundleImageCache.setObject(ui, forKey: key)
             self = Image(uiImage: ui)
         } else {
             self = Image(systemName: "photo")
         }
+    }
+
+    /// Görseli ekranın en büyük kenarına göre (piksel bazında) indirerek TEK
+    /// sefer decode eder (ImageIO thumbnail). Tam çözünürlüğü her seferinde
+    /// decode etmek yerine — tam ekran arka planlar için bu boyut fazlasıyla
+    /// yeterli, RAM/CPU maliyeti çok daha düşük.
+    private static func decodeDownsampled(at url: URL) -> UIImage? {
+        guard let src = CGImageSourceCreateWithURL(url as CFURL,
+                                                    [kCGImageSourceShouldCache: false] as CFDictionary) else {
+            // ImageIO açılamazsa eski davranışa düş (en azından görsel gösterilir).
+            return UIImage(contentsOfFile: url.path)
+        }
+        let bounds = UIScreen.main.bounds
+        let maxPixel = max(bounds.width, bounds.height) * UIScreen.main.scale
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxPixel,
+        ]
+        guard let cg = CGImageSourceCreateThumbnailAtIndex(src, 0, options as CFDictionary) else {
+            return UIImage(contentsOfFile: url.path)
+        }
+        return UIImage(cgImage: cg)
     }
 }
 

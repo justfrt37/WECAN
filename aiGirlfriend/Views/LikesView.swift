@@ -23,7 +23,14 @@ struct LikesView: View {
     /// rastgele seçilir, bkz. NotificationScheduler.rescheduleLikedYou).
     /// Kullanıcı GERÇEKTEN cevap yazınca listeden düşer — botun ilk açılış
     /// mesajı enjekte edilir edilmez değil, yoksa kullanıcı fark etmeden kaybolur.
-    private var likers: [Character] {
+    ///
+    /// Bilinçli olarak METOT (computed property değil): pahalı — UserDefaults
+    /// okuması (likedCharacterIDs) + aday başına disk okuması (LocalConversationStore.load)
+    /// + sıralamada eleman başına ek UserDefaults okuması (likedAt). Eskiden
+    /// computed property'di ve `body` içinde üç ayrı yerden okunduğu için her
+    /// render'da 3 kez yeniden hesaplanıyordu. Artık `body` başında BİR kez
+    /// çağrılıp yereldeki `likers`'a bağlanıyor (bkz. body).
+    private func computeLikers() -> [Character] {
         let likedIDs: Set<UUID> = LikedByStore.likedCharacterIDs()
         let candidates: [Character] = store.characters.filter { likedIDs.contains($0.id) }
         let visible: [Character] = candidates.filter { c in
@@ -51,7 +58,10 @@ struct LikesView: View {
         // is shorter than the screen (most visibly the empty state, which is
         // small — looked like it was floating mid-screen instead of pinned
         // under the header).
-        ZStack(alignment: .top) {
+        // Pahalı `likers` hesabı render başına BİR kez — üç kullanım sitesi de
+        // (isEmpty / infoRow sayısı / grid) aynı yerel değeri kullanır.
+        let likers = computeLikers()
+        return ZStack(alignment: .top) {
             LinearGradient(colors: [AppColor.bg, AppColor.bg2, AppColor.bg],
                            startPoint: .top, endPoint: .bottom)
                 .ignoresSafeArea()
@@ -63,8 +73,8 @@ struct LikesView: View {
                 } else {
                     ScrollView {
                         VStack(alignment: .leading, spacing: 14) {
-                            infoRow
-                            grid
+                            infoRow(likers)
+                            grid(likers)
                         }
                         .padding(.horizontal, 16)
                         .padding(.top, 8)
@@ -93,7 +103,7 @@ struct LikesView: View {
         .padding(.vertical, 12)
     }
 
-    private var infoRow: some View {
+    private func infoRow(_ likers: [Character]) -> some View {
         // "PRO değil" göstergesi kaldırıldı; sayı canlı/okunur bir kırmızıya
         // alındı (eski AppColor.pink koyu bordo, koyu zeminde soluk kalıyordu).
         Label("\(likers.count) people liked you", systemImage: "heart.fill")
@@ -101,7 +111,7 @@ struct LikesView: View {
             .foregroundStyle(Color(hex: 0xFF5A78))
     }
 
-    private var grid: some View {
+    private func grid(_ likers: [Character]) -> some View {
         LazyVGrid(columns: columns, spacing: 12) {
             ForEach(likers) { c in
                 Button {
@@ -137,12 +147,31 @@ private struct LikeCard: View {
 
     var body: some View {
         ZStack(alignment: .bottomLeading) {
-            CachedImage(url: character.photoURL) { img in
-                img.resizable().scaledToFill()
-            } placeholder: { AppColor.card }
-            .frame(maxWidth: .infinity).frame(height: 200)
-            .clipped()
-            .blur(radius: locked ? 22 : 0)
+            // Kilitli (non-PRO) hücrede TAM çözünürlüklü 200pt görseli kaydırma
+            // sırasında CANLI Gauss blur'lamak (radius 22) çok sayıda hücre
+            // aynı anda blur'landığında kare düşürüyordu. Onun yerine görseli
+            // KÜÇÜK bir hedefe indirip orada ucuz bir blur uygularız,
+            // drawingGroup ile TEK seferde rasterize edip hücreyi dolduracak
+            // şekilde büyütürüz — kilitli "buzlu silüet" görünümü korunur ama
+            // blur maliyeti düşük ve statiktir (her karede yeniden hesaplanmaz).
+            if locked {
+                CachedImage(url: character.photoURL) { img in
+                    img.resizable().scaledToFill()
+                } placeholder: { AppColor.card }
+                .frame(width: 45, height: 53)   // ~1/4 çözünürlük — küçük hedef
+                .clipped()
+                .blur(radius: 6)                // küçük bitmap'te ucuz blur
+                .drawingGroup()                 // tek seferde rasterize et
+                .scaleEffect(4, anchor: .center) // hücreyi doldur (45*4≈180 ≥ en)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .clipped()
+            } else {
+                CachedImage(url: character.photoURL) { img in
+                    img.resizable().scaledToFill()
+                } placeholder: { AppColor.card }
+                .frame(maxWidth: .infinity).frame(height: 200)
+                .clipped()
+            }
 
             LinearGradient(colors: [.clear, .black.opacity(0.85)],
                            startPoint: .center, endPoint: .bottom)

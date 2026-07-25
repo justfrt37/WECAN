@@ -28,6 +28,21 @@ struct CharacterProfileView: View {
             : character.galleryURLs
     }
 
+    /// Kilitli (PRO olmayan) foto için UCUZ "buzlu cam" yer tutucu. Eskiden
+    /// kilitli fotolar tam çözünürlükte İNDİRİLİP hem hero (520, blur 22) hem
+    /// grid'de (240, blur 18) Gaussian blur uygulanıyordu → aynı görsel iki kez
+    /// çözülüyor + tam-res blur RAM/CPU yiyordu. Kilitli zaten görünmez olacağı
+    /// için görseli hiç indirmeden obscured bir zemin çiziyoruz (görsel eşdeğer).
+    private var frostedLockedFill: some View {
+        Rectangle()
+            .fill(AppColor.card)
+            .overlay(
+                LinearGradient(colors: [AppColor.pink.opacity(0.12), AppColor.card.opacity(0.9)],
+                               startPoint: .topLeading, endPoint: .bottomTrailing)
+            )
+            .overlay(.ultraThinMaterial)
+    }
+
     var body: some View {
         NavigationStack {
             ZStack(alignment: .top) {
@@ -90,12 +105,17 @@ struct CharacterProfileView: View {
                 ForEach(Array(images.enumerated()), id: \.offset) { idx, url in
                     let locked = idx > 0 && !PurchaseService.shared.isPro
                     ZStack {
-                        CachedImage(url: url) { image in
-                            image.resizable().scaledToFill()
-                        } placeholder: {
-                            AppColor.card
+                        // Kilitli: tam-res görseli indirip bulanıklaştırma yerine
+                        // ucuz buzlu-cam yer tutucu (bkz. frostedLockedFill).
+                        if locked {
+                            frostedLockedFill
+                        } else {
+                            CachedImage(url: url) { image in
+                                image.resizable().scaledToFill()
+                            } placeholder: {
+                                AppColor.card
+                            }
                         }
-                        .blur(radius: locked ? 22 : 0)
 
                         if locked {
                             Color.black.opacity(0.25)
@@ -244,10 +264,15 @@ struct CharacterProfileView: View {
                         .frame(maxWidth: .infinity)
                         .frame(height: 240)
                         .overlay {
-                            CachedImage(url: url) { image in
-                                image.resizable().scaledToFill()
-                            } placeholder: { AppColor.card }
-                            .blur(radius: locked ? 18 : 0)
+                            // Kilitli: tam-res indir+blur yerine buzlu yer tutucu
+                            // (bkz. frostedLockedFill) → çift çözme + tam-res blur yok.
+                            if locked {
+                                frostedLockedFill
+                            } else {
+                                CachedImage(url: url) { image in
+                                    image.resizable().scaledToFill()
+                                } placeholder: { AppColor.card }
+                            }
                         }
                         .overlay {
                             if locked {

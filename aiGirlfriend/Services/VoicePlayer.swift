@@ -11,7 +11,7 @@ import Observation
 
 @MainActor
 @Observable
-final class VoicePlayer: NSObject, AVAudioPlayerDelegate {
+final class VoicePlayer: NSObject, AVAudioPlayerDelegate, AVSpeechSynthesizerDelegate {
     /// AKTİF (yüklü) mesaj — çalıyor VEYA duraklatılmış olabilir. Duraklatınca
     /// player canlı kalır (kaldığı yerden devam + duruyorken sarma için).
     var speakingMessageID: UUID?
@@ -26,6 +26,18 @@ final class VoicePlayer: NSObject, AVAudioPlayerDelegate {
     private let synth = AVSpeechSynthesizer()
     private var player: AVAudioPlayer?
     private var progressTimer: Timer?
+
+    override init() {
+        super.init()
+        // Cihaz-içi TTS (fallback) bitişini yakalamak için — bkz. speakOnDevice /
+        // speechSynthesizer(_:didFinish:). Aksi halde speakingMessageID hemen
+        // temizlenip "konuşuyor" durumu HİÇ gösterilmiyordu.
+        synth.delegate = self
+    }
+
+    // Not: zamanlayıcı sızıntısına karşı temizlik `stop()`'ta yapılır; bu da
+    // ChatView.onDisappear'da çağrılır (main-actor izole `progressTimer`'a
+    // nonisolated `deinit`'ten erişilemediği için ayrı bir deinit YOK).
 
     func speak(_ text: String, id: UUID) {
         stop()
@@ -49,6 +61,9 @@ final class VoicePlayer: NSObject, AVAudioPlayerDelegate {
         playbackElapsed = 0
         isPlaying = false
         speakingMessageID = nil
+        // Ses oturumunu bırak — .playback + .duckOthers ile başka uygulamaların
+        // sesini kalıcı kısık bırakmayalım (bkz. playData/speakOnDevice setActive(true)).
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     }
 
     /// Duraklat — player CANLI kalır (kaldığı yerden devam + duruyorken sarma
@@ -116,9 +131,11 @@ final class VoicePlayer: NSObject, AVAudioPlayerDelegate {
         let u = AVSpeechUtterance(string: text)
         u.voice = AVSpeechSynthesisVoice(language: "tr-TR") ?? AVSpeechSynthesisVoice(language: "en-US")
         u.rate = 0.5
+        isPlaying = true
         synth.speak(u)
-        // Cihaz içi seste bitişi basitçe işaretlemiyoruz; UI durumu kısa sürer.
-        speakingMessageID = nil
+        // speakingMessageID BURADA temizlenmez — konuşma bitişi
+        // speechSynthesizer(_:didFinish:) delegesinden temizlenir, aksi halde
+        // cihaz-içi TTS "konuşuyor" durumunu HİÇ göstermiyordu.
     }
 
     nonisolated func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
@@ -129,6 +146,18 @@ final class VoicePlayer: NSObject, AVAudioPlayerDelegate {
             self.playbackElapsed = 0
             self.isPlaying = false
             self.speakingMessageID = nil
+            // Bitişte ses oturumunu bırak — başka uygulamaların sesi kısık kalmasın.
+            try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        }
+    }
+
+    /// Cihaz-içi (fallback) TTS bitince çağrılır — speakingMessageID'yi burada
+    /// temizleriz ki konuşma boyunca "konuşuyor" durumu gösterilebilsin (bkz. speakOnDevice).
+    nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
+        Task { @MainActor in
+            self.isPlaying = false
+            self.speakingMessageID = nil
+            try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
         }
     }
 }

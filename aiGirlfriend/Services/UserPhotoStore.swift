@@ -7,11 +7,18 @@
 //
 
 import UIKit
+import ImageIO
 
 enum UserPhotoStore {
     private static let directory: URL = FileManager.default
         .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         .appendingPathComponent("UserPhotos", isDirectory: true)
+
+    /// Diskten çözülmüş (küçültülmüş) kullanıcı fotolarının bellek önbelleği —
+    /// her redraw'da tam çözünürlüklü fotoyu `Data(contentsOf:)`+`UIImage(data:)`
+    /// ile yeniden çözmemek için (path → UIImage). NSCache thread-safe'dir ve
+    /// bellek baskısında otomatik boşalır.
+    private static let cache = NSCache<NSString, UIImage>()
 
     /// Verilen fotoğrafı `<uuid>.jpg` olarak kaydeder, göreli dosya adını döner
     /// (bkz. Message.localImagePath). Tam çözünürlük saklanır — sıkıştırma
@@ -34,9 +41,31 @@ enum UserPhotoStore {
     /// ChatBubble'ın çizmesi için. Ağ çağrısı yok, CachedImage/ImageCache
     /// KULLANILMAZ (bu görsel hiç yüklenmedi, sadece cihazda duruyor).
     static func loadUserPhoto(relativePath: String) -> UIImage? {
+        let key = relativePath as NSString
+        if let cached = cache.object(forKey: key) { return cached }
         let url = directory.appendingPathComponent(relativePath)
         guard let data = try? Data(contentsOf: url) else { return nil }
-        return UIImage(data: data)
+        // Ekran için makul boyuta KÜÇÜLTEREK çöz (ImageIO thumbnail tam bitmap'i
+        // belleğe açmaz) — tam çözünürlük redraw'larda gereksiz RAM tüketiyordu.
+        let image = downsample(data) ?? UIImage(data: data)
+        if let image {
+            let cost = Int(image.size.width * image.scale * image.size.height * image.scale * 4)
+            cache.setObject(image, forKey: key, cost: cost)
+        }
+        return image
+    }
+
+    /// Ham veriyi ImageIO ile ~1280px uzun kenara küçülterek çözer.
+    private static func downsample(_ data: Data, maxPixelDimension: CGFloat = 1280) -> UIImage? {
+        guard let src = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+        let opts: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxPixelDimension,
+        ]
+        guard let cg = CGImageSourceCreateThumbnailAtIndex(src, 0, opts as CFDictionary) else { return nil }
+        return UIImage(cgImage: cg)
     }
 
     /// Grok'un vision girişine giden, TOKEN MALİYETİNİ sınırlamak için

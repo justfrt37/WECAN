@@ -30,6 +30,42 @@ final class NotificationScheduler {
         (Self.roleIntervalHours[role] ?? Self.roleIntervalHours["flirty"]!) * 3600
     }
 
+    // MARK: - Global pending-request budget
+    //
+    // iOS bir uygulama için EN FAZLA 64 bekleyen (pending) yerel bildirim tutar;
+    // fazlası SESSİZCE düşer (ilk 64 dışındakiler eklenmez). onForeground tek
+    // seferde tüm re-engagement türlerini (liked/ghosted/jealousy/bedtime/
+    // missedYou/goodMorning) fan-out ile çizelgelediğinden, ağır kullanıcıda
+    // (~22+ sohbet) ghosted/bedtime/goodMorning tek başına 22'şer istek üretip
+    // sınırı taşırır ve hangi bildirimin düşeceği belirsizleşir. Bu yüzden:
+    //   1) Kişi-başı üretilen türlere (ghosted/bedtime/goodMorning) tür-başı bir
+    //      bütçe ayırıyoruz; bütçeler toplamı + tekil türler 64'ün belirgin
+    //      altında (headroom: sleepy çiftleri, level-up vb. için).
+    //   2) Her tür içinde EN YAKIN tetiklenecek (soonest-firing) istekler öncelikli;
+    //      bütçeyi aşan (daha geç) istekler eklenmez, eskisi de temizlenir.
+    //   3) Düşen her istek print'lenir — sessiz kayıp olmasın.
+    private static let ghostedBudget = 24
+    private static let bedtimeBudget = 12
+    private static let goodMorningBudget = 12
+
+    private struct PendingCandidate {
+        let request: UNNotificationRequest
+        let fireAt: Date
+    }
+
+    /// Adayları en yakın tetiklenene göre sıralar, bütçe kadarını ekler; taşanları
+    /// (eskisi kalmasın diye) temizler ve düşürüldüğünü loglar.
+    private func commit(_ candidates: [PendingCandidate], budget: Int, kindLabel: String) {
+        let sorted = candidates.sorted { $0.fireAt < $1.fireAt }
+        for dropped in sorted.dropFirst(budget) {
+            center.removePendingNotificationRequests(withIdentifiers: [dropped.request.identifier])
+            print("[NotificationScheduler] \(kindLabel): global bütçe (\(budget)) aşıldı, DÜŞÜRÜLDÜ → \(dropped.request.identifier) @ \(dropped.fireAt)")
+        }
+        for kept in sorted.prefix(budget) {
+            center.add(kept.request) // aynı identifier'ı olan pending'i iOS otomatik değiştirir
+        }
+    }
+
     // MARK: - Liked You (once daily, untalked catalog bots, persisted in LikedByStore)
 
     private static let likedYouIDPrefix = "notif.liked."
@@ -41,7 +77,14 @@ final class NotificationScheduler {
         guard !LikedByStore.hasPickedToday() else { return }
         center.removePendingNotificationRequests(withIdentifiers: [Self.likedYouIDPrefix + "0"])
         let alreadyLiked = LikedByStore.likedCharacterIDs()
-        let hour = Int.random(in: 9...22)
+        // Saat aralığının ALT sınırını şu anki saate çek — aksi halde çekilen saat
+        // şu andan erkense iOS bildirimi YARINA atar ve hasPickedToday kilidiyle
+        // "bugün beğenildin" hiç ateşlenmez. Gece 22'den sonra bugünkü pencere
+        // kapandığı için bugüne çizelgelenecek bir şey yok, atla.
+        let currentHour = Calendar.current.component(.hour, from: Date())
+        let lower = max(currentHour, 9)
+        guard lower <= 22 else { return }
+        let hour = Int.random(in: lower...22)
         let eligible = characters.filter { character in
             guard character.createdBy == nil,
                   LocalConversationStore.shared.load(for: character.id) == nil,
@@ -70,9 +113,17 @@ final class NotificationScheduler {
         content.title = String(localized: "One girl liked you 👀")
         content.userInfo = ["type": NotificationKind.liked.rawValue, "characterId": bot.id.uuidString]
 
-        var dateComponents = DateComponents()
-        dateComponents.hour = hour
-        let trigger = UNCalendarNotificationTrigger(dateMatching: dateComponents, repeats: false)
+        // Sadece `hour` içeren bir takvim tetikleyicisi, saat başı çoktan geçmişse
+        // (ör. hour == şu anki saat ama dakika ilerlemiş) iOS tarafından yarına
+        // atılırdı. Bunun yerine BUGÜN o saatteki somut anı hesaplayıp zaman-aralığı
+        // tetikleyicisi kuruyoruz; an geçmişse bir dakika sonrasına sabitliyoruz ki
+        // yine de BUGÜN ateşlensin.
+        let now = Date()
+        var fireDate = Calendar.current.date(bySettingHour: hour, minute: 0, second: 0, of: now) ?? now
+        if fireDate <= now {
+            fireDate = now.addingTimeInterval(60)
+        }
+        let trigger = UNTimeIntervalNotificationTrigger(timeInterval: max(1, fireDate.timeIntervalSince(now)), repeats: false)
         let request = UNNotificationRequest(
             identifier: Self.likedYouIDPrefix + "\(slotIndex)", content: content, trigger: trigger
         )
@@ -84,6 +135,7 @@ final class NotificationScheduler {
     private static func ghostedID(for characterID: UUID) -> String { "notif.ghosted.\(characterID.uuidString)" }
 
     func rescheduleGhosted(characters: [Character]) {
+        var candidates: [PendingCandidate] = []
         for character in characters {
             guard !BlockedCharactersStore.isBlocked(character.id),
                   let stored = LocalConversationStore.shared.load(for: character.id),
@@ -125,9 +177,10 @@ final class NotificationScheduler {
             ]
             let trigger = UNTimeIntervalNotificationTrigger(timeInterval: interval, repeats: false)
             let request = UNNotificationRequest(identifier: Self.ghostedID(for: character.id), content: content, trigger: trigger)
-            center.removePendingNotificationRequests(withIdentifiers: [Self.ghostedID(for: character.id)])
-            center.add(request)
+            candidates.append(PendingCandidate(request: request, fireAt: fireAt))
         }
+        // Global bütçe: en yakın tetiklenecek ghosted'lar öncelikli (bkz. commit).
+        commit(candidates, budget: Self.ghostedBudget, kindLabel: "ghosted")
     }
 
     /// Called right after the user sends a message — resets that bot's silence window
@@ -152,7 +205,21 @@ final class NotificationScheduler {
     private var jealousyTargetCharacterID: UUID?
 
     func armJealousyTimer(characters: [Character]) {
-        center.removePendingNotificationRequests(withIdentifiers: [Self.jealousyID])
+        // Zaten silahlanmış ve HÂLÂ BEKLEYEN bir kıskançlık zamanlayıcısı varsa
+        // dokunma. Her ön plana gelişte iptal edip yeni 2-10dk gecikmeyle yeniden
+        // atmak, sık backgrounding'de tetikleme anını sürekli ileri iterdi ve
+        // bildirim hiç ateşlenmeyebilirdi. (Sohbet açılınca cancelJealousyTimer
+        // zaten temizliyor; burada sadece "yoksa kur".)
+        center.getPendingNotificationRequests { [weak self] requests in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                if requests.contains(where: { $0.identifier == Self.jealousyID }) { return }
+                self.armJealousyTimerNow(characters: characters)
+            }
+        }
+    }
+
+    private func armJealousyTimerNow(characters: [Character]) {
         let eligible = characters.filter { character in
             let stored = LocalConversationStore.shared.load(for: character.id)
             return !BlockedCharactersStore.isBlocked(character.id) &&
@@ -214,7 +281,10 @@ final class NotificationScheduler {
         let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 60, repeats: false)
         let request = UNNotificationRequest(identifier: Self.levelUpID(for: character.id), content: content, trigger: trigger)
         center.add(request)
-        UserDefaults.standard.set(Date(), forKey: Self.lastFiredKey)
+        // "Bugün ateşlendi" işaretini BURADA (zamanlama anında) koymuyoruz — 60sn
+        // gecikme içinde app'e dönülüp cancelLevelUpTimers pending'i iptal etse bile
+        // işaret kalır, hiçbir şey teslim edilmediği hâlde gün boyu yeniden
+        // zamanlamayı bloklardı. İşaret artık GERÇEK teslimde konur (recordDelivery).
     }
 
     /// Called on app foreground — never let a level-up tease fire while the app is active.
@@ -229,13 +299,17 @@ final class NotificationScheduler {
 
     /// Generic title (matches Ghosted/Jealousy's pattern) — the actual dialogue
     /// line only appears once injected into the chat, never in the OS banner.
-    private func scheduleOneShot(id: String, kind: NotificationKind, characterID: UUID, characterName: String, fireAt: Date) {
+    private func oneShotRequest(id: String, kind: NotificationKind, characterID: UUID, characterName: String, fireAt: Date) -> UNNotificationRequest {
         let content = UNMutableNotificationContent()
         content.title = String(localized: "\(characterName) sent you a message.")
         content.userInfo = ["type": kind.rawValue, "characterId": characterID.uuidString]
         let delay = max(1, fireAt.timeIntervalSinceNow)
         let trigger = UNTimeIntervalNotificationTrigger(timeInterval: delay, repeats: false)
-        center.add(UNNotificationRequest(identifier: id, content: content, trigger: trigger))
+        return UNNotificationRequest(identifier: id, content: content, trigger: trigger)
+    }
+
+    private func scheduleOneShot(id: String, kind: NotificationKind, characterID: UUID, characterName: String, fireAt: Date) {
+        center.add(oneShotRequest(id: id, kind: kind, characterID: characterID, characterName: characterName, fireAt: fireAt))
     }
 
     // MARK: - Sleepy Goodnight (two-stage idle-timeout after being woken up)
@@ -278,6 +352,7 @@ final class NotificationScheduler {
     /// product decision; the idle-timeout goodnight in scheduleSleepyGoodnight
     /// is level-independent since it's user-triggered, not proactive).
     func rescheduleBedtime(characters: [Character]) {
+        var candidates: [PendingCandidate] = []
         for character in characters {
             let id = Self.bedtimeID(for: character.id)
             guard !BlockedCharactersStore.isBlocked(character.id),
@@ -290,9 +365,11 @@ final class NotificationScheduler {
                 center.removePendingNotificationRequests(withIdentifiers: [id])
                 continue
             }
-            center.removePendingNotificationRequests(withIdentifiers: [id])
-            scheduleOneShot(id: id, kind: .bedtime, characterID: character.id, characterName: character.name, fireAt: fireAt)
+            let request = oneShotRequest(id: id, kind: .bedtime, characterID: character.id, characterName: character.name, fireAt: fireAt)
+            candidates.append(PendingCandidate(request: request, fireAt: fireAt))
         }
+        // Global bütçe: en yakın yatma anı olan botlar öncelikli (bkz. commit).
+        commit(candidates, budget: Self.bedtimeBudget, kindLabel: "bedtime")
     }
 
     // MARK: - Missed You (10pm-midnight, one weighted-random active bot per night)
@@ -383,6 +460,7 @@ final class NotificationScheduler {
     /// already messaged this bot since her wake time today (also enforced
     /// reactively in `noteUserSent`, for a message sent after scheduling).
     func rescheduleGoodMorning(characters: [Character]) {
+        var candidates: [PendingCandidate] = []
         for character in characters {
             let id = Self.goodMorningID(for: character.id)
             guard !BlockedCharactersStore.isBlocked(character.id),
@@ -417,23 +495,38 @@ final class NotificationScheduler {
                 center.removePendingNotificationRequests(withIdentifiers: [id])
                 continue
             }
-            center.removePendingNotificationRequests(withIdentifiers: [id])
-            scheduleOneShot(id: id, kind: .goodMorning, characterID: character.id, characterName: character.name, fireAt: fireAt)
+            let request = oneShotRequest(id: id, kind: .goodMorning, characterID: character.id, characterName: character.name, fireAt: fireAt)
+            candidates.append(PendingCandidate(request: request, fireAt: fireAt))
         }
+        // Global bütçe: en yakın (en erken sabah) good-morning'ler öncelikli (bkz. commit).
+        commit(candidates, budget: Self.goodMorningBudget, kindLabel: "goodMorning")
     }
 
     // MARK: - Tap-handling glue
 
     func recordDelivery(kind: NotificationKind, characterID: UUID) {
+        // Level-up tease GERÇEKTEN teslim edildiğinde günlük kilidi burada koy —
+        // zamanlama anında değil (bkz. evaluateLevelUpOnBackground). handleTap hem
+        // dokunmada hem de catch-up taramasında (teslim edilmiş bildirim için)
+        // çağrıldığından, işaret yalnızca bildirim gerçekten ateşlendiyse konur.
+        if kind == .levelUp {
+            UserDefaults.standard.set(Date(), forKey: Self.lastFiredKey)
+        }
         guard kind != .liked else { return } // Liked You has no per-bot cap (untalked bots aren't in the cap list)
         NotificationPreferencesStore.recordSent(for: characterID)
     }
 
     // MARK: - App lifecycle entry points
 
+    /// getNotificationSettings tamamlanması ARKA PLAN kuyruğunda çalışır; completion'ı
+    /// ANA KUYRUĞA taşıyoruz. Böylece onForeground/onBackground'ın tetiklediği tüm
+    /// reschedule/arm işleri (ve paylaşılan `jealousyTargetCharacterID` yazımı) ana
+    /// thread'de kalır — cancelJealousyTimer (sohbet açılışında, ana thread) ile aynı
+    /// seride çalışıp veri yarışını (data race) ortadan kaldırır.
     private func hasPermission(_ completion: @escaping (Bool) -> Void) {
         center.getNotificationSettings { settings in
-            completion(settings.authorizationStatus == .authorized)
+            let granted = settings.authorizationStatus == .authorized
+            DispatchQueue.main.async { completion(granted) }
         }
     }
 

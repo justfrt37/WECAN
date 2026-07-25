@@ -97,9 +97,16 @@ private enum Keychain {
         }
         var attributes = query
         attributes[kSecValueData as String] = data
+        // Cihaz kilitliyken de okunabilsin: varsayılan WhenUnlocked olduğu için
+        // arka plan/bildirim akışlarında (kilitli ekran) token okuması nil dönüp
+        // yeni bir anonim kimlik basılmasına yol açabiliyordu — ilk açılıştan
+        // sonra kilitli olsa bile erişilebilir yap.
+        attributes[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
         let status = SecItemAdd(attributes as CFDictionary, nil)
         if status == errSecDuplicateItem {
-            SecItemUpdate(query as CFDictionary, [kSecValueData as String: data] as CFDictionary)
+            SecItemUpdate(query as CFDictionary,
+                          [kSecValueData as String: data,
+                           kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock] as CFDictionary)
         }
     }
 }

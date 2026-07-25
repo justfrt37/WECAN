@@ -115,7 +115,13 @@ struct ChatView: View {
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .navigationBar)
         .onAppear { viewModel.isVisible = true }
-        .onDisappear { viewModel.isVisible = false }
+        .onDisappear {
+            viewModel.isVisible = false
+            // Sohbetten çıkınca ses çalmaya / mikrofon açık kalmaya devam etmesin —
+            // oynatıcıyı durdur (ses oturumunu da bırakır) ve kaydı iptal et.
+            voice.stop()
+            recognizer.cancel()
+        }
         .task {
             viewModel.store = store
             viewModel.tokenStore = tokenStore
@@ -422,7 +428,6 @@ struct ChatView: View {
                 VStack(spacing: 10) {
                     ForEach(viewModel.messages) { message in
                         ChatBubble(message: message,
-                                   isSpeaking: voice.speakingMessageID == message.id,
                                    showsTimestamp: expandedMessageID == message.id,
                                    onTap: {
                             withAnimation(.easeInOut(duration: 0.2)) {
@@ -434,10 +439,13 @@ struct ChatView: View {
                             } else {
                                 voice.speak(message.content, id: message.id)
                             }
-                        }, isVoicePlaying: voice.isPlaying && voice.speakingMessageID == message.id,
-                           voiceIsActive: voice.speakingMessageID == message.id,
-                           voiceProgress: voice.speakingMessageID == message.id ? voice.playbackProgress : 0,
-                           voiceElapsed: voice.speakingMessageID == message.id ? voice.playbackElapsed : 0,
+                        // Yüksek frekanslı oynatma okumaları (playbackProgress/
+                        // playbackElapsed/speakingMessageID) ARTIK burada OKUNMAZ —
+                        // oynatıcının kendisi yaprak balona (VoiceMessageBubble)
+                        // geçilir, böylece çalarken ChatView.body (tüm liste) değil
+                        // sadece o balon yeniden çizilir (kök-neden: 20 fps'te tüm
+                        // non-lazy liste yeniden kuruluyordu).
+                        }, voice: voice,
                            onPlayVoice: {
                             // Çalıyorsa duraklat, duraklatılmışsa devam, değilse baştan çal.
                             if let path = message.voiceLocalPath {
@@ -652,8 +660,6 @@ struct ChatView: View {
     private var inputBar: some View {
         HStack(spacing: 10) {
             HStack(spacing: 10) {
-                Image(systemName: "face.smiling")
-                    .font(.system(size: 20)).foregroundStyle(.white.opacity(0.5))
                 TextField("", text: $viewModel.inputText,
                           prompt: Text(inputPlaceholder).foregroundColor(.white.opacity(0.4)),
                           axis: .vertical)
@@ -753,14 +759,13 @@ struct ChatView: View {
 
 private struct ChatBubble: View {
     let message: Message
-    var isSpeaking: Bool = false
     var showsTimestamp: Bool = false
     var onTap: (() -> Void)? = nil
     var onSpeak: (() -> Void)? = nil
-    var isVoicePlaying: Bool = false
-    var voiceIsActive: Bool = false
-    var voiceProgress: Double = 0
-    var voiceElapsed: Double = 0
+    /// Gözlemlenen oynatıcı — SADECE yaprak VoiceMessageBubble'a geçirilir,
+    /// ChatBubble.body burada hiçbir oynatma özelliğini OKUMAZ (aksi halde her
+    /// balon 20 fps'te yeniden çizilirdi). Bkz. ChatView ForEach kök-neden notu.
+    let voice: VoicePlayer
     var onPlayVoice: (() -> Void)? = nil
     var onVoiceSeek: ((Double) -> Void)? = nil
     var onTapImage: ((URL) -> Void)? = nil
@@ -799,9 +804,7 @@ private struct ChatBubble: View {
                                     isGenerating: isGeneratingVoice,
                                     onTap: { onGenerateVoice?() })
             } else if message.isVoice {
-                VoiceMessageBubble(message: message, isUser: message.isUser, isPlaying: isVoicePlaying,
-                                   isActive: voiceIsActive,
-                                   progress: voiceProgress, elapsed: voiceElapsed,
+                VoiceMessageBubble(message: message, isUser: message.isUser, voice: voice,
                                    onTap: { onPlayVoice?() },
                                    onSeek: { frac in onVoiceSeek?(frac) })
             } else if let localPath = message.localImagePath,

@@ -66,17 +66,29 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
                         let characterID = UUID(uuidString: idString)
                     else { continue }
 
-                    UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [request.identifier])
-                    self.handleTap(kind: kind, characterID: characterID, level: userInfo["level"] as? Int, navigate: false)
+                    // Teslim edilmişi SADECE handleTap başarılı olduysa (karakter
+                    // yüklüyse) sil. Karakterler henüz yüklenmediyse handleTap erken
+                    // döner; navigate==false olduğu için pendingTap'e de yazılmaz —
+                    // önceden silseydik teslim edilmiş proaktif mesaj tamamen kaybolurdu.
+                    // Silmeyip bırakırsak bir sonraki catch-up taramasında (karakterler
+                    // yüklendikten sonra) tekrar işlenir; başarıda silindiği için çift
+                    // enjeksiyon olmaz.
+                    let handled = self.handleTap(kind: kind, characterID: characterID, level: userInfo["level"] as? Int, navigate: false)
+                    if handled {
+                        UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [request.identifier])
+                    }
                 }
             }
         }
     }
 
-    private func handleTap(kind: NotificationKind, characterID: UUID, level: Int?, navigate: Bool) {
+    /// Döndürdüğü Bool: karakter yüklüydü ve işlem tamamlandı mı? (catch-up
+    /// yolu bununla teslim edilmiş bildirimi silip silmeyeceğine karar verir.)
+    @discardableResult
+    private func handleTap(kind: NotificationKind, characterID: UUID, level: Int?, navigate: Bool) -> Bool {
         guard let character = store.characters.first(where: { $0.id == characterID }) else {
             if navigate { Self.pendingTap = (kind, characterID, level) }
-            return
+            return false
         }
 
         NotificationScheduler.shared.recordDelivery(kind: kind, characterID: characterID)
@@ -121,7 +133,7 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
             injectProactive(line, kind: kind, character: character, createIfMissing: kind == .liked)
         }
 
-        guard navigate else { return }
+        guard navigate else { return true }
 
         // Level-up dışındaki bot bildirimleri sadece ilgili sekmeye yönlendirir —
         // doğrudan o botun sohbetini açmaz. "Liked You" artık Beğeniler
@@ -134,6 +146,7 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
         case .ghosted, .jealousy, .sleepyQuestion, .sleepyGoodbye, .bedtime, .missedYou, .goodMorning:
             store.pendingTab = .chat
         }
+        return true
     }
 
     /// Show the banner even while the app is active.

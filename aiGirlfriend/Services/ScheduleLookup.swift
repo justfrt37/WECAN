@@ -54,12 +54,15 @@ enum ScheduleLookup {
         return nil
     }
 
-    /// Karakterin GERÇEK programına göre uyanma anı — bugünkü sabah uyku
-    /// bloğunun bitişi (öğlenden önce biten ilk uyku bloğu), bugün geçmiş
-    /// olsa bile döner (Good Morning bildirimi bunu "bugünkü uyanma + offset"
-    /// hesabı için kullanır — bkz. NotificationScheduler.rescheduleGoodMorning).
-    /// Bugün uygun bir blok yoksa (nadir), nextSleepBlockStart'la aynı
-    /// güvenlik ağıyla ileriki günlere bakar.
+    /// Karakterin GERÇEK programına göre bir sonraki uyanma anı — sabah uyku
+    /// bloğunun bitişi (öğlenden önce biten ilk uyku bloğu). Bugünkü uyanma
+    /// hâlâ GELECEKTEyse onu, çoktan geçmişse (ya da bugün uygun blok yoksa)
+    /// ileriki günlerin uyanma anını döner (en fazla bir hafta ileri).
+    /// Good Morning bildirimi bunu "uyanma + offset" hesabı için kullanır —
+    /// bkz. NotificationScheduler.rescheduleGoodMorning. ÖNEMLİ: bugünkü
+    /// uyanma geçmişse artık DÖNMEZ; aksi halde Good Morning geçmiş bir ana
+    /// çizelgelenmeye çalışıp `fireAt > now` guard'ında düşerdi ve app sabah
+    /// penceresinde açılmadıkça yarına asla kaymazdı.
     static func nextWakeTime(
         schedule: CharacterSchedule,
         from: Date = Date(),
@@ -74,7 +77,9 @@ enum ScheduleLookup {
                     bySettingHour: endMinutes / 60, minute: endMinutes % 60, second: 0, of: candidateDay
                 )
             }
-            let candidates = dayOffset == 0 ? wakeTimes : wakeTimes.filter { $0 > from }
+            // Her gün için (bugün dahil) yalnızca GELECEKTEKİ uyanma anlarını al —
+            // bugünkü uyanma geçmişse dayOffset ilerleyip yarınki uyanmaya kayar.
+            let candidates = wakeTimes.filter { $0 > from }
             if let earliest = candidates.min() { return earliest }
         }
         return nil

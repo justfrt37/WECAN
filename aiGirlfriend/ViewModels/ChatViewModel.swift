@@ -47,6 +47,12 @@ final class ChatViewModel {
     var store: CharacterStore?
     var tokenStore: TokenStore?
 
+    /// Yerel kalıcılaştırmayı (LocalConversationStore load+build+save) MainActor
+    /// dışında sıralı biçimde yürütmek için — bkz. updateCache. Seri kuyruk,
+    /// ard arda gelen save'lerin (kullanıcı mesajı → asistan mesajı) sırasını
+    /// korur; LocalConversationStore zaten NSLock ile thread-safe.
+    private static let persistQueue = DispatchQueue(label: "chat.local-persist", qos: .utility)
+
     /// Her başarılı ödemeli çağrıdan sonra çağrılır — TokenBadge'in bir
     /// sonraki `TokenStore.refresh()`'i beklemeden anında güncellenmesi için.
     private func handleTokenBalance(_ balance: Int?) {
@@ -1058,24 +1064,39 @@ final class ChatViewModel {
     private func updateCache(msgCounter: Int? = nil) {
         let real = realMessages()
         guard !real.isEmpty else { return }
+        // Bellek-içi önbellek ANINDA (main) güncellenir — hemen ardından okuyan
+        // main-actor kodu (loadHistory'nin önbellek dalı, ChatListView) taze görsün.
         store?.chatCache[character.id] = real
-        let stored = LocalConversationStore.shared.load(for: character.id)
-        let updated = LocalConversationStore.Stored(
-            messages: real,
-            xp: stored?.xp ?? 0,
-            level: relationshipLevel,
-            summary: stored?.summary ?? "",
-            summarizedCount: stored?.summarizedCount ?? 0,
-            msgCounter: msgCounter ?? stored?.msgCounter ?? 0,
-            levelProgress: levelProgress,
-            detectedLanguage: ConversationLanguage.resolve(
-                latestAssistantText: real.last(where: { $0.role == .assistant })?.content,
-                previouslyDetected: stored?.detectedLanguage
-            ),
-            schedule: stored?.schedule,
-            wokenUpAt: stored?.wokenUpAt,
-            manualSleepAt: stored?.manualSleepAt
-        )
-        LocalConversationStore.shared.save(updated, for: character.id)
+
+        // Kalıcılaştırma her mesaj eklemede senkron olarak MainActor'da çalışıp
+        // UI'ı takıyordu (bkz. çağrı yerleri: send/sendUserVoice/... hepsi bunu
+        // çağırır). Değer anlık görüntüsü (snapshot) yakalanır ve load+build+save
+        // seri arka plan kuyruğunda yapılır — böylece gönderimde hitch olmaz,
+        // yarış (race) da olmaz (snapshot değer-tipi + sıralı kuyruk).
+        let characterID = character.id
+        let snapshot = real
+        let level = relationshipLevel
+        let progress = levelProgress
+        let counter = msgCounter
+        Self.persistQueue.async {
+            let stored = LocalConversationStore.shared.load(for: characterID)
+            let updated = LocalConversationStore.Stored(
+                messages: snapshot,
+                xp: stored?.xp ?? 0,
+                level: level,
+                summary: stored?.summary ?? "",
+                summarizedCount: stored?.summarizedCount ?? 0,
+                msgCounter: counter ?? stored?.msgCounter ?? 0,
+                levelProgress: progress,
+                detectedLanguage: ConversationLanguage.resolve(
+                    latestAssistantText: snapshot.last(where: { $0.role == .assistant })?.content,
+                    previouslyDetected: stored?.detectedLanguage
+                ),
+                schedule: stored?.schedule,
+                wokenUpAt: stored?.wokenUpAt,
+                manualSleepAt: stored?.manualSleepAt
+            )
+            LocalConversationStore.shared.save(updated, for: characterID)
+        }
     }
 }

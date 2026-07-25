@@ -13,6 +13,14 @@ final class CharacterStore {
     var isLoaded = false
     var errorMessage: String?
 
+    /// `load()` TAMAMEN bitti mi (sunucu fetch + hydrateConversations dahil).
+    /// `isLoaded` yalnızca UI kapısı için ERKEN set edilir (disk önbelleği varsa
+    /// splash beklemesin diye) — o pencerede bir öne-geliş `refreshCharacters()`
+    /// çağrısı, henüz süren ilk yükleme boru hattıyla YARIŞIP çift fetch/hydrate
+    /// (conversationsVersion iki kez artması) yapıyordu. refreshCharacters bu
+    /// bayrağı bekler; gerçek bitişi işaretler.
+    private var didFinishInitialLoad = false
+
     /// Feed'de o an görünen karakter (Chat sekmesi bunu kullanır).
     var currentCharacterID: UUID?
 
@@ -47,6 +55,15 @@ final class CharacterStore {
     /// mesaj sunucuya zaten kalıcı yazıldı (bkz. MainTabView.openPendingOnboardingChat).
     var pendingFirstHello: (characterID: UUID, line: String)?
 
+    /// ISO8601 çözücüleri — mesaj başına yeni formatter ALLOKE ETME (pahalı).
+    /// Bir kez kurulur, hydrateConversations tüm mesajlar için bunları kullanır.
+    private static let iso8601WithFractional: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+    private static let iso8601Plain = ISO8601DateFormatter()
+
     func setTyping(_ id: UUID, _ value: Bool) {
         if value { typingCharacterIDs.insert(id) } else { typingCharacterIDs.remove(id) }
     }
@@ -57,8 +74,6 @@ final class CharacterStore {
         }
         return characters.first
     }
-
-    private let service = CharacterService()
 
     /// Karakter listesinin diskteki önbelleği — her açılışta sunucuyu beklemeden
     /// aynı anda göstermek için (splash "yükleniyor" ekranında takılmasın diye).
@@ -90,7 +105,9 @@ final class CharacterStore {
         var fetched: [Character]?
         for attempt in 1...3 {
             do {
-                fetched = try await service.fetchAll()
+                // Review Mode anahtarını da içerir: açıksa `characters_review`
+                // tablosundan çeker (bkz. ReviewModeService).
+                fetched = try await ReviewModeService.shared.fetchCharacters()
                 break
             } catch {
                 errorMessage = error.localizedDescription
@@ -124,6 +141,10 @@ final class CharacterStore {
         // için her açılışta yeniden üretmek pahalı olurdu; rutin artık sohbet
         // AÇILDIĞINDA talep üzerine üretilir (bkz. ChatViewModel.ensureScheduleGenerated).
         await hydrateConversations()
+
+        // İlk yükleme boru hattı TAMAMEN bitti → artık öne-geliş refresh'i
+        // güvenle çalışabilir (bkz. refreshCharacters guard'ı).
+        didFinishInitialLoad = true
     }
 
     private let conversationsService = ConversationsService()
@@ -154,9 +175,9 @@ final class CharacterStore {
 
         func parseDate(_ s: String?) -> Date? {
             guard let s else { return nil }
-            let f = ISO8601DateFormatter()
-            f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-            return f.date(from: s) ?? ISO8601DateFormatter().date(from: s)
+            // Önbelleğe alınmış formatter'lar (bkz. static let yukarıda) —
+            // mesaj başına yeniden alloke edilmez.
+            return Self.iso8601WithFractional.date(from: s) ?? Self.iso8601Plain.date(from: s)
         }
 
         for state in states {
@@ -168,7 +189,10 @@ final class CharacterStore {
             let existing = LocalConversationStore.shared.load(for: state.characterID)
             let stored = LocalConversationStore.Stored(
                 messages: messages,
-                xp: 0,
+                // Sunucu xp'yi henüz saklamıyor → mevcut yerel xp'yi KORU
+                // (komşu alanlar gibi). Eskiden 0'a sıfırlanıyordu → her
+                // açılış/öne gelişte xp siliniyordu.
+                xp: existing?.xp ?? 0,
                 level: state.relationshipLevel ?? existing?.level ?? 1,
                 summary: state.summary ?? "",
                 summarizedCount: state.summarizedCount ?? 0,
@@ -195,10 +219,16 @@ final class CharacterStore {
     /// `store.characters` is `@Observable`, so both views update the moment
     /// this replaces it, no per-view refresh code needed.
     func refreshCharacters() async {
-        guard isLoaded else { return } // avoid racing the initial load()
-        if let fetched = try? await service.fetchAll(), !fetched.isEmpty {
-            characters = fetched
-            saveCachedCharacters(fetched)
+        guard didFinishInitialLoad else { return } // avoid racing the initial load()
+        if let fetched = try? await ReviewModeService.shared.fetchCharacters(), !fetched.isEmpty {
+            // id'ye göre BİRLEŞTİR — sunucu cevabında henüz olmayan ama yerelde
+            // yeni eklenmiş (ör. az önce yaratılmış) karakterleri KORU. Eskiden
+            // tam değiştirme (`characters = fetched`) bunları her öne gelişte
+            // düşürüyordu (bkz. CreateCharacterView.createCharacter).
+            let fetchedIDs = Set(fetched.map { $0.id })
+            let localOnly = characters.filter { !fetchedIDs.contains($0.id) }
+            characters = fetched + localOnly
+            saveCachedCharacters(characters)
         }
         // Öne gelişte sohbet durumunu da sunucudan tazele — bir bildirim
         // (proaktif mesaj, bkz. Phase C) arka planda sunucuya yazılmış olabilir.

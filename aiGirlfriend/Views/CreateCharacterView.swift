@@ -220,6 +220,11 @@ struct CreateCharacterView: View {
     @State private var showPaywall = false
     /// PRO ama coin (100) yetmiyorsa açılan COIN mağazası (bkz. reveal / createCharacter).
     @State private var showTokenStore = false
+    /// reveal()'in başlattığı yapısız görev — sağ üstteki çarpı (dismiss) /
+    /// .onDisappear bunu İPTAL eder ki kapatıldıktan sonra createCharacter()
+    /// bitip store'a ekleme + proaktif mesaj enjekte etme + sunucu tahsili
+    /// SÜRMESİN (bkz. reveal / createCharacter'daki Task.isCancelled kontrolü).
+    @State private var revealTask: Task<Void, Never>?
 
     private enum Phase { case steps, generatingPhoto, photoPreview, creating, ready }
 
@@ -267,6 +272,16 @@ struct CreateCharacterView: View {
             TokenStoreView(tokenStore: tokenStore)
         }
         .task { await prefillIfEditingDevCharacter() }
+        .onDisappear {
+            // Sağ üstteki çarpı (dismiss) / sihirbaz kapanınca: sürmekte olan
+            // reveal görevini İPTAL et — yoksa kapatılsa bile createCharacter()
+            // biter, store'a eklenir, proaktif mesaj enjekte edilir ve sunucu
+            // coin tahsil eder (bkz. reveal / createCharacter Task.isCancelled).
+            revealTask?.cancel()
+            // DEV ses önizlemesi: aktifleştirilen AVAudioSession'ı kapat +
+            // player'ı bırak (DEV-only yol, bkz. playDevVoicePreview).
+            if devMode != nil { teardownDevVoicePreview() }
+        }
     }
 
     /// Client tarafı gösterim/erken-kontrol için maliyet aynası — KAYNAK-DOĞRU
@@ -1030,6 +1045,15 @@ struct CreateCharacterView: View {
         devVoicePlayer?.play()
     }
 
+    /// DEV ses önizlemesini durdurur, player'ı bırakır ve aktifleştirilmiş
+    /// AVAudioSession'ı kapatır — playDevVoicePreview session'ı açık bırakıyordu
+    /// (bkz. .onDisappear). Player yoksa/oturum açılmamışsa zararsız (no-op).
+    private func teardownDevVoicePreview() {
+        devVoicePlayer?.pause()
+        devVoicePlayer = nil
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+    }
+
     private func loadDevVoices(force: Bool = false) async {
         guard force || devVoices.isEmpty else { return }
         devIsLoadingVoices = true
@@ -1485,7 +1509,8 @@ struct CreateCharacterView: View {
         photoGenError = nil
         // @MainActor: tüm @State güncellemeleri ana thread'de olsun (arka planda
         // state değişimi UI'ı bozuyordu — "buga giriyor" sebebi buydu).
-        Task { @MainActor in
+        // Görev bir handle'da tutulur → kapatınca (.onDisappear) iptal edilir.
+        revealTask = Task { @MainActor in
             if devMode != nil, let source = devProfileSource {
                 // A real device photo was uploaded (or kept from an existing
                 // character, edit mode) — use it as-is instead of the AI
@@ -1500,16 +1525,22 @@ struct CreateCharacterView: View {
             } else {
                 await generatePhoto()               // en iyi çaba (istek atılır)
             }
+            if Task.isCancelled { return }          // kapatıldı → hiçbir şey oluşturma
             // Gerçek fotoğrafı ÖNCEDEN indir ki reveal anında dummy flaşlamasın.
             if let urlStr = generatedPhotoURL, let url = URL(string: urlStr) {
                 var req = URLRequest(url: url)
                 req.timeoutInterval = 20
-                if let (data, _) = try? await URLSession.shared.data(for: req),
-                   let ui = UIImage(data: data) {
-                    revealedImage = Image(uiImage: ui)
+                if let (data, _) = try? await URLSession.shared.data(for: req) {
+                    // Büyük AI görselini ana aktörde çözme — UI'ı bloklar.
+                    // Arka planda çöz, yalnızca sonucu main'e ata.
+                    let ui = await Task.detached { UIImage(data: data) }.value
+                    if Task.isCancelled { return }
+                    if let ui { revealedImage = Image(uiImage: ui) }
                 }
             }
+            if Task.isCancelled { return }
             await createCharacter()             // her durumda karakteri oluştur
+            if Task.isCancelled { return }
             generating = false
             photoRevealed = true                // blur animasyonsuz, anında kalkar
         }
@@ -1707,6 +1738,11 @@ struct CreateCharacterView: View {
 
         switch outcome {
         case .success(let c, let tokenBalance):
+            // Kullanıcı bu arada akışı kapattıysa (sağ üstteki çarpı → dismiss,
+            // bkz. reveal'in iptali) HİÇBİR yan etki tetikleme — store'a ekleme,
+            // proaktif mesaj enjekte etme. Aksi halde iptal edilse bile karakter
+            // oluşur + listeye düşerdi.
+            if Task.isCancelled { return }
             // Yaratma sonrası kalan coin bakiyesini güncelle (sunucu döndü).
             if let tokenBalance { tokenStore.setBalance(tokenBalance) }
             withAnimation { created = c }
@@ -1723,6 +1759,16 @@ struct CreateCharacterView: View {
                 )
                 store.conversationsVersion &+= 1
             }
+            return
+        case .decodeFailure:
+            // Sunucu 2xx döndü — karakter büyük olasılıkla OLUŞTU ve coin tahsil
+            // edildi — ama cevabı çözemedik. Rastgele-UUID bir fallback ÜRETME
+            // (sunucunun tanımadığı hayalet karakter + sahipsiz sohbet olurdu);
+            // bunun yerine sunucudan yeniden çek + bakiyeyi tazele.
+            if Task.isCancelled { return }
+            photoRevealed = true
+            await store.refreshCharacters()
+            await tokenStore.refresh()
             return
         case .insufficientTokens(let tokenBalance):
             // PRO ama coin yetmedi (sunucu 402) → bakiyeyi güncelle + coin mağazası.

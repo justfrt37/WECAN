@@ -66,8 +66,16 @@ final class ImageCache {
         return UIImage(cgImage: cg)
     }
 
+    /// SADECE bellek (NSCache) — diske DOKUNMAZ. View kurulumu sırasında
+    /// (CachedImage.init) senkron çağrılabilsin diye ayrı: disk okuma/çözme
+    /// ana thread'i bloklamamalı, o iş async load yoluna taşındı.
+    func memoryImage(for url: URL) -> UIImage? {
+        cache.object(forKey: url.absoluteString as NSString)
+    }
+
     /// Bellekte varsa oradan; yoksa diskten (küçültülmüş halde saklı) okur ve
     /// belleğe de alır. İkisinde de yoksa nil — çağıran taraf ağdan indirir.
+    /// DİKKAT: disk I/O + decode yapar, ana thread'de çağırma (async load'dan).
     func image(for url: URL) -> UIImage? {
         let key = url.absoluteString as NSString
         if let cached = cache.object(forKey: key) { return cached }
@@ -110,12 +118,32 @@ final class ImageCache {
     /// Verilen URL'leri eş zamanlı indirip (küçültüp) cache'e koyar. Zaten
     /// bellekte/diskte olanları atlar. Splash'te `await` ile çağrılır.
     func prefetch(_ urls: [URL]) async {
+        // Büyük bir feed prefetch'inde yüzlerce URL geliyordu; her biri için
+        // aynı anda görev açmak yüzlerce eş zamanlı indirmeye yol açıyordu.
+        // Kayan pencere ile aynı anda en fazla `maxConcurrent` indirme tut.
+        let pending = urls.filter { image(for: $0) == nil }
+        guard !pending.isEmpty else { return }
+        let maxConcurrent = 5
         await withTaskGroup(of: Void.self) { group in
-            for url in urls where image(for: url) == nil {
+            var index = 0
+            // İlk pencereyi doldur.
+            while index < pending.count && index < maxConcurrent {
+                let url = pending[index]
                 group.addTask {
                     guard let (data, _) = try? await URLSession.shared.data(from: url) else { return }
                     ImageCache.shared.insert(data: data, for: url)
                 }
+                index += 1
+            }
+            // Biri bitince bir sonrakini ekle — böylece in-flight sayısı sabit kalır.
+            while await group.next() != nil {
+                guard index < pending.count else { continue }
+                let url = pending[index]
+                group.addTask {
+                    guard let (data, _) = try? await URLSession.shared.data(from: url) else { return }
+                    ImageCache.shared.insert(data: data, for: url)
+                }
+                index += 1
             }
         }
     }

@@ -75,6 +75,13 @@ struct CharacterCreateService {
         /// PRO ama coin yetmiyor (sunucu 402 + kalan bakiye) → coin paywall.
         case insufficientTokens(tokenBalance: Int)
         case networkFailure
+        /// Sunucu BAŞARILI (2xx) döndü — karakter satırı büyük olasılıkla
+        /// OLUŞTU ve coin sunucuda tahsil edildi — ama client cevabı çözemedi
+        /// (Character decode hatası). `networkFailure`'dan AYRI tutulur: çağıran
+        /// taraf ASLA yerel-sadece rastgele-UUID bir fallback üretmemeli (hayalet
+        /// karakter + sahipsiz sohbet olurdu); bunun yerine sunucudan yeniden
+        /// çekmeli (bkz. CreateCharacterView.createCharacter).
+        case decodeFailure
     }
 
     private struct RejectionBody: Decodable {
@@ -153,9 +160,13 @@ struct CharacterCreateService {
             let bal = (try? JSONDecoder().decode(TokenBalanceBody.self, from: respData))?.tokenBalance ?? 0
             return .insufficientTokens(tokenBalance: bal)
         }
-        guard (200..<300).contains(http.statusCode),
-              let character = try? JSONDecoder().decode(Character.self, from: respData)
-        else { return .networkFailure }
+        // Sunucu 2xx dışı (ve 403/402 değil) → gerçek bir ağ/sunucu hatası.
+        guard (200..<300).contains(http.statusCode) else { return .networkFailure }
+        // 2xx geldi ama cevabı çözemedik: satır sunucuda OLUŞMUŞ olabilir →
+        // networkFailure DEĞİL (yoksa çağıran taraf hayalet karakter üretir).
+        guard let character = try? JSONDecoder().decode(Character.self, from: respData) else {
+            return .decodeFailure
+        }
         let bal = (try? JSONDecoder().decode(TokenBalanceBody.self, from: respData))?.tokenBalance
         return .success(character, tokenBalance: bal)
     }

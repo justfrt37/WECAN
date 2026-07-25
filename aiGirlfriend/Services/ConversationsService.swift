@@ -32,10 +32,18 @@ struct LastMessage: Codable {
     var isImage: Bool { kind == "image" || kind == "image_pending" }
     var isVoice: Bool { kind == "voice" }
 
-    var date: Date? {
+    /// ISO8601 ayrıştırıcılar pahalı — her `date` erişiminde iki tane
+    /// yaratmak yerine paylaşılan (thread-safe, salt-okunur) örnekleri kullan.
+    private static let fractionalFormatter: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return f.date(from: createdAt) ?? ISO8601DateFormatter().date(from: createdAt)
+        return f
+    }()
+    private static let plainFormatter = ISO8601DateFormatter()
+
+    var date: Date? {
+        LastMessage.fractionalFormatter.date(from: createdAt)
+            ?? LastMessage.plainFormatter.date(from: createdAt)
     }
 
     init(conversationID: UUID, content: String, role: String, createdAt: String, kind: String? = nil) {
@@ -109,6 +117,7 @@ struct ConversationsService {
     private func get<T: Decodable>(_ endpoint: String, retrying: Bool = true) async -> T? {
         guard let url = URL(string: endpoint) else { return nil }
         var request = URLRequest(url: url)
+        request.timeoutInterval = 20
         let bearer = UserDefaultsManager.shared.accessToken ?? Config.supabaseAnonKey
         request.setValue(Config.supabaseAnonKey, forHTTPHeaderField: "apikey")
         request.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")

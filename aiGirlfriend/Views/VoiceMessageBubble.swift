@@ -12,15 +12,11 @@ import SwiftUI
 struct VoiceMessageBubble: View {
     let message: Message
     let isUser: Bool
-    /// GERÇEKTEN çalıyor mu — play/pause ikonu buna bakar.
-    let isPlaying: Bool
-    /// AKTİF mi (çalıyor VEYA duraklatılmış) — ilerleme, sarma ve süre buna bakar,
-    /// böylece duraklatılmışken de dalga dolu görünür ve sarma yapılabilir.
-    var isActive: Bool = false
-    /// Oynatma ilerlemesi (0...1) — sadece bu balon aktifken anlamlı.
-    var progress: Double = 0
-    /// Geçen süre (saniye) — çalarken süre yazısı bunu gösterir.
-    var elapsed: Double = 0
+    /// Gözlemlenen oynatıcı — yüksek frekanslı (20 fps) ilerleme/geçen-süre
+    /// okumaları YALNIZCA bu YAPRAK alt görünümde yapılsın diye buraya taşındı.
+    /// Böylece çalarken ChatView.body (tüm mesaj listesi) değil, SADECE aktif
+    /// sesli mesaj balonu yeniden çizilir (bkz. ChatView ForEach, kök-neden notu).
+    let voice: VoicePlayer
     /// Oynat/durdur (play tuşu ya da dururken dalga-forma dokunma).
     let onTap: () -> Void
     /// İleri/geri sarma — dalga-formu üzerinde sürükleyince oran (0...1) döner.
@@ -29,7 +25,16 @@ struct VoiceMessageBubble: View {
     private let barCount = 18
 
     var body: some View {
-        HStack(spacing: 6) {
+        // Tüm oynatıcı okumaları BURADA (yaprak body) yapılır — üst görünümlere
+        // sızmaz. `isActive` önce okunur (nadir değişir); ilerleme/geçen-süre
+        // (20 fps) SADECE bu balon aktifken okunur (kısa-devre), böylece pasif
+        // sesli balonlar yüksek-frekanslı yeniden çizime tabi olmaz.
+        let isActive = voice.speakingMessageID == message.id
+        let isPlaying = isActive && voice.isPlaying
+        let progress = isActive ? voice.playbackProgress : 0
+        let elapsed = isActive ? voice.playbackElapsed : 0
+
+        return HStack(spacing: 6) {
             Button(action: onTap) {
                 Image(systemName: isPlaying ? "pause.circle.fill" : "play.circle.fill")
                     .font(.system(size: 28))
@@ -64,7 +69,7 @@ struct VoiceMessageBubble: View {
             }
             .frame(width: 108, height: 24)
 
-            Text(durationLabel)
+            Text(durationLabel(isActive: isActive, elapsed: elapsed))
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(.white.opacity(0.7))
                 .monospacedDigit()
@@ -83,7 +88,7 @@ struct VoiceMessageBubble: View {
     }
 
     /// Çalarken geçen süre, dururken toplam süre — ikisi de yoksa gizli.
-    private var durationLabel: String {
+    private func durationLabel(isActive: Bool, elapsed: Double) -> String {
         if isActive { return formattedDuration(elapsed) }   // çalıyor veya duraklatılmış
         if let duration = message.voiceDuration { return formattedDuration(duration) }
         return ""
@@ -98,6 +103,7 @@ struct VoiceMessageBubble: View {
 
     private func formattedDuration(_ seconds: Double) -> String {
         let total = Int(seconds.rounded())
-        return String(format: "0:%02d", total)
+        // Dakika sabit "0" değildi — 75 sn artık "0:75" değil "1:15" gösterir.
+        return String(format: "%d:%02d", total / 60, total % 60)
     }
 }

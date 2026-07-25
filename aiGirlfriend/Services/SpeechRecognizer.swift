@@ -86,7 +86,23 @@ final class SpeechRecognizer {
         recorder?.record()
 
         audioEngine.prepare()
-        do { try audioEngine.start() } catch { return false }
+        do {
+            try audioEngine.start()
+        } catch {
+            // start() başarısız olursa tap + recorder ZATEN kurulmuş durumda kalır;
+            // temizlemezsek bir sonraki start() aynı bus'a İKİNCİ bir tap kurup
+            // AVAudioEngine'i çökertir (fatal). O yüzden burada tam geri sar:
+            // tap kaldır, recorder durdur/nil'le, request/task iptal, ses oturumunu
+            // bırak ve durumu sıfırla.
+            audioEngine.inputNode.removeTap(onBus: 0)
+            recorder?.stop()
+            recorder = nil
+            request?.endAudio()
+            request = nil
+            isRecording = false
+            try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+            return false
+        }
         isRecording = true
 
         task = recognizer?.recognitionTask(with: req) { [weak self] result, error in

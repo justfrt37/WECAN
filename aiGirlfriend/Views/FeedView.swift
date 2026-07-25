@@ -11,10 +11,18 @@ struct FeedView: View {
     @State private var dragOffset = CGSize.zero
     @State private var showTutorial = !UserDefaultsManager.shared.hasSeenSwipeTutorial
 
+    /// Gösterilecek deste — `body` içinde HER frame yeniden filtrelenmek yerine
+    /// (drag sırasında ~6×/frame + karakter başına UserDefaults/disk okuması)
+    /// tek sefer hesaplanıp burada saklanır. Yalnızca `store.characters`
+    /// değişince veya bir kaydırma (pass/block) sonrası `rebuildDeck()` ile
+    /// güncellenir. Ayrıca subscript güvenliği: `body` bu snapshot'ı okur, o an
+    /// filtre değişse bile out-of-bounds olmaz.
+    @State private var deck: [Character] = []
+
     /// Zaten sohbete başlanmış (yerel bir konuşma kaydı olan) karakterler
     /// Discover'da tekrar gösterilmez — aynı tanım NotificationScheduler'ın
     /// Liked You uygunluk kontrolüyle birebir aynı (bkz. LikedByStore).
-    private var characters: [Character] {
+    private func computeDeck() -> [Character] {
         // Yalnızca backend'den gelen (store.characters) karakterler — sahte/dummy
         // feed kaldırıldı (bkz. kullanıcı talebi: "backende ne geliyorsa onu göster").
         store.characters.filter {
@@ -24,20 +32,31 @@ struct FeedView: View {
         }
     }
 
+    /// Desteyi yeniden hesaplar ve `currentIndex`'i sınırlar. Kaydırma sonrası
+    /// ve `store.characters` değişince çağrılır.
+    private func rebuildDeck() {
+        deck = computeDeck()
+        if currentIndex >= deck.count { currentIndex = 0 }
+        store.currentCharacterID = deck.indices.contains(currentIndex) ? deck[currentIndex].id : nil
+    }
+
     var body: some View {
         GeometryReader { geo in
             ZStack {
                 AppColor.bg.ignoresSafeArea()
 
-                if !characters.isEmpty {
+                // `currentIndex` güvenli mi? Deste snapshot'ı `body` boyunca sabit,
+                // ama animasyon/re-render sırası yüzünden index geçici olarak
+                // taşabilir — bu yüzden okumadan önce sınırla.
+                if !deck.isEmpty, deck.indices.contains(currentIndex) {
                     // Alttaki kart (sonraki)
-                    let nextIdx = (currentIndex + 1) % characters.count
+                    let nextIdx = (currentIndex + 1) % deck.count
                     FeedCard(
-                        character: characters[nextIdx],
+                        character: deck[nextIdx],
                         safeTop: geo.safeAreaInsets.top,
                         safeBottom: geo.safeAreaInsets.bottom
                     )
-                    .id(characters[nextIdx].id)
+                    .id(deck[nextIdx].id)
                     .frame(width: geo.size.width, height: geo.size.height)
                     .scaleEffect(nextCardScale)
                     .allowsHitTesting(false)
@@ -45,11 +64,11 @@ struct FeedView: View {
                     // Üstteki kart (geçerli)
                     ZStack {
                         FeedCard(
-                            character: characters[currentIndex],
+                            character: deck[currentIndex],
                             safeTop: geo.safeAreaInsets.top,
                             safeBottom: geo.safeAreaInsets.bottom
                         )
-                        .id(characters[currentIndex].id)
+                        .id(deck[currentIndex].id)
                         .frame(width: geo.size.width, height: geo.size.height)
 
                         likeOverlay.opacity(likeOpacity)
@@ -89,11 +108,10 @@ struct FeedView: View {
         .background(AppColor.bg)
         .onAppear {
             currentIndex = 0
-            store.currentCharacterID = characters.first?.id
+            rebuildDeck()
         }
-        .onChange(of: characters) { _, chars in
-            if currentIndex >= chars.count { currentIndex = 0 }
-            store.currentCharacterID = chars.isEmpty ? nil : chars[currentIndex].id
+        .onChange(of: store.characters) { _, _ in
+            rebuildDeck()
         }
     }
 
@@ -176,40 +194,42 @@ struct FeedView: View {
 
     private func handleSwipe(_ t: CGSize, w: CGFloat) {
         let threshold: CGFloat = 100
-        if abs(t.width) > threshold {
-            let dir: CGFloat = t.width > 0 ? 1 : -1
-            let current = characters.indices.contains(currentIndex) ? characters[currentIndex] : nil
-            withAnimation(.easeOut(duration: 0.35)) {
-                dragOffset = CGSize(width: dir * w * 1.6, height: t.height * 0.3)
-            }
-            if dir == 1, let current {
-                // "Tanışmak ister misin?" onayı KALDIRILDI — beğeninde doğrudan sohbete git.
-                store.pendingMeetRequest = MeetRequest(character: current, prefillText: IcebreakerPool.next())
-            } else if dir == -1, let current {
-                // Kart hemen `characters`ten düşsün (PassedCharactersStore
-                // filtreye giriyor) — önceden HİÇBİR yere kaydedilmiyordu,
-                // "nope" görsel olarak ilerliyordu ama karakter asla
-                // kaybolmuyordu (deste döngüsünde tekrar tekrar çıkıyordu;
-                // tek karakter kalmışsa hep AYNI kart görünüyordu).
-                PassedCharactersStore.pass(current.id)
-            }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.36) {
-                dragOffset = .zero
-                guard !characters.isEmpty else { return }
-                // Beğenide (dir==1) kart hâlâ destede — bir sonrakine geç.
-                // Nope'ta (dir==-1) kart zaten listeden düştü, aynı index
-                // artık bir sonraki karta işaret ediyor — TEKRAR ilerletme
-                // (ilerletirse bir kart atlanır).
-                if dir == 1 {
-                    currentIndex = (currentIndex + 1) % characters.count
-                } else if currentIndex >= characters.count {
-                    currentIndex = 0
-                }
-                store.currentCharacterID = characters[currentIndex].id
-            }
-        } else {
+        guard abs(t.width) > threshold else {
             withAnimation(.spring(response: 0.4, dampingFraction: 0.75)) {
                 dragOffset = .zero
+            }
+            return
+        }
+        // Geçerli kartı SNAPSHOT'tan (deck) al — filtre o an değişse bile güvenli.
+        guard deck.indices.contains(currentIndex) else {
+            withAnimation(.spring()) { dragOffset = .zero }
+            return
+        }
+        let dir: CGFloat = t.width > 0 ? 1 : -1
+        let current = deck[currentIndex]
+        withAnimation(.easeOut(duration: 0.35)) {
+            dragOffset = CGSize(width: dir * w * 1.6, height: t.height * 0.3)
+        }
+        if dir == 1 {
+            // "Tanışmak ister misin?" onayı KALDIRILDI — beğeninde doğrudan sohbete git.
+            store.pendingMeetRequest = MeetRequest(character: current, prefillText: IcebreakerPool.next())
+        } else {
+            // Kartı `passed` olarak işaretle. Desteyi HEMEN yeniden kurmuyoruz —
+            // aksi halde animasyon bitmeden üstteki kart bir sonrakine sıçrardı.
+            // Yeniden kurma animasyon sonunda (asyncAfter) yapılır.
+            PassedCharactersStore.pass(current.id)
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.36) {
+            dragOffset = .zero
+            if dir == 1 {
+                // Beğenide kart hâlâ destede — bir sonrakine geç.
+                if !deck.isEmpty { currentIndex = (currentIndex + 1) % deck.count }
+                store.currentCharacterID = deck.indices.contains(currentIndex) ? deck[currentIndex].id : nil
+            } else {
+                // Nope: kart artık `passed` — desteyi yeniden kur. Aynı index
+                // otomatik olarak bir sonraki karta işaret eder (rebuildDeck
+                // gerekirse index'i sınırlar ve currentCharacterID'yi ayarlar).
+                rebuildDeck()
             }
         }
     }

@@ -136,6 +136,15 @@ async function fetchDirective(characterId: string, role: string, level: number):
   return script?.directive ?? `İlişki seviyesi ${level}/10. Doğal ve sıcak ol.`;
 }
 
+// Review Mode (App Store inceleme) direktifi — flört/romantizm İÇERMEZ. Rol
+// bazlı direktifin (fetchDirective) yerine geçer; bkz. ReviewModeService.swift.
+const REVIEW_DIRECTIVE =
+  "You are a warm, friendly companion and nothing more. Keep the entire " +
+  "conversation strictly platonic, wholesome and respectful. Do NOT flirt, do " +
+  "NOT give romantic compliments, do NOT be seductive, suggestive or sexual in " +
+  "any way, and never steer the conversation toward romance or dating. Chat like " +
+  "a kind, supportive friend about everyday topics (hobbies, feelings, daily life).";
+
 // Modelin foto göndermek istediğini bildirme yöntemi.
 // franc's ISO 639-3 codes for the 7 languages we actually support (matches
 // VoiceLanguage.swift's superset). Detection replaces the old approach of
@@ -523,6 +532,9 @@ Deno.serve(async (req: Request) => {
     const characterId: string = body.characterId;
     const systemPrompt: string = body.systemPrompt ?? "";
     const userMessage: string | undefined = body.userMessage;
+    // Review Mode (App Store inceleme): açıkken flört direktifi YERİNE platonik,
+    // arkadaş-canlısı bir direktif uygulanır (bkz. ReviewModeService.swift).
+    const reviewMode: boolean = body.reviewMode === true;
 
     // === SOHBETİ TEMİZLE === İstemcinin "Clear Chat" eylemi — konuşma satırını
     // siler (messages/memories cascade ile birlikte gider), bir sonraki açılışta
@@ -784,7 +796,9 @@ Deno.serve(async (req: Request) => {
       }
 
       const reactionLevel: number = convo.relationship_level ?? 1;
-      const reactionDirective = await fetchDirective(characterId, personalityRole, reactionLevel);
+      const reactionDirective = reviewMode
+        ? REVIEW_DIRECTIVE
+        : await fetchDirective(characterId, personalityRole, reactionLevel);
       let reactionSystem = systemPrompt;
       reactionSystem += `\n\n${reactionDirective}`;
       if (exHistory) {
@@ -841,7 +855,9 @@ Deno.serve(async (req: Request) => {
     // === CEVAP MODU: sistem promptunu hazırla ===
     const currentLevel: number = convo.relationship_level ?? 1;
     let system = systemPrompt;
-    const directive = await fetchDirective(characterId, personalityRole, currentLevel);
+    const directive = reviewMode
+      ? REVIEW_DIRECTIVE
+      : await fetchDirective(characterId, personalityRole, currentLevel);
     system += `\n\n${directive}`;
     if (exHistory) {
       system += `\n\n[SHARED HISTORY — reference these memories naturally in conversation]\n${exHistory}`;
@@ -872,7 +888,8 @@ Deno.serve(async (req: Request) => {
     system += TEXTING_STYLE_RULE;
     system += VARIATION_RULE;
     system += CONTINUITY_RULE;
-    system += humorDirective(currentLevel);
+    // Review modda mizah direktifi de romantik/flörtöz tona kayabildiği için atlanır.
+    if (!reviewMode) system += humorDirective(currentLevel);
     if (voiceChat) {
       system += VOICE_TAGS_RULE;
     }

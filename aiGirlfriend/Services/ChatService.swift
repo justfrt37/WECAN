@@ -56,6 +56,10 @@ private struct ChatRequest: Codable {
     /// gönderebilirim" tarzı doğal bir yönlendirme cevabı yazmalı (bkz.
     /// chat/index.ts IMAGE_REDIRECT_RULE).
     let imageRedirected: Bool?
+    /// Review Mode (App Store inceleme) açıkken true — sunucu flört direktifini
+    /// atlayıp platonik/arkadaş-canlısı bir direktif uygular (bkz. ReviewModeService,
+    /// chat/index.ts). Varsayılan nil (memberwise init'i bozmaz).
+    var reviewMode: Bool? = nil
 }
 
 private struct WireMessage: Codable {
@@ -137,6 +141,7 @@ struct ChatService {
     func addCharacterNote(characterId: UUID, kind: String, content: String) async throws -> Bool {
         var request = URLRequest(url: Config.addCharacterNoteFunctionURL)
         request.httpMethod = "POST"
+        request.timeoutInterval = 20
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         let bearer = UserDefaultsManager.shared.accessToken ?? Config.supabaseAnonKey
         request.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
@@ -184,6 +189,7 @@ struct ChatService {
     func injectProactiveMessage(character: Character, kind: String, text: String, createIfMissing: Bool, messageKind: String = "text") async -> Bool {
         var request = URLRequest(url: Config.chatFunctionURL)
         request.httpMethod = "POST"
+        request.timeoutInterval = 20
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         let bearer = UserDefaultsManager.shared.accessToken ?? Config.supabaseAnonKey
         request.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
@@ -219,6 +225,7 @@ struct ChatService {
     func savePhotoMessage(character: Character, prompt: String, url: String?) async -> Bool {
         var request = URLRequest(url: Config.chatFunctionURL)
         request.httpMethod = "POST"
+        request.timeoutInterval = 20
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         let bearer = UserDefaultsManager.shared.accessToken ?? Config.supabaseAnonKey
         request.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
@@ -380,23 +387,11 @@ struct ChatService {
     /// çalışıyorum") görsel üretim promptuna taşımak için, `sendWithLocalHistory`
     /// ile aynı amaçla gönderilir.
     func generateChatImage(character: Character, prompt: String, localMessages: [Message], summary: String, currentActivity: String? = nil) async throws -> ChatImageResult {
-        var request = URLRequest(url: Config.chatImageFunctionURL)
-        request.httpMethod = "POST"
-        // Default URLSession timeout (60s) isn't enough — the backend's prompt
-        // composer + image generation (plus occasional server-side polling on
-        // slower jobs) can run well past that, causing spurious client-side
-        // timeouts even when the server would've succeeded. 150s covers the
-        // observed worst case with margin.
-        request.timeoutInterval = 150
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        let bearer = UserDefaultsManager.shared.accessToken ?? Config.supabaseAnonKey
-        request.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
-        request.setValue(Config.supabaseAnonKey, forHTTPHeaderField: "apikey")
         let wireHistory = localMessages
             .filter { $0.imageURL == nil && $0.localImagePath == nil && !$0.isPending }
             .suffix(20)
             .map { WireHistoryMessage(role: $0.role.rawValue, content: $0.content) }
-        request.httpBody = try JSONEncoder().encode(
+        let bodyData = try JSONEncoder().encode(
             ChatImageRequest(
                 characterId: character.id.uuidString.lowercased(),
                 prompt: prompt,
@@ -406,8 +401,12 @@ struct ChatService {
             )
         )
 
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse else { throw ChatServiceError.decoding }
+        // Ortak yürütücü: 401 kurtar+yeniden-dene + auth başlıkları. Default
+        // URLSession timeout (60s) yetmiyor — backend'in prompt oluşturucusu +
+        // görsel üretimi (yavaş işlerde ara sıra sunucu-taraflı polling) bunu
+        // rahatça aşabilir, sunucu başarılı olacakken istemcide sahte timeout
+        // oluşuyordu. 150s gözlenen en kötü durumu marjıyla kapsar.
+        let (data, http) = try await sendChatRequest(body: bodyData, url: Config.chatImageFunctionURL, timeout: 150)
         guard (200..<300).contains(http.statusCode) else {
             throw ChatServiceError.badStatus(http.statusCode, String(data: data, encoding: .utf8) ?? "")
         }
@@ -458,6 +457,8 @@ struct ChatService {
     func generateInitialSchedule(character: Character) async throws -> CharacterSchedule {
         var request = URLRequest(url: Config.characterScheduleFunctionURL)
         request.httpMethod = "POST"
+        // Rutin üretimi bir LLM çağrısı — 20s bazen yetmez, biraz daha cömert.
+        request.timeoutInterval = 60
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         let bearer = UserDefaultsManager.shared.accessToken ?? Config.supabaseAnonKey
         request.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
@@ -519,12 +520,9 @@ struct ChatService {
     }
 
     private func call(character: Character, userMessage: String?, level: Int? = nil, lastMessageAt: Date? = nil) async throws -> ChatResponse {
-        do {
-            return try await perform(character: character, userMessage: userMessage, extra: .none, level: level, lastMessageAt: lastMessageAt)
-        } catch ChatServiceError.badStatus(let code, _) where code == 401 {
-            _ = await SupabaseAuth.recover()
-            return try await perform(character: character, userMessage: userMessage, extra: .none, level: level, lastMessageAt: lastMessageAt)
-        }
+        // 401 kurtar+yeniden-dene artık `perform`/`sendChatRequest` içinde ortak —
+        // burada ayrıca sarmalamaya gerek yok (çift kurtarma olmasın).
+        return try await perform(character: character, userMessage: userMessage, extra: .none, level: level, lastMessageAt: lastMessageAt)
     }
 
     private func perform(
@@ -541,13 +539,6 @@ struct ChatService {
         userImageBase64: String? = nil,
         imageRedirected: Bool = false
     ) async throws -> ChatResponse {
-        var request = URLRequest(url: Config.chatFunctionURL)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        let bearer = UserDefaultsManager.shared.accessToken ?? Config.supabaseAnonKey
-        request.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
-        request.setValue(Config.supabaseAnonKey, forHTTPHeaderField: "apikey")
-
         var clearConversation: Bool? = nil
         var clientHistory: [WireHistoryMessage]? = nil
         var localSummary: String? = nil
@@ -576,7 +567,8 @@ struct ChatService {
 
         let body = ChatRequest(
             characterId: character.id.uuidString.lowercased(),
-            systemPrompt: character.systemPrompt,
+            // Review mode açıkken flörtsüz/arkadaş-canlısı prompt (bkz. ReviewModeService).
+            systemPrompt: ReviewModeService.systemPrompt(for: character),
             userMessage: userMessage,
             clientHistory: clientHistory,
             localSummary: localSummary,
@@ -595,12 +587,18 @@ struct ChatService {
             photoURL: photoURL,
             nearSleepTime: nearSleepTime,
             userImageBase64: userImageBase64,
-            imageRedirected: imageRedirected
+            imageRedirected: imageRedirected,
+            reviewMode: ReviewModeService.isEnabledSnapshot ? true : nil
         )
-        request.httpBody = try JSONEncoder().encode(body)
+        let bodyData = try JSONEncoder().encode(body)
 
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse else { throw ChatServiceError.decoding }
+        // 401 (token süresi doldu) tek seferlik kurtar+yeniden-dene ARTIK burada,
+        // ortak `perform`ta yaşıyor — böylece bunu çağıran TÜM akışlar
+        // (sendWithLocalHistory / sendUserPhotoMessage / sendPhotoDownloadReaction /
+        // clear / summarize / loadHistory) token yenilemesinden faydalanır, yoksa
+        // süre dolduktan sonraki ilk gönderim kullanıcıya "Server error (401)" olarak
+        // sızıyordu. Yeniden-denemede istek TAZE token ile yeniden kurulur.
+        let (data, http) = try await sendChatRequest(body: bodyData, url: Config.chatFunctionURL, timeout: 20)
         guard (200..<300).contains(http.statusCode) else {
             throw ChatServiceError.badStatus(http.statusCode, String(data: data, encoding: .utf8) ?? "")
         }
@@ -608,5 +606,31 @@ struct ChatService {
             throw ChatServiceError.decoding
         }
         return decoded
+    }
+
+    /// Ortak POST yürütücü: JSON gövdesini gönderir, 401 gelirse bir kez
+    /// `SupabaseAuth.recover()` deneyip isteği TAZE erişim jetonuyla yeniden kurup
+    /// gönderir. Auth başlıklarını ve açık `timeoutInterval`ı tek yerde uygular —
+    /// hem `perform` hem `generateChatImage` bunu kullanır (bkz. fix: 401 sadece
+    /// eski `call()`de vardı, doğrudan `perform` çağıranlar bypass ediyordu).
+    private func sendChatRequest(body: Data, url: URL, timeout: TimeInterval) async throws -> (Data, HTTPURLResponse) {
+        func attempt() async throws -> (Data, HTTPURLResponse) {
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            request.timeoutInterval = timeout
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            let bearer = UserDefaultsManager.shared.accessToken ?? Config.supabaseAnonKey
+            request.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
+            request.setValue(Config.supabaseAnonKey, forHTTPHeaderField: "apikey")
+            request.httpBody = body
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse else { throw ChatServiceError.decoding }
+            return (data, http)
+        }
+
+        let first = try await attempt()
+        guard first.1.statusCode == 401 else { return first }
+        _ = await SupabaseAuth.recover()
+        return try await attempt()
     }
 }
