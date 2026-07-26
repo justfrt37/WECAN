@@ -21,7 +21,7 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const db = createClient(SUPABASE_URL, SERVICE_ROLE, { auth: { persistSession: false } });
 
-// Kept in sync with aiGirlfriend/Services/DevAccess.swift's devUserIDs — the
+// Kept in sync with Plumm/Services/DevAccess.swift's devUserIDs — the
 // only two active dev users on this project (see project memory).
 const DEV_UIDS = new Set([
   "81565166-be1e-48f6-a580-3f8b78e378e2",

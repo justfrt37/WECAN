@@ -78,20 +78,38 @@ Deno.serve(async (req: Request) => {
       if (!WEEKLY_TOKENS[tier]) return json({ error: "invalid_tier" }, 400);
 
       const now = new Date();
-      const periodEnd = new Date(now.getTime() + 7 * 86_400_000);
-      // "Mimics a subscription being bought for the first time" — a real
-      // purchase resets the period AND drips that tier's weekly tokens, so
-      // this does both, not just a flag flip.
+      // `periodStart` verilirse (gerçek satın alma/restore akışı) DÖNEM BAŞINA
+      // idempotent: aynı dönemde tekrar çağrılınca token EKLENMEZ. Verilmezse
+      // (dev panel butonu) her çağrıda yeni dönem + grant (eski davranış).
+      const periodStart: string | null = typeof body.periodStart === "string" ? body.periodStart : null;
+      const start = periodStart ? new Date(periodStart) : now;
+      const periodEnd = new Date(start.getTime() + 7 * 86_400_000);
+
+      let shouldGrant = true;
+      if (periodStart) {
+        const { data: existing } = await db
+          .from("subscriptions").select("current_period_start").eq("user_id", uid).maybeSingle();
+        if (existing && new Date(existing.current_period_start).getTime() === start.getTime()) {
+          shouldGrant = false;   // bu dönem zaten verildi
+        }
+      }
+
       await db.from("subscriptions").upsert({
         user_id: uid,
         tier,
-        current_period_start: now.toISOString(),
+        current_period_start: start.toISOString(),
         current_period_end: periodEnd.toISOString(),
         updated_at: now.toISOString(),
       });
-      await db.rpc("grant_tokens", { p_user_id: uid, p_amount: WEEKLY_TOKENS[tier], p_reason: "subscription_grant" });
+
+      if (shouldGrant) {
+        // Opsiyonel `tokens` verilirse onu kullan (ürüne özel — haftalık 100 /
+        // yıllık 1000), yoksa tier'ın varsayılan haftalık miktarı.
+        const amount = typeof body.tokens === "number" ? body.tokens : WEEKLY_TOKENS[tier];
+        await db.rpc("grant_tokens", { p_user_id: uid, p_amount: amount, p_reason: "subscription_grant" });
+      }
       const balance = await currentBalance(uid);
-      return json({ balance, tier });
+      return json({ balance, tier, granted: shouldGrant });
     }
 
     return json({ error: "unknown_action" }, 400);

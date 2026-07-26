@@ -51,6 +51,19 @@ async function chargeOrReject(uid: string, amount: number, reason: string): Prom
   return { ok: true, balance: row?.balance ?? 0 };
 }
 
+/// Üretilen sesi `characters` public bucket'ına yükler → kalıcı public URL döner.
+/// Böylece chate tekrar girildiğinde ses (metin değil) geri gelir. Hata → null
+/// (istemci yine yerel dosyayla anlık çalar; sadece reload kalıcılığı kaybolur).
+async function uploadVoice(bytes: Uint8Array, uid: string): Promise<string | null> {
+  const path = `voices/${uid}/${crypto.randomUUID()}.mp3`;
+  const { error } = await db.storage.from("characters").upload(path, bytes, {
+    contentType: "audio/mpeg", upsert: false,
+  });
+  if (error) return null;
+  const { data } = db.storage.from("characters").getPublicUrl(path);
+  return data.publicUrl;
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -116,11 +129,13 @@ Deno.serve(async (req) => {
       }
       const bytes = new Uint8Array(await elevenResp.arrayBuffer());
       const charge = await chargeOrReject(uid, 12, "voice");
+      const voiceUrl = charge.ok ? await uploadVoice(bytes, uid) : null;
       return new Response(bytes, {
         status: 200,
         headers: {
           ...corsHeaders, "Content-Type": "audio/mpeg",
           "X-Token-Balance": charge.ok ? String(charge.balance) : "",
+          "X-Voice-Url": voiceUrl ?? "",
         },
       });
     }
@@ -157,11 +172,13 @@ Deno.serve(async (req) => {
     const bytes = Uint8Array.from(atob(audioContent), (c) => c.charCodeAt(0));
 
     const charge = await chargeOrReject(uid, 12, "voice");
+    const voiceUrl = charge.ok ? await uploadVoice(bytes, uid) : null;
     return new Response(bytes, {
       status: 200,
       headers: {
         ...corsHeaders, "Content-Type": "audio/mpeg",
         "X-Token-Balance": charge.ok ? String(charge.balance) : "",
+        "X-Voice-Url": voiceUrl ?? "",
       },
     });
   } catch (error) {

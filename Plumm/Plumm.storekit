@@ -1,0 +1,104 @@
+{
+  "appPolicies" : {
+    "eula" : "",
+    "policies" : [
+      {
+        "locale" : "en_US",
+        "policyText" : "",
+        "policyURL" : ""
+      }
+    ]
+  },
+  "identifier" : "89044F0C",
+  "nonRenewingSubscriptions" : [
+
+  ],
+  "products" : [
+
+  ],
+  "settings" : {
+    "_askToBuyEnabled" : false,
+    "_billingGracePeriodEnabled" : false,
+    "_billingIssuesEnabled" : false,
+    "_disableDialogs" : false,
+    "_failTransactionsEnabled" : false,
+    "_locale" : "en_US",
+    "_renewalBillingIssuesEnabled" : false,
+    "_storefront" : "USA",
+    "_storeKitErrors" : [
+
+    ],
+    "_timeRate" : 0
+  },
+  "subscriptionGroups" : [
+    {
+      "id" : "19AC6CD9",
+      "localizations" : [
+
+      ],
+      "name" : "Premium",
+      "subscriptions" : [
+        {
+          "adHocOffers" : [
+
+          ],
+          "codeOffers" : [
+
+          ],
+          "displayPrice" : "4.99",
+          "familyShareable" : false,
+          "groupNumber" : 1,
+          "internalID" : "A6BD4F52",
+          "introductoryOffer" : null,
+          "localizations" : [
+            {
+              "description" : "Plumm Pro weekly access",
+              "displayName" : "Plumm Pro (Weekly)",
+              "locale" : "en_US"
+            }
+          ],
+          "productID" : "weekly_pro",
+          "recurringSubscriptionPeriod" : "P1W",
+          "referenceName" : "Plumm Pro Weekly",
+          "subscriptionGroupID" : "19AC6CD9",
+          "type" : "RecurringSubscription",
+          "winbackOffers" : [
+
+          ]
+        },
+        {
+          "adHocOffers" : [
+
+          ],
+          "codeOffers" : [
+
+          ],
+          "displayPrice" : "49.99",
+          "familyShareable" : false,
+          "groupNumber" : 1,
+          "internalID" : "9765324B",
+          "introductoryOffer" : null,
+          "localizations" : [
+            {
+              "description" : "Plumm Pro yearly access",
+              "displayName" : "Plumm Pro (Yearly)",
+              "locale" : "en_US"
+            }
+          ],
+          "productID" : "yearly_pro_2",
+          "recurringSubscriptionPeriod" : "P1Y",
+          "referenceName" : "Plumm Pro Yearly",
+          "subscriptionGroupID" : "19AC6CD9",
+          "type" : "RecurringSubscription",
+          "winbackOffers" : [
+
+          ]
+        }
+      ]
+    }
+  ],
+  "version" : {
+    "major" : 4,
+    "minor" : 0
+  }
+}

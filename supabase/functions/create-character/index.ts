@@ -52,7 +52,7 @@ const WEEKLY_CHARACTER_LIMIT: Record<string, number> = {
 // Karakter yaratma maliyeti (coin/jeton) — KAYNAK-DOĞRU burada tutulur (bkz.
 // kullanıcı talebi: "bu bilgi backend'de tutulmalı"). charge_tokens ile atomik
 // tahsil edilir; yetmezse oluşturulan karakter geri alınır (delete).
-const CREATION_COST = 100;
+const CREATION_COST = 50;
 
 async function checkCreationAllowance(uid: string): Promise<{ ok: true } | { ok: false; error: string; limit?: number }> {
   const { data: sub } = await db

@@ -1,0 +1,187 @@
+<!doctype html>
+<!--
+  Plumm — Privacy Policy (hosted copy).
+  ⚠️ Aynı metin uygulama içinde de duruyor: Plumm/Views/Legal/LegalDocument.swift
+  Birini güncelleyen DİĞERİNİ de güncellemeli.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Plumm — Privacy Policy</title>
+<style>
+  :root { color-scheme: dark light; --bg:#0c0509; --bg2:#160a12; --fg:#f5eef2; --muted:#a99aa4; --pink:#ff6f8d; }
+  * { box-sizing: border-box; }
+  body { margin:0; padding:0; background:linear-gradient(180deg,var(--bg),var(--bg2) 55%,var(--bg));
+         color:var(--fg); font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; }
+  main { max-width:760px; margin:0 auto; padding:48px 22px 80px; }
+  h1 { font-size:2rem; line-height:1.2; margin:0 0 .35em; }
+  h2 { font-size:1.15rem; margin:2.2em 0 .6em; }
+  .updated { color:var(--muted); font-size:.85rem; margin:0 0 1.6em; }
+  p, li { color:#e6dbe2; }
+  ul { padding-left:1.15em; }
+  li { margin:.4em 0; }
+  a { color:var(--pink); }
+  footer { color:var(--muted); font-size:.8rem; margin-top:3em; border-top:1px solid rgba(255,255,255,.08); padding-top:1.2em; }
+  @media (prefers-color-scheme: light) {
+    body { background:#fff; color:#181218; }
+    p, li { color:#2c232b; }
+    .updated, footer { color:#6b606a; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <h1>Privacy Policy</h1>
+  <p class="updated">Last updated: 26 July 2026</p>
+
+  <p>Plumm is built privacy-first. You do not create an account, you never tell us your name,
+  email address or phone number, and we do not track you. This policy explains exactly what the
+  app keeps, where it is kept, and who can reach it.</p>
+
+  <h2>The short version</h2>
+  <ul>
+    <li>No sign-up. No email, no phone number, no password, no social login. Your session is an anonymous ID.</li>
+    <li>No advertising, no ad SDKs, no IDFA/ATT tracking prompt, no third-party analytics — the app ships without them.</li>
+    <li>We never sell, rent or share your data with data brokers or advertisers. Ever.</li>
+    <li>Your chats live in a database protected by Supabase Row Level Security (RLS): each row is bound to your own anonymous ID, and no other user can read it.</li>
+    <li>Some things never leave your phone at all — the first name you type during onboarding and any photo you save into a chat.</li>
+    <li>You can delete a conversation from inside the app, and it is deleted on the server too.</li>
+  </ul>
+
+  <h2>Who we are</h2>
+  <p>Plumm (the “App”) is operated by Miles Warner, Bağdat Caddesi No: 142, Apt. 5, 34710 Kadıköy, İstanbul, Türkiye (“we”, “us”).
+  For any privacy question or request you can reach us at
+  <a href="mailto:destek@wecan.app">destek@wecan.app</a>.</p>
+
+  <h2>No account, no identity</h2>
+  <p>When you first open Plumm, the app signs in anonymously with Supabase Auth. That produces a
+  random user ID (a UUID) and a session token. That ID is the only identifier we hold: it is not
+  linked to your name, your email, your phone number, your Apple ID or your contacts, and we have
+  no way to work backwards from it to your real-world identity.</p>
+  <p>Because there is no login, your data is tied to that anonymous session on this device. If you
+  delete the app or reset the device, the session can no longer be recovered — and neither can the
+  chats attached to it.</p>
+
+  <h2>What is stored on our servers</h2>
+  <p>Our backend runs on Supabase (Postgres database, authentication, storage and Edge Functions).
+  Stored against your anonymous ID:</p>
+  <ul>
+    <li>Your conversations and messages — so a chat is still there when you reopen the app or reinstall while the session is alive.</li>
+    <li>Relationship progress — level and progress within a level for each character.</li>
+    <li>Coin balance, and the subscription tier reported by the store.</li>
+    <li>Characters you create with the character builder, and the AI-generated photos and voice clips produced for you.</li>
+    <li>Basic technical records needed to run the service, such as server-side error logs and rate-limit counters.</li>
+  </ul>
+  <p>We do not store your device's contacts, photo library, location, health data, calendar or
+  advertising identifier. The App does not ask for those permissions.</p>
+
+  <h2>What never leaves your device</h2>
+  <ul>
+    <li>The first name you enter during onboarding — it is saved in local app storage only and is never uploaded.</li>
+    <li>Photos you send into a chat — they are written to the app's private folder on the device. They are not uploaded to our storage.</li>
+    <li>Downloaded voice clips and cached images, kept locally so the app is fast and uses less data.</li>
+    <li>Your notification schedule — reminders are created and fired locally by iOS (see “Notifications” below).</li>
+  </ul>
+  <p>One clarification, because it matters: a photo you send stays on your device, but in order for
+  the character to be able to react to it, a copy is transmitted to the AI provider that generates
+  the reply. It is used for that reply and is not stored by us. If you do not want an image
+  processed that way, do not send it.</p>
+
+  <h2>How Row Level Security protects your chats</h2>
+  <p>Row Level Security (RLS) is a Postgres feature that filters data at the database level, per
+  row, before any result is returned. Every table that holds user data in Plumm has RLS enabled
+  with policies that compare the requesting session's ID to the owner of the row
+  (<code>auth.uid() = user_id</code>).</p>
+  <ul>
+    <li>The App only ever talks to the database with the public key plus your own session token. Under RLS that combination can read and write your rows and nothing else.</li>
+    <li>Another user — or anyone holding the public key, which is designed to be public — cannot read, modify or delete your conversations. The database refuses to return the rows.</li>
+    <li>Tables that only the server needs have RLS enabled with no client policy at all, so the App cannot touch them.</li>
+    <li>Privileged keys (service role) and every third-party API key live exclusively in server-side Edge Functions. They are never shipped inside the App and cannot be extracted from it.</li>
+  </ul>
+  <p>To be straight with you about the limits of that guarantee: our Edge Functions run with a
+  privileged role so they can do their job — saving a message, charging a coin, generating a photo
+  — and Supabase, as our hosting provider, operates the infrastructure the data sits on. Access on
+  our side is limited to what is needed to run and support the service (for example, investigating
+  a bug or a safety report). We do not read conversations for curiosity, profiling, advertising or
+  training our own models.</p>
+
+  <h2>AI processing and service providers</h2>
+  <p>Plumm's characters are generated by third-party AI services. To produce a reply, the relevant
+  part of the conversation (and, where applicable, an image you sent or a text prompt) is
+  transmitted to the provider through our servers:</p>
+  <ul>
+    <li>xAI (Grok) — chat replies.</li>
+    <li>OpenAI — supporting text and moderation-related tasks.</li>
+    <li>Civitai — image generation.</li>
+    <li>ElevenLabs — voice message synthesis.</li>
+    <li>Supabase — database, authentication, storage and Edge Functions hosting.</li>
+    <li>RevenueCat — subscription and purchase state (receipt validation), together with Apple.</li>
+  </ul>
+  <p>These providers act as processors for us and are bound by their own terms; they are not
+  permitted to use your content for advertising. Requests are sent with your anonymous ID at most —
+  never with a name, an email address or a payment detail, because we do not have them.</p>
+
+  <h2>Purchases</h2>
+  <p>Subscriptions and coin packs are sold through Apple's In-App Purchase. Payment is handled
+  entirely by Apple: we never see or receive your card number, billing address or Apple ID. We
+  receive a validated entitlement (“this anonymous ID has an active plan”) via RevenueCat and
+  Apple's receipt, and we store the resulting tier and coin balance.</p>
+
+  <h2>Notifications</h2>
+  <p>Reminders and character messages are scheduled as local notifications by iOS on your device.
+  The App does not register for remote push notifications, so there is no device push token, and we
+  do not use a third-party push provider. Notifications can be turned off at any time in the
+  Profile tab or in iOS Settings.</p>
+
+  <h2>No tracking and no advertising</h2>
+  <p>The App contains no advertising SDK, no attribution SDK and no third-party analytics SDK. We
+  do not use the advertising identifier (IDFA), we do not fingerprint your device, and we do not
+  build profiles about you or sell audiences. Apple may provide us with aggregate, non-identifying
+  App Store statistics (downloads, crashes) which we cannot tie to an individual user.</p>
+
+  <h2>Adults only</h2>
+  <p>Plumm is intended solely for users aged 18 and over. It is not directed at children and we do
+  not knowingly collect data from anyone under 18. If we learn that an underage person is using the
+  App, we will terminate the session and delete the associated data.</p>
+
+  <h2>Retention and deletion</h2>
+  <ul>
+    <li>Deleting a conversation in the App deletes it on the server, not just on the screen.</li>
+    <li>Deleting the App removes everything held locally on the device (your onboarding name, saved photos, cached media) and ends your access to the anonymous session.</li>
+    <li>You can ask us to erase all server-side data attached to your anonymous ID by emailing <a href="mailto:destek@wecan.app">destek@wecan.app</a> with that ID (Profile tab → tap the ID to copy it). We will action it without undue delay and in any case within 30 days.</li>
+    <li>Records we are legally required to keep (for example, purchase records for tax purposes) are retained for the period the law requires.</li>
+  </ul>
+
+  <h2>Your rights</h2>
+  <p>Depending on where you live, you may have the right to access, correct, export or delete your
+  data, to object to or restrict processing, and to complain to your data protection authority.
+  Because the App is anonymous, we can only act on such a request if you send us the anonymous ID
+  shown in the Profile tab — it is the only way we can locate your data. Requests go to
+  <a href="mailto:destek@wecan.app">destek@wecan.app</a>.</p>
+
+  <h2>International transfers</h2>
+  <p>Our provider infrastructure and the AI services listed above may process data in countries
+  outside your own, including the United States. Where required, such transfers rely on the
+  safeguards offered by those providers, such as the European Commission's Standard Contractual
+  Clauses.</p>
+
+  <h2>Security</h2>
+  <p>Traffic between the App and our servers is encrypted in transit (TLS). Data at rest is
+  encrypted by our hosting provider. Access to our systems is restricted and secrets are held
+  server-side only. No system is perfectly secure, so we cannot promise absolute security — but we
+  do commit to notifying affected users and the competent authority where a breach requires it.</p>
+
+  <h2>Changes to this policy</h2>
+  <p>If we change this policy we will update the date at the top and, for material changes, tell
+  you inside the App. Continuing to use Plumm after a change means you accept the updated policy.</p>
+
+  <h2>Contact</h2>
+  <p>Questions, requests or complaints: <a href="mailto:destek@wecan.app">destek@wecan.app</a></p>
+
+  <footer>
+    © 2026 Plumm. All rights reserved. · <a href="terms.html">Terms of Use</a>
+  </footer>
+</main>
+</body>
+</html>

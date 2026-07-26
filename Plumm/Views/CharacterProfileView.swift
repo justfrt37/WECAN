@@ -1,0 +1,414 @@
+//
+//  CharacterProfileView.swift
+//  Karakter profil sayfası — fullscreen sheet.
+//  Tasarım: AIGUI .pen "Karakter Profile".
+//
+
+import SwiftUI
+
+struct CharacterProfileView: View {
+    let character: Character
+    /// Chat'ten açıldığında alttaki "Chat" butonu gizlenir (zaten sohbetteyiz).
+    var showsChatButton: Bool = true
+    @Environment(\.dismiss) private var dismiss
+    @State private var page = 0
+    @State private var showPaywall = false
+    @State private var showLevels = false
+    /// Bu kullanıcının bu karakterle olan gerçek seviyesi/ilerlemesi. `character.
+    /// relationshipLevel` eski/global bir alan (bkz. gotchas); bunun yerine CANLI
+    /// `CharacterStore.levelCache`'ten okunur (chat her mesajda günceller → profil
+    /// ANINDA taze). Cache yoksa kalıcı yerel depoya, o da yoksa character alanına düşer.
+    @Environment(CharacterStore.self) private var characterStore: CharacterStore?
+
+    private var userLevel: Int {
+        characterStore?.levelCache[character.id]?.level
+            ?? LocalConversationStore.shared.load(for: character.id)?.level
+            ?? max(1, character.relationshipLevel)
+    }
+    private var userLevelProgress: Double {
+        characterStore?.levelCache[character.id]?.progress
+            ?? LocalConversationStore.shared.load(for: character.id)?.levelProgress
+            ?? 0
+    }
+    /// Chat header'ındakiyle aynı yerel hesap (bkz. ChatViewModel.currentActivity) —
+    /// bu view kendi ChatViewModel'ini paylaşmadığı için ayrıca hesaplanır.
+    @State private var currentActivity: (label: String, detail: String)?
+
+    /// Seviye/ilerleme/aktivite İLK KARE'de hazır olsun diye `.task` yerine
+    /// init'te okunur: kaynak `LocalConversationStore` bellek-içi bir sözlük
+    /// (disk/ağ YOK, bkz. LocalConversationStore) — senkron okumak bedava.
+    /// Eskiden `.task` içinde okunduğu için LV dairesi profil açıldıktan SONRA
+    /// belirip ring 0'dan doluyordu; artık profille birlikte geliyor.
+    init(character: Character, showsChatButton: Bool = true) {
+        self.character = character
+        self.showsChatButton = showsChatButton
+
+        let stored = LocalConversationStore.shared.load(for: character.id)
+        var activity: (label: String, detail: String)?
+        if let schedule = stored?.schedule,
+           let block = ScheduleLookup.currentBlock(schedule: schedule) {
+            activity = (label: block.label, detail: block.detail)
+        }
+        _currentActivity = State(initialValue: activity)
+    }
+
+    private var images: [URL] {
+        character.galleryURLs.isEmpty
+            ? [character.photoURL].compactMap { $0 }
+            : character.galleryURLs
+    }
+
+    /// Kilitli (PRO olmayan) foto için UCUZ "buzlu cam" yer tutucu. Eskiden
+    /// kilitli fotolar tam çözünürlükte İNDİRİLİP hem hero (520, blur 22) hem
+    /// grid'de (240, blur 18) Gaussian blur uygulanıyordu → aynı görsel iki kez
+    /// çözülüyor + tam-res blur RAM/CPU yiyordu. Kilitli zaten görünmez olacağı
+    /// için görseli hiç indirmeden obscured bir zemin çiziyoruz (görsel eşdeğer).
+    private var frostedLockedFill: some View {
+        Rectangle()
+            .fill(AppColor.card)
+            .overlay(
+                LinearGradient(colors: [AppColor.pink.opacity(0.12), AppColor.card.opacity(0.9)],
+                               startPoint: .topLeading, endPoint: .bottomTrailing)
+            )
+            .overlay(.ultraThinMaterial)
+    }
+
+    var body: some View {
+        NavigationStack {
+            ZStack(alignment: .top) {
+                AppColor.bg.ignoresSafeArea()
+
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        hero
+                        about
+                            .padding(.horizontal, 24)
+                            .padding(.top, 22)
+                        interestsSection
+                            .padding(.horizontal, 24)
+                            .padding(.top, 22)
+                        photosSection
+                            .padding(.horizontal, 24)
+                            .padding(.top, 22)
+                            .padding(.bottom, 30)
+                    }
+                }
+                .scrollIndicators(.hidden)
+                .ignoresSafeArea(edges: .top)
+
+                closeButton
+                    .padding(.trailing, 20)
+                    .padding(.top, 12)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+            }
+            .navigationDestination(for: Character.self) { ChatView(character: $0) }
+            .toolbar(.hidden, for: .navigationBar)
+        }
+        // PRO gerektiren her yerde onboarding paywall'ı (alttan fullscreen) açılır.
+        .fullScreenCover(isPresented: $showPaywall) { OnboardingPaywallView() }
+        .sheet(isPresented: $showLevels) {
+            RelationshipLevelsView(currentLevel: userLevel)
+        }
+    }
+
+    // MARK: Hero (kaydırılabilir resimler + isim + seviye)
+
+    private var hero: some View {
+        ZStack(alignment: .bottom) {
+            // Kaydırılabilir resimler — hazır galeri fotoğrafları (pre-made)
+            // SADECE burada gösteriliyor (bkz. GalleryView, "More Photos" oradan
+            // kaldırıldı). İlk foto (ana profil fotosu) her zaman açık — geri
+            // kalanı PRO olmayanlar için bulanık/kilitli kalır.
+            TabView(selection: $page) {
+                ForEach(Array(images.enumerated()), id: \.offset) { idx, url in
+                    let locked = idx > 0 && !PurchaseService.shared.isPro
+                    ZStack {
+                        // Kilitli: tam-res görseli indirip bulanıklaştırma yerine
+                        // ucuz buzlu-cam yer tutucu (bkz. frostedLockedFill).
+                        if locked {
+                            frostedLockedFill
+                        } else {
+                            CachedImage(url: url) { image in
+                                image.resizable().scaledToFill()
+                            } placeholder: {
+                                AppColor.card
+                            }
+                        }
+
+                        if locked {
+                            Color.black.opacity(0.25)
+                            Button { showPaywall = true } label: {
+                                Image(systemName: "lock.fill")
+                                    .font(.system(size: 34))
+                                    .foregroundStyle(.white)
+                                    .shadow(color: .black.opacity(0.5), radius: 8, y: 4)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .tag(idx)
+                }
+            }
+            .tabViewStyle(.page(indexDisplayMode: .never))
+            .frame(height: 520)
+            .clipped()
+
+            // Alt gradient
+            LinearGradient(
+                colors: [.clear, AppColor.bg.opacity(0.95), AppColor.bg],
+                startPoint: .center, endPoint: .bottom
+            )
+            .frame(height: 280)
+            .frame(maxHeight: .infinity, alignment: .bottom)
+            .allowsHitTesting(false)
+
+            VStack(spacing: 14) {
+                nameRow
+                paginationDots
+            }
+            .padding(.horizontal, 24)
+            .padding(.bottom, 18)
+        }
+        .frame(height: 520)
+        .clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
+    }
+
+    private var nameRow: some View {
+        HStack(alignment: .center) {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    Text(character.nameWithAge)
+                        .font(.system(size: 28, weight: .bold))
+                        .foregroundStyle(.white)
+                    Image(systemName: "checkmark.seal.fill")
+                        .font(.system(size: 18))
+                        .foregroundStyle(AppColor.pink)
+                }
+                HStack(spacing: 6) {
+                    Circle().fill(Color(hex: 0x4ECB71)).frame(width: 8, height: 8)
+                    Text(currentActivity?.label ?? character.locationText ?? String(localized: "Online"))
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.8))
+                }
+            }
+            Spacer()
+            HStack(spacing: 10) {
+                // Sohbet artık alt bar yerine Level'ın SOLUNDA yuvarlak buton
+                // olarak (bkz. kullanıcı talebi). Sohbetten açıldığında gizli.
+                if showsChatButton { chatCircleButton }
+                levelCircle
+            }
+        }
+    }
+
+    /// Level dairesinin solundaki yuvarlak "Sohbet" butonu — bu NavigationStack
+    /// içinde ChatView'i push eder (bkz. navigationDestination).
+    private var chatCircleButton: some View {
+        NavigationLink(value: character) {
+            Image(systemName: "bubble.left.and.bubble.right.fill")
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 56, height: 56)
+                .background(
+                    LinearGradient(colors: [AppColor.pink, AppColor.amber],
+                                   startPoint: .topLeading, endPoint: .bottomTrailing),
+                    in: Circle()
+                )
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// Kalp + LV N, ring seviyenin İÇİNDEKİ ilerlemeyle (levelProgress) orantılı dolar (0 → boş).
+    /// Dokununca İlişki Seviyeleri ekranı açılır.
+    private var levelCircle: some View {
+        Button { showLevels = true } label: { levelCircleContent }
+            .buttonStyle(.plain)
+    }
+
+    private var levelCircleContent: some View {
+        ZStack {
+            Circle().stroke(.white.opacity(0.12), lineWidth: 3)
+            Circle()
+                .trim(from: 0, to: userLevelProgress)
+                .stroke(
+                    LinearGradient(colors: [AppColor.pink, AppColor.amber],
+                                   startPoint: .topLeading, endPoint: .bottomTrailing),
+                    style: StrokeStyle(lineWidth: 3, lineCap: .round)
+                )
+                .rotationEffect(.degrees(-90))
+                .animation(.easeInOut(duration: 0.6), value: userLevelProgress)
+            VStack(spacing: 1) {
+                Image(systemName: "heart.fill")
+                    .font(.system(size: 13))
+                    .foregroundStyle(AppColor.pink)
+                Text("LV \(userLevel)")
+                    .font(.system(size: 10, weight: .heavy))
+                    .foregroundStyle(.white)
+            }
+        }
+        .frame(width: 64, height: 64)
+    }
+
+    private var paginationDots: some View {
+        HStack(spacing: 5) {
+            ForEach(images.indices, id: \.self) { i in
+                Capsule()
+                    .fill(i == page ? Color.white : Color.white.opacity(0.4))
+                    .frame(width: i == page ? 18 : 6, height: 6)
+            }
+        }
+    }
+
+    // MARK: Fotoğraflar (ilgi alanları altında, 2 sütun, aşağıya kadar)
+
+    private let photoColumns = [GridItem(.flexible(), spacing: 16),
+                                GridItem(.flexible(), spacing: 16)]
+
+    private var photosSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("PHOTOS")
+                .font(.system(size: 13, weight: .bold))
+                .tracking(0.5)
+                .foregroundStyle(.white.opacity(0.8))
+            LazyVGrid(columns: photoColumns, spacing: 16) {
+                ForEach(Array(images.enumerated()), id: \.offset) { idx, url in
+                    let locked = idx > 0 && !PurchaseService.shared.isPro
+                    // TAŞMAYA KARŞI BAĞIŞIK hücre: boyut çıpası olarak Color.clear
+                    // (sütun genişliğini doldurur, 240 yüksekliğinde); görsel bir
+                    // OVERLAY olarak çizilir ve `clipShape` HER ŞEYİ hücre sınırına
+                    // kırpar → scaledToFill/blur asla komşuya taşmaz, aradaki 16pt
+                    // boşluk korunur (bkz. "sağlı sollu birbirine giriyor" hatası).
+                    Color.clear
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 240)
+                        .overlay {
+                            // Kilitli: tam-res indir+blur yerine buzlu yer tutucu
+                            // (bkz. frostedLockedFill) → çift çözme + tam-res blur yok.
+                            if locked {
+                                frostedLockedFill
+                            } else {
+                                CachedImage(url: url) { image in
+                                    image.resizable().scaledToFill()
+                                } placeholder: { AppColor.card }
+                            }
+                        }
+                        .overlay {
+                            if locked {
+                                ZStack {
+                                    Color.black.opacity(0.25)
+                                    Image(systemName: "lock.fill")
+                                        .font(.system(size: 26))
+                                        .foregroundStyle(.white)
+                                        .shadow(color: .black.opacity(0.5), radius: 6, y: 3)
+                                }
+                            }
+                        }
+                        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                        .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                        .onTapGesture { if locked { showPaywall = true } }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    // MARK: Hakkımda
+
+    private var about: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("ABOUT")
+                .font(.system(size: 13, weight: .bold))
+                .tracking(0.5)
+                .foregroundStyle(.white.opacity(0.8))
+            if let profession = character.profession {
+                Text(profession)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(AppColor.pinkSoft)
+            }
+            Text(character.tagline)
+                .font(.system(size: 15, weight: .medium))
+                .lineSpacing(4)
+                .foregroundStyle(.white.opacity(0.9))
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    // MARK: İlgi Alanları
+
+    private var interestsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("INTERESTS")
+                .font(.system(size: 13, weight: .bold))
+                .tracking(0.5)
+                .foregroundStyle(.white.opacity(0.8))
+            FlowLayout(spacing: 8) {
+                ForEach(Array(character.interests.enumerated()), id: \.offset) { idx, item in
+                    interestChip(item, highlighted: idx == 0)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func interestChip(_ text: String, highlighted: Bool) -> some View {
+        Text(text)
+            .font(.system(size: 12, weight: highlighted ? .semibold : .medium))
+            .foregroundStyle(highlighted ? AppColor.pinkSoft : Color.white.opacity(0.85))
+            .padding(.horizontal, 14)
+            .frame(height: 34)
+            .background(highlighted ? AppColor.pink.opacity(0.15) : Color.white.opacity(0.08),
+                        in: Capsule())
+            .overlay(
+                Capsule().strokeBorder(
+                    highlighted ? AppColor.pink.opacity(0.3) : Color.white.opacity(0.12),
+                    lineWidth: 1)
+            )
+    }
+
+    private var closeButton: some View {
+        Button { dismiss() } label: {
+            Image(systemName: "xmark")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 36, height: 36)
+                .background(AppColor.bg.opacity(0.65), in: Circle())
+                .overlay(Circle().strokeBorder(.white.opacity(0.12), lineWidth: 1))
+        }
+    }
+}
+
+/// Basit sarmalayan (wrap) yerleşim — ilgi alanı chip'leri için.
+struct FlowLayout: Layout {
+    var spacing: CGFloat = 8
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let maxWidth = proposal.width ?? .infinity
+        var x: CGFloat = 0, y: CGFloat = 0, rowHeight: CGFloat = 0
+        for sub in subviews {
+            let size = sub.sizeThatFits(.unspecified)
+            if x + size.width > maxWidth, x > 0 {
+                x = 0; y += rowHeight + spacing; rowHeight = 0
+            }
+            x += size.width + spacing
+            rowHeight = max(rowHeight, size.height)
+        }
+        return CGSize(width: maxWidth == .infinity ? x : maxWidth, height: y + rowHeight)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var x = bounds.minX, y = bounds.minY, rowHeight: CGFloat = 0
+        for sub in subviews {
+            let size = sub.sizeThatFits(.unspecified)
+            if x + size.width > bounds.maxX, x > bounds.minX {
+                x = bounds.minX; y += rowHeight + spacing; rowHeight = 0
+            }
+            sub.place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(size))
+            x += size.width + spacing
+            rowHeight = max(rowHeight, size.height)
+        }
+    }
+}
+
+#Preview {
+    CharacterProfileView(character: Character.samples[0])
+}

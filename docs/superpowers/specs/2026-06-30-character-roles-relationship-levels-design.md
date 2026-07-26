@@ -1,7 +1,7 @@
 # Character Roles & Relationship Levels Design
 
 **Date:** 2026-06-30
-**Project:** WECAN / aiGirlfriend
+**Project:** WECAN / Plumm
 
 ---
 

@@ -1,4 +1,4 @@
-# aiGirlfriend
+# Plumm
 
 AI arkadaş / companion iOS uygulaması.
 **Yığın:** SwiftUI (iOS 17+) · Supabase (Free ile başla) · Grok 4.1 Fast (xAI).
@@ -20,9 +20,9 @@ Grok API key **hiçbir zaman uygulamanın içinde değil** — Edge Function'da 
 ## Proje yapısı
 
 ```
-aiGirlfriend.xcodeproj         Xcode projesi (synchronized folder)
-aiGirlfriend/                  Swift kaynakları
-  aiGirlfriendApp.swift        Giriş noktası
+Plumm.xcodeproj         Xcode projesi (synchronized folder)
+Plumm/                  Swift kaynakları
+  PlummApp.swift        Giriş noktası
   Config.swift                 Supabase URL + anon key (DOLDUR)
   Models/                      Character, Message
   Services/ChatService.swift   Edge Function'ı çağırır
@@ -36,7 +36,7 @@ supabase/
 ## Kurulum
 
 ### 1. iOS uygulaması
-- `aiGirlfriend.xcodeproj`'i Xcode ile aç, çalıştır (iOS 17+ simülatör).
+- `Plumm.xcodeproj`'i Xcode ile aç, çalıştır (iOS 17+ simülatör).
 - `Config.swift` içine Supabase `URL` ve `anon key`'i gir.
 
 ### 2. Supabase

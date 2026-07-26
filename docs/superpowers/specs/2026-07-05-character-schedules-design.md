@@ -122,18 +122,18 @@ chat).
 - Edit: `supabase/functions/chat/index.ts` (`currentActivity` field +
   instruction; `summarizeMessages` branch extended to accept
   `previousSchedule` and return `schedule`)
-- Edit: `aiGirlfriend/Services/ChatService.swift` (new
+- Edit: `Plumm/Services/ChatService.swift` (new
   `generateInitialSchedule`, `generateLocalSummary` gains
   `previousSchedule` param + `schedule` in its return, `sendWithLocalHistory`
   gains `currentActivity` param)
-- New: `aiGirlfriend/Models/CharacterSchedule.swift` (`ScheduleBlock`,
+- New: `Plumm/Models/CharacterSchedule.swift` (`ScheduleBlock`,
   `CharacterSchedule`, both `Codable`)
-- New: `aiGirlfriend/Services/ScheduleLookup.swift` (pure `currentBlock`
+- New: `Plumm/Services/ScheduleLookup.swift` (pure `currentBlock`
   function)
-- Edit: `aiGirlfriend/Services/LocalConversationStore.swift` (`Stored` gains
+- Edit: `Plumm/Services/LocalConversationStore.swift` (`Stored` gains
   `schedule: CharacterSchedule?`)
-- Edit: `aiGirlfriend/ViewModels/ChatViewModel.swift` (`currentActivity`
+- Edit: `Plumm/ViewModels/ChatViewModel.swift` (`currentActivity`
   property + refresh, initial-generation kickoff, threading
   `currentActivity`/`previousSchedule` through `send()`/`sendVoiceRequest()`/
   `sendImageRequest()`/summarization)
-- Edit: `aiGirlfriend/Views/ChatView.swift` (header status line)
+- Edit: `Plumm/Views/ChatView.swift` (header status line)

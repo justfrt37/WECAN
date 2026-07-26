@@ -602,10 +602,10 @@ git commit -m "feat: gate character creation by subscription tier + weekly slot 
 ## Task 7: Swift — `TokenStore` (client-side balance cache)
 
 **Files:**
-- Create: `aiGirlfriend/Services/TokenStore.swift`
+- Create: `Plumm/Services/TokenStore.swift`
 
 **Interfaces:**
-- Produces: `@Observable final class TokenStore { var balance: Int; func refresh() async }`, injected via `.environment(TokenStore())` the same way `CharacterStore`/`AuthService` already are in `aiGirlfriendApp.swift`.
+- Produces: `@Observable final class TokenStore { var balance: Int; func refresh() async }`, injected via `.environment(TokenStore())` the same way `CharacterStore`/`AuthService` already are in `PlummApp.swift`.
 
 - [ ] **Step 1: Write the store, mirroring `CharacterStore`'s disk-cache-then-refresh pattern**
 
@@ -657,7 +657,7 @@ final class TokenStore {
 }
 ```
 
-- [ ] **Step 2: Wire it into the app root** — modify `aiGirlfriend/aiGirlfriendApp.swift`: find the existing `@State private var characterStore = CharacterStore()`-style declarations and the matching `.environment(characterStore)` call, and add a sibling:
+- [ ] **Step 2: Wire it into the app root** — modify `Plumm/PlummApp.swift`: find the existing `@State private var characterStore = CharacterStore()`-style declarations and the matching `.environment(characterStore)` call, and add a sibling:
 
 ```swift
 @State private var tokenStore = TokenStore()
@@ -674,7 +674,7 @@ and in the same view builder where `.environment(characterStore)` is applied, ad
 - [ ] **Step 4: Commit**
 
 ```bash
-git add aiGirlfriend/Services/TokenStore.swift aiGirlfriend/aiGirlfriendApp.swift
+git add Plumm/Services/TokenStore.swift Plumm/PlummApp.swift
 git commit -m "feat: add TokenStore client-side balance cache"
 ```
 
@@ -683,8 +683,8 @@ git commit -m "feat: add TokenStore client-side balance cache"
 ## Task 8: Swift — `TokenBadge` view, placed once on `MainTabView`
 
 **Files:**
-- Create: `aiGirlfriend/Views/TokenBadge.swift`
-- Modify: `aiGirlfriend/Views/MainTabView.swift`
+- Create: `Plumm/Views/TokenBadge.swift`
+- Modify: `Plumm/Views/MainTabView.swift`
 
 **Interfaces:**
 - Consumes: `TokenStore` from Task 7 (via `@Environment(TokenStore.self)`).
@@ -747,7 +747,7 @@ struct TokenBadge: View {
 - [ ] **Step 5: Commit**
 
 ```bash
-git add aiGirlfriend/Views/TokenBadge.swift aiGirlfriend/Views/MainTabView.swift
+git add Plumm/Views/TokenBadge.swift Plumm/Views/MainTabView.swift
 git commit -m "feat: add persistent token badge to MainTabView's stack"
 ```
 
@@ -756,9 +756,9 @@ git commit -m "feat: add persistent token badge to MainTabView's stack"
 ## Task 9: Swift — `TokenStoreView` (paywall/purchase page)
 
 **Files:**
-- Create: `aiGirlfriend/Views/TokenStoreView.swift`
-- Modify: `aiGirlfriend/Services/PurchaseService.swift`
-- Modify: `aiGirlfriend/Views/PaywallHostView.swift`
+- Create: `Plumm/Views/TokenStoreView.swift`
+- Modify: `Plumm/Services/PurchaseService.swift`
+- Modify: `Plumm/Views/PaywallHostView.swift`
 
 **Interfaces:**
 - Consumes: `PurchaseService.shared` (extended below), `AppColor` (existing theme tokens).
@@ -1037,7 +1037,7 @@ struct PaywallHostView: View {
 - [ ] **Step 6: Commit**
 
 ```bash
-git add aiGirlfriend/Views/TokenStoreView.swift aiGirlfriend/Services/PurchaseService.swift aiGirlfriend/Views/PaywallHostView.swift aiGirlfriend/Localizable.xcstrings
+git add Plumm/Views/TokenStoreView.swift Plumm/Services/PurchaseService.swift Plumm/Views/PaywallHostView.swift Plumm/Localizable.xcstrings
 git commit -m "feat: add TokenStoreView, replace PaywallHostView placeholder"
 ```
 
@@ -1046,9 +1046,9 @@ git commit -m "feat: add TokenStoreView, replace PaywallHostView placeholder"
 ## Task 10: Swift — Streak popup
 
 **Files:**
-- Create: `aiGirlfriend/Services/StreakService.swift`
-- Create: `aiGirlfriend/Views/StreakPopupView.swift`
-- Modify: `aiGirlfriend/Views/MainTabView.swift`
+- Create: `Plumm/Services/StreakService.swift`
+- Create: `Plumm/Views/StreakPopupView.swift`
+- Modify: `Plumm/Views/MainTabView.swift`
 
 **Interfaces:**
 - Consumes: `claim-streak` edge function (Task 2), `TokenStore` (Task 7).
@@ -1216,7 +1216,7 @@ struct IdentifiableStreakResult: Identifiable {
 - [ ] **Step 5: Commit**
 
 ```bash
-git add aiGirlfriend/Services/StreakService.swift aiGirlfriend/Views/StreakPopupView.swift aiGirlfriend/Views/MainTabView.swift
+git add Plumm/Services/StreakService.swift Plumm/Views/StreakPopupView.swift Plumm/Views/MainTabView.swift
 git commit -m "feat: add daily streak popup, auto-claims once per app session"
 ```
 
@@ -1225,8 +1225,8 @@ git commit -m "feat: add daily streak popup, auto-claims once per app session"
 ## Task 11: Swift — Surface `insufficient_tokens` in chat + refresh balance after paid actions
 
 **Files:**
-- Modify: `aiGirlfriend/ViewModels/ChatViewModel.swift`
-- Modify: `aiGirlfriend/Services/ChatService.swift`
+- Modify: `Plumm/ViewModels/ChatViewModel.swift`
+- Modify: `Plumm/Services/ChatService.swift`
 
 **Interfaces:**
 - Consumes: `TokenStore` (Task 7) — `ChatViewModel` needs a reference to it, passed in the same way `store: CharacterStore?` is already threaded through today.
@@ -1270,7 +1270,7 @@ if let balance = result.tokenBalance { tokenStore?.setBalance(balance) }
 - [ ] **Step 6: Commit**
 
 ```bash
-git add aiGirlfriend/ViewModels/ChatViewModel.swift aiGirlfriend/Services/ChatService.swift aiGirlfriend/Localizable.xcstrings
+git add Plumm/ViewModels/ChatViewModel.swift Plumm/Services/ChatService.swift Plumm/Localizable.xcstrings
 git commit -m "feat: surface insufficient-tokens error, live-refresh balance after paid actions"
 ```
 
@@ -1279,7 +1279,7 @@ git commit -m "feat: surface insufficient-tokens error, live-refresh balance aft
 ## Task 12: Swift — Gate `CreateCharacterView` on subscription + slot allowance
 
 **Files:**
-- Modify: `aiGirlfriend/Views/CreateCharacterView.swift`
+- Modify: `Plumm/Views/CreateCharacterView.swift`
 
 **Interfaces:**
 - Consumes: `PurchaseService.shared.tier` (Task 9).
@@ -1306,7 +1306,7 @@ Add this string to `Localizable.xcstrings` with full `de/es/fr/it/pt/tr` transla
 - [ ] **Step 4: Commit**
 
 ```bash
-git add aiGirlfriend/Views/CreateCharacterView.swift aiGirlfriend/Localizable.xcstrings
+git add Plumm/Views/CreateCharacterView.swift Plumm/Localizable.xcstrings
 git commit -m "feat: gate character creation UI on subscription tier + weekly slots"
 ```
 

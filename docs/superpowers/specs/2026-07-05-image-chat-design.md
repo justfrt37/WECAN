@@ -166,11 +166,11 @@ read `galleryURLs`/this new table at all today and this change doesn't add that.
 - New: `supabase/functions/chat-image/index.ts`
 - New: `supabase/migrations/004_generated_photos.sql`
 - Edit: `supabase/functions/chat/index.ts` (`imageReactionChat` flag + `IMAGE_CAPTION_RULE`)
-- Edit: `aiGirlfriend/Services/ChatService.swift` (`generateChatImage`, `sendWithLocalHistory`
+- Edit: `Plumm/Services/ChatService.swift` (`generateChatImage`, `sendWithLocalHistory`
   gains `imageReactionChat` param)
-- New: `aiGirlfriend/Services/GeneratedPhotoService.swift`
-- Edit: `aiGirlfriend/ViewModels/ChatViewModel.swift` (`isImageArmed`, `isSendingImageReply`,
+- New: `Plumm/Services/GeneratedPhotoService.swift`
+- Edit: `Plumm/ViewModels/ChatViewModel.swift` (`isImageArmed`, `isSendingImageReply`,
   `sendImageRequest()`)
-- Edit: `aiGirlfriend/Views/ChatView.swift` (`quickReplyRow` rewrite, send-button branch,
+- Edit: `Plumm/Views/ChatView.swift` (`quickReplyRow` rewrite, send-button branch,
   `ImagePendingIndicator`, input placeholder)
-- Edit: `aiGirlfriend/Views/GalleryView.swift` ("Your Photos" section)
+- Edit: `Plumm/Views/GalleryView.swift` ("Your Photos" section)

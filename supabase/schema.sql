@@ -1,4 +1,4 @@
--- aiGirlfriend — Supabase şeması
+-- Plumm — Supabase şeması
 -- Çalıştır: Supabase Dashboard > SQL Editor > yapıştır > Run
 -- (Free tier ile başlanır; +18 hacmi büyüyünce self-hosted Supabase'e geçilir.)
 

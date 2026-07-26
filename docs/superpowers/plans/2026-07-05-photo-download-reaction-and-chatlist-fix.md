@@ -425,7 +425,7 @@ EOF
 ### Task 4: `ChatService.sendPhotoDownloadReaction`
 
 **Files:**
-- Modify: `aiGirlfriend/Services/ChatService.swift`
+- Modify: `Plumm/Services/ChatService.swift`
 
 **Interfaces:**
 - Consumes: `Config.chatFunctionURL`, `UserDefaultsManager.shared.accessToken`, `Config.supabaseAnonKey`, existing `ChatRequest`/`ChatResponse`/`WireHistoryMessage`/`RequestExtra`/`perform(...)` (all in this file).
@@ -586,7 +586,7 @@ No test target exists (see Global Constraints). Re-read the diff and confirm:
 - [ ] **Step 5: Commit**
 
 ```bash
-git add aiGirlfriend/Services/ChatService.swift
+git add Plumm/Services/ChatService.swift
 git commit -m "$(cat <<'EOF'
 feat: add ChatService.sendPhotoDownloadReaction
 
@@ -600,15 +600,15 @@ EOF
 ### Task 5: `CharacterStore.conversationsVersion` + bump on out-of-band injection
 
 **Files:**
-- Modify: `aiGirlfriend/Services/CharacterStore.swift`
-- Modify: `aiGirlfriend/Services/NotificationDelegate.swift:127-135`
+- Modify: `Plumm/Services/CharacterStore.swift`
+- Modify: `Plumm/Services/NotificationDelegate.swift:127-135`
 
 **Interfaces:**
 - Produces: `CharacterStore.conversationsVersion: Int` — observed by Task 8 (`ChatListView`), bumped by `NotificationDelegate.injectMessage` (this task) and by `ChatViewModel.reactToPrivateDownload` (Task 6).
 
 - [ ] **Step 1: Add the property**
 
-In `aiGirlfriend/Services/CharacterStore.swift`, find:
+In `Plumm/Services/CharacterStore.swift`, find:
 
 ```swift
     /// Karakter başına sohbet geçmişi önbelleği (Chat History'de doldurulur,
@@ -629,7 +629,7 @@ Add right after it:
 
 - [ ] **Step 2: Bump it from `NotificationDelegate.injectMessage`**
 
-In `aiGirlfriend/Services/NotificationDelegate.swift`, find:
+In `Plumm/Services/NotificationDelegate.swift`, find:
 
 ```swift
     private func injectMessage(_ text: String, for characterID: UUID) {
@@ -665,7 +665,7 @@ Confirm `CharacterStore` is `@Observable` (it is, line 10) so `conversationsVers
 - [ ] **Step 4: Commit**
 
 ```bash
-git add aiGirlfriend/Services/CharacterStore.swift aiGirlfriend/Services/NotificationDelegate.swift
+git add Plumm/Services/CharacterStore.swift Plumm/Services/NotificationDelegate.swift
 git commit -m "$(cat <<'EOF'
 feat: add CharacterStore.conversationsVersion, bump on notification message injection
 
@@ -679,7 +679,7 @@ EOF
 ### Task 6: `ChatViewModel.reactToPrivateDownload`
 
 **Files:**
-- Modify: `aiGirlfriend/ViewModels/ChatViewModel.swift`
+- Modify: `Plumm/ViewModels/ChatViewModel.swift`
 
 **Interfaces:**
 - Consumes: `service.sendPhotoDownloadReaction(character:localMessages:summary:level:photoURL:) async throws -> String?` (Task 4), `LocalConversationStore.shared.load(for:)`, `realMessages()`, `updateCache()`, `store?.conversationsVersion` (Task 5).
@@ -724,7 +724,7 @@ Confirm `service` (line 43, `private let service = ChatService()`), `realMessage
 - [ ] **Step 3: Commit**
 
 ```bash
-git add aiGirlfriend/ViewModels/ChatViewModel.swift
+git add Plumm/ViewModels/ChatViewModel.swift
 git commit -m "$(cat <<'EOF'
 feat: add ChatViewModel.reactToPrivateDownload
 
@@ -738,15 +738,15 @@ EOF
 ### Task 7: Download button in `FullscreenImageView` + `PHPhotoLibrary` save + Info.plist key
 
 **Files:**
-- Modify: `aiGirlfriend/Views/ChatView.swift:1-7` (import), `:92-99` (fullScreenCover wiring), `:621-647` (`FullscreenImageView`)
-- Modify: `aiGirlfriend.xcodeproj/project.pbxproj` (both Debug and Release `INFOPLIST_KEY_*` blocks)
+- Modify: `Plumm/Views/ChatView.swift:1-7` (import), `:92-99` (fullScreenCover wiring), `:621-647` (`FullscreenImageView`)
+- Modify: `Plumm.xcodeproj/project.pbxproj` (both Debug and Release `INFOPLIST_KEY_*` blocks)
 
 **Interfaces:**
 - Consumes: `ImageCache.shared.image(for: URL) -> UIImage?` (already exists), `viewModel.reactToPrivateDownload(imageURL:)` (Task 6).
 
 - [ ] **Step 1: Add the Info.plist usage-description key**
 
-In `aiGirlfriend.xcodeproj/project.pbxproj`, find (appears twice — once per build config):
+In `Plumm.xcodeproj/project.pbxproj`, find (appears twice — once per build config):
 
 ```
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Microphone access is needed to send voice messages.";
@@ -765,7 +765,7 @@ Replace **both occurrences** with:
 
 - [ ] **Step 2: Add the `Photos` import**
 
-In `aiGirlfriend/Views/ChatView.swift`, find:
+In `Plumm/Views/ChatView.swift`, find:
 
 ```swift
 import SwiftUI
@@ -932,15 +932,15 @@ Replace with:
 - [ ] **Step 5: Manual read-through verification**
 
 No test target / no Xcode in this environment (see Global Constraints). Re-read the diff and confirm:
-1. `FullscreenImageView`'s new `onDownloaded` parameter is supplied at both the call site above and has no other call sites in the file (`grep -n "FullscreenImageView(" aiGirlfriend/Views/ChatView.swift` should show exactly one construction, matching the new 3-argument form).
+1. `FullscreenImageView`'s new `onDownloaded` parameter is supplied at both the call site above and has no other call sites in the file (`grep -n "FullscreenImageView(" Plumm/Views/ChatView.swift` should show exactly one construction, matching the new 3-argument form).
 2. `PHAssetChangeRequest` and `PHPhotoLibrary` are both part of the `Photos` framework import added in Step 2 — no additional framework needed.
-3. The `project.pbxproj` edit applied to **both** the Debug and Release blocks (`grep -c "INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription" aiGirlfriend.xcodeproj/project.pbxproj` should print `2`).
+3. The `project.pbxproj` edit applied to **both** the Debug and Release blocks (`grep -c "INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription" Plumm.xcodeproj/project.pbxproj` should print `2`).
 4. Flag to the user: this task is unverified beyond static review — a real Xcode build and on-device tap-through (download a photo, confirm it lands in Photos, confirm permission-denied path shows the inline message) is still owed, per the Global Constraints note.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add aiGirlfriend/Views/ChatView.swift aiGirlfriend.xcodeproj/project.pbxproj
+git add Plumm/Views/ChatView.swift Plumm.xcodeproj/project.pbxproj
 git commit -m "$(cat <<'EOF'
 feat: add photo download button to fullscreen chat image viewer
 
@@ -954,7 +954,7 @@ EOF
 ### Task 8: `ChatListView` — sort by recency + new reactive trigger
 
 **Files:**
-- Modify: `aiGirlfriend/Views/ChatListView.swift:37-115`
+- Modify: `Plumm/Views/ChatListView.swift:37-115`
 
 **Interfaces:**
 - Consumes: `CharacterStore.conversationsVersion` (Task 5).
@@ -1040,7 +1040,7 @@ No test target / no Xcode in this environment (see Global Constraints). Re-read 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add aiGirlfriend/Views/ChatListView.swift
+git add Plumm/Views/ChatListView.swift
 git commit -m "$(cat <<'EOF'
 fix: sort chat list by most-recent message, add reactive trigger for out-of-band message injection
 

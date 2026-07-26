@@ -98,7 +98,7 @@ git commit -m "feat: backfill vibe for seed catalog characters"
 ### Task 2: Expose `vibe` on the `Character` model
 
 **Files:**
-- Modify: `aiGirlfriend/Models/Character.swift`
+- Modify: `Plumm/Models/Character.swift`
 
 **Interfaces:**
 - Consumes: nothing new — reads `builder_selections` from the same REST payload `CharacterService.fetchAll()` already fetches (`select=*`).
@@ -106,7 +106,7 @@ git commit -m "feat: backfill vibe for seed catalog characters"
 
 - [ ] **Step 1: Add the field and decode logic**
 
-Open `aiGirlfriend/Models/Character.swift`. Add a stored property next to `personalityRole` (around line 30):
+Open `Plumm/Models/Character.swift`. Add a stored property next to `personalityRole` (around line 30):
 
 ```swift
 var personalityRole: String  // flirty | distant | shy | playful | devoted | crazy | ex
@@ -141,13 +141,13 @@ vibe = builderSelections??.vibe ?? "Sweet"
 
 - [ ] **Step 2: Verify it builds**
 
-Run: `xcodebuild -project aiGirlfriend.xcodeproj -scheme aiGirlfriend -destination 'generic/platform=iOS Simulator' build`
+Run: `xcodebuild -project Plumm.xcodeproj -scheme Plumm -destination 'generic/platform=iOS Simulator' build`
 Expected: `BUILD SUCCEEDED`, no decode-related warnings on `Character.swift`.
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add aiGirlfriend/Models/Character.swift
+git add Plumm/Models/Character.swift
 git commit -m "feat: decode character vibe from builder_selections"
 ```
 
@@ -156,7 +156,7 @@ git commit -m "feat: decode character vibe from builder_selections"
 ### Task 3: Role-only content — Liked You (7 lines) + Level-Up Tease (7 lines)
 
 **Files:**
-- Create: `aiGirlfriend/Services/Notifications/RoleOnlyContent.swift`
+- Create: `Plumm/Services/Notifications/RoleOnlyContent.swift`
 
 **Interfaces:**
 - Produces: `LikedYouContent.opener(forRole:) -> String`, `LevelUpTeaseContent.line(forRole:) -> String`. Both take a raw role string and fall back to the `"flirty"` entry for any unrecognized value (defensive — matches `Relationship.stageName`'s `default:` pattern).
@@ -227,13 +227,13 @@ Expected: `OK: all 7 roles + unknown fallback resolve`
 
 - [ ] **Step 3: Build check**
 
-Run: `xcodebuild -project aiGirlfriend.xcodeproj -scheme aiGirlfriend -destination 'generic/platform=iOS Simulator' build`
+Run: `xcodebuild -project Plumm.xcodeproj -scheme Plumm -destination 'generic/platform=iOS Simulator' build`
 Expected: `BUILD SUCCEEDED`
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add aiGirlfriend/Services/Notifications/RoleOnlyContent.swift
+git add Plumm/Services/Notifications/RoleOnlyContent.swift
 git commit -m "feat: add liked-you and level-up-tease notification content"
 ```
 
@@ -242,7 +242,7 @@ git commit -m "feat: add liked-you and level-up-tease notification content"
 ### Task 4: Jealousy Bait content (role × vibe × 3 variants = 84 lines)
 
 **Files:**
-- Create: `aiGirlfriend/Services/Notifications/JealousyContent.swift`
+- Create: `Plumm/Services/Notifications/JealousyContent.swift`
 
 **Interfaces:**
 - Produces: `JealousyContent.randomLine(role: String, vibe: String) -> String`.
@@ -387,17 +387,17 @@ swift /tmp/jealousy_check.swift
 ```
 Expected: `OK: 84 jealousy lines expected across 7 roles x 4 vibes x 3 variants`
 
-Then manually confirm every one of the 28 `role`/`vibe` cells in `JealousyContent.swift` has exactly 3 strings (`grep -c 'String(localized:' aiGirlfriend/Services/Notifications/JealousyContent.swift` should print `84`).
+Then manually confirm every one of the 28 `role`/`vibe` cells in `JealousyContent.swift` has exactly 3 strings (`grep -c 'String(localized:' Plumm/Services/Notifications/JealousyContent.swift` should print `84`).
 
 - [ ] **Step 3: Build check**
 
-Run: `xcodebuild -project aiGirlfriend.xcodeproj -scheme aiGirlfriend -destination 'generic/platform=iOS Simulator' build`
+Run: `xcodebuild -project Plumm.xcodeproj -scheme Plumm -destination 'generic/platform=iOS Simulator' build`
 Expected: `BUILD SUCCEEDED`
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add aiGirlfriend/Services/Notifications/JealousyContent.swift
+git add Plumm/Services/Notifications/JealousyContent.swift
 git commit -m "feat: add jealousy bait notification content (84 lines)"
 ```
 
@@ -406,7 +406,7 @@ git commit -m "feat: add jealousy bait notification content (84 lines)"
 ### Task 5: Ghosted content (role × vibe × tier × 3 variants = 252 lines)
 
 **Files:**
-- Create: `aiGirlfriend/Services/Notifications/GhostedContent.swift`
+- Create: `Plumm/Services/Notifications/GhostedContent.swift`
 
 **Interfaces:**
 - Produces: `GhostedContent.randomLine(role: String, vibe: String, level: Int) -> String`. `level` (the conversation's `relationship_level`, 1-10) is bucketed internally into `"low"` (1-3), `"mid"` (4-6), `"high"` (7-10) — callers pass the raw level, not the tier string.
@@ -794,17 +794,17 @@ swift /tmp/ghosted_check.swift
 ```
 Expected: `OK: tier bucketing correct, 252 ghosted lines expected across 7x4x3x3`
 
-Then confirm actual count: `grep -c 'String(localized:' aiGirlfriend/Services/Notifications/GhostedContent.swift` should print `252`.
+Then confirm actual count: `grep -c 'String(localized:' Plumm/Services/Notifications/GhostedContent.swift` should print `252`.
 
 - [ ] **Step 3: Build check**
 
-Run: `xcodebuild -project aiGirlfriend.xcodeproj -scheme aiGirlfriend -destination 'generic/platform=iOS Simulator' build`
+Run: `xcodebuild -project Plumm.xcodeproj -scheme Plumm -destination 'generic/platform=iOS Simulator' build`
 Expected: `BUILD SUCCEEDED`
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add aiGirlfriend/Services/Notifications/GhostedContent.swift
+git add Plumm/Services/Notifications/GhostedContent.swift
 git commit -m "feat: add ghosted notification content (252 lines)"
 ```
 
@@ -813,7 +813,7 @@ git commit -m "feat: add ghosted notification content (252 lines)"
 ### Task 6: `NotificationPreferencesStore` — per-bot daily caps
 
 **Files:**
-- Create: `aiGirlfriend/Services/NotificationPreferencesStore.swift`
+- Create: `Plumm/Services/NotificationPreferencesStore.swift`
 
 **Interfaces:**
 - Produces:
@@ -934,13 +934,13 @@ Expected: `OK: cap/unlimited/none logic verified`
 
 - [ ] **Step 3: Build check**
 
-Run: `xcodebuild -project aiGirlfriend.xcodeproj -scheme aiGirlfriend -destination 'generic/platform=iOS Simulator' build`
+Run: `xcodebuild -project Plumm.xcodeproj -scheme Plumm -destination 'generic/platform=iOS Simulator' build`
 Expected: `BUILD SUCCEEDED`
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add aiGirlfriend/Services/NotificationPreferencesStore.swift
+git add Plumm/Services/NotificationPreferencesStore.swift
 git commit -m "feat: add per-bot daily notification cap preferences store"
 ```
 
@@ -949,7 +949,7 @@ git commit -m "feat: add per-bot daily notification cap preferences store"
 ### Task 7: `NotificationScheduler` — core scheduling logic
 
 **Files:**
-- Create: `aiGirlfriend/Services/NotificationScheduler.swift`
+- Create: `Plumm/Services/NotificationScheduler.swift`
 
 **Interfaces:**
 - Consumes:
@@ -1196,13 +1196,13 @@ Expected: `OK: role intervals and tier bucketing verified`
 
 - [ ] **Step 3: Build check**
 
-Run: `xcodebuild -project aiGirlfriend.xcodeproj -scheme aiGirlfriend -destination 'generic/platform=iOS Simulator' build`
+Run: `xcodebuild -project Plumm.xcodeproj -scheme Plumm -destination 'generic/platform=iOS Simulator' build`
 Expected: `BUILD SUCCEEDED`
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add aiGirlfriend/Services/NotificationScheduler.swift
+git add Plumm/Services/NotificationScheduler.swift
 git commit -m "feat: add NotificationScheduler for all 4 re-engagement systems"
 ```
 
@@ -1211,9 +1211,9 @@ git commit -m "feat: add NotificationScheduler for all 4 re-engagement systems"
 ### Task 8: Notification tap handling + app lifecycle wiring
 
 **Files:**
-- Modify: `aiGirlfriend/aiGirlfriendApp.swift`
-- Create: `aiGirlfriend/Services/NotificationDelegate.swift`
-- Modify: `aiGirlfriend/ViewModels/ChatViewModel.swift:165` (call `noteUserSent` after appending the user message)
+- Modify: `Plumm/PlummApp.swift`
+- Create: `Plumm/Services/NotificationDelegate.swift`
+- Modify: `Plumm/ViewModels/ChatViewModel.swift:165` (call `noteUserSent` after appending the user message)
 
 **Interfaces:**
 - Consumes: `NotificationScheduler.shared`, `CharacterStore`, `LocalConversationStore`, content-table `random`/`opener`/`line` functions from Tasks 3-5.
@@ -1293,20 +1293,20 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
 **Note:** `NotificationScheduler.shared.recordDelivery(kind:characterID:)` is a small addition needed on top of Task 7's `NotificationScheduler` — add this method in this task since it's tap-handling glue, not scheduling:
 
 ```swift
-// Add to NotificationScheduler (aiGirlfriend/Services/NotificationScheduler.swift):
+// Add to NotificationScheduler (Plumm/Services/NotificationScheduler.swift):
 func recordDelivery(kind: NotificationKind, characterID: UUID) {
     guard kind != .liked else { return } // Liked You has no per-bot cap (untalked bots aren't in the cap list)
     NotificationPreferencesStore.recordSent(for: characterID)
 }
 ```
 
-- [ ] **Step 2: Wire lifecycle hooks in `aiGirlfriendApp.swift`**
+- [ ] **Step 2: Wire lifecycle hooks in `PlummApp.swift`**
 
 Replace the file's contents with:
 
 ```swift
 //
-//  aiGirlfriendApp.swift
+//  PlummApp.swift
 //  AI companion / arkadaş uygulaması.
 //  Backend: Supabase (DB + Auth + Edge Functions)
 //  LLM: Grok 4.1 Fast (xAI) — API key SUNUCUDA, Edge Function üzerinden çağrılır.
@@ -1318,7 +1318,7 @@ Replace the file's contents with:
 import SwiftUI
 
 @main
-struct aiGirlfriendApp: App {
+struct PlummApp: App {
     @State private var navigationCenter = NavigationCenter()
     @State private var auth = AuthService()
     @State private var store = CharacterStore()
@@ -1361,7 +1361,7 @@ struct aiGirlfriendApp: App {
 
 - [ ] **Step 3: Reset the jealousy timer when a chat is opened**
 
-Open `aiGirlfriend/ViewModels/ChatViewModel.swift`. Find its `init`/`onAppear`-equivalent setup (around line 74-90, where it loads cached/local messages). Add, right after the character/store are known (e.g. right after line 74's cache check or in the existing load path):
+Open `Plumm/ViewModels/ChatViewModel.swift`. Find its `init`/`onAppear`-equivalent setup (around line 74-90, where it loads cached/local messages). Add, right after the character/store are known (e.g. right after line 74's cache check or in the existing load path):
 
 ```swift
 NotificationScheduler.shared.cancelJealousyTimer(for: character.id)
@@ -1377,13 +1377,13 @@ NotificationScheduler.shared.noteUserSent(character: character)
 
 - [ ] **Step 5: Build check**
 
-Run: `xcodebuild -project aiGirlfriend.xcodeproj -scheme aiGirlfriend -destination 'generic/platform=iOS Simulator' build`
+Run: `xcodebuild -project Plumm.xcodeproj -scheme Plumm -destination 'generic/platform=iOS Simulator' build`
 Expected: `BUILD SUCCEEDED`
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add aiGirlfriend/aiGirlfriendApp.swift aiGirlfriend/Services/NotificationDelegate.swift aiGirlfriend/Services/NotificationScheduler.swift aiGirlfriend/ViewModels/ChatViewModel.swift
+git add Plumm/PlummApp.swift Plumm/Services/NotificationDelegate.swift Plumm/Services/NotificationScheduler.swift Plumm/ViewModels/ChatViewModel.swift
 git commit -m "feat: wire notification tap handling and app-lifecycle scheduling"
 ```
 
@@ -1392,8 +1392,8 @@ git commit -m "feat: wire notification tap handling and app-lifecycle scheduling
 ### Task 9: Settings menu — replace the notification toggle in `ProfileView`
 
 **Files:**
-- Create: `aiGirlfriend/Views/NotificationSettingsView.swift`
-- Modify: `aiGirlfriend/Views/ProfileView.swift`
+- Create: `Plumm/Views/NotificationSettingsView.swift`
+- Modify: `Plumm/Views/ProfileView.swift`
 
 **Interfaces:**
 - Consumes: `CharacterStore.characters`, `LocalConversationStore.shared.load(for:)` (to find active conversations), `BlockedCharactersStore.isBlocked(_:)` (exclude blocked bots), `NotificationPreferencesStore.dailyCap(for:)` / `.setDailyCap(_:for:)`.
@@ -1493,7 +1493,7 @@ struct NotificationSettingsView: View {
 
 - [ ] **Step 2: Wire it into `ProfileView`**
 
-Open `aiGirlfriend/Views/ProfileView.swift`. Find `notificationRow` (around line 155-165) — it currently drives `@State private var notificationsOn` with a `Toggle`. Replace its body: keep the master on/off `Toggle` row exactly as-is (still the real OS-permission-backed toggle, unchanged behavior — see `currentNotificationStatus()` around line 184), but wrap the row in a `NavigationLink` to `NotificationSettingsView()` so tapping the row (not the toggle itself) opens the per-bot menu:
+Open `Plumm/Views/ProfileView.swift`. Find `notificationRow` (around line 155-165) — it currently drives `@State private var notificationsOn` with a `Toggle`. Replace its body: keep the master on/off `Toggle` row exactly as-is (still the real OS-permission-backed toggle, unchanged behavior — see `currentNotificationStatus()` around line 184), but wrap the row in a `NavigationLink` to `NotificationSettingsView()` so tapping the row (not the toggle itself) opens the per-bot menu:
 
 ```swift
 NavigationLink {
@@ -1507,7 +1507,7 @@ Adjust the existing `Toggle`'s tap target if needed so the row navigates on tap 
 
 - [ ] **Step 3: Build check**
 
-Run: `xcodebuild -project aiGirlfriend.xcodeproj -scheme aiGirlfriend -destination 'generic/platform=iOS Simulator' build`
+Run: `xcodebuild -project Plumm.xcodeproj -scheme Plumm -destination 'generic/platform=iOS Simulator' build`
 Expected: `BUILD SUCCEEDED`
 
 - [ ] **Step 4: Manual verification (no test target — this is a UI screen, verify in Simulator)**
@@ -1521,7 +1521,7 @@ Run the app in the iOS Simulator (`xcodebuild ... -destination 'platform=iOS Sim
 - [ ] **Step 5: Commit**
 
 ```bash
-git add aiGirlfriend/Views/NotificationSettingsView.swift aiGirlfriend/Views/ProfileView.swift
+git add Plumm/Views/NotificationSettingsView.swift Plumm/Views/ProfileView.swift
 git commit -m "feat: add per-bot notification settings menu"
 ```
 
@@ -1530,7 +1530,7 @@ git commit -m "feat: add per-bot notification settings menu"
 ### Task 10: Request notification permission at the right time + final integration pass
 
 **Files:**
-- Modify: `aiGirlfriend/Views/ProfileView.swift` (verify existing `requestNotificationPermission`-equivalent code, around line 184-196, still gates all scheduling)
+- Modify: `Plumm/Views/ProfileView.swift` (verify existing `requestNotificationPermission`-equivalent code, around line 184-196, still gates all scheduling)
 
 **Interfaces:**
 - Consumes: everything from Tasks 1-9.
@@ -1571,7 +1571,7 @@ func onBackground(characters: [Character]) {
 
 - [ ] **Step 2: Build check**
 
-Run: `xcodebuild -project aiGirlfriend.xcodeproj -scheme aiGirlfriend -destination 'generic/platform=iOS Simulator' build`
+Run: `xcodebuild -project Plumm.xcodeproj -scheme Plumm -destination 'generic/platform=iOS Simulator' build`
 Expected: `BUILD SUCCEEDED`
 
 - [ ] **Step 3: Manual end-to-end verification in Simulator**
@@ -1584,7 +1584,7 @@ Launch the app, grant notification permission via the Profile toggle, start a co
 - [ ] **Step 4: Commit**
 
 ```bash
-git add aiGirlfriend/Services/NotificationScheduler.swift
+git add Plumm/Services/NotificationScheduler.swift
 git commit -m "fix: gate all notification scheduling behind granted permission"
 ```
 

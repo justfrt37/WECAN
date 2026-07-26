@@ -1,4 +1,4 @@
--- aiGirlfriend — "Tümünü Gör" için dummy karakterler
+-- Plumm — "Tümünü Gör" için dummy karakterler
 -- 5 Realistic + 5 Fantasy + 5 Anime = 15 kız
 -- Çalıştır: Supabase Dashboard > SQL Editor > yapıştır > Run
 -- (Önce schema.sql çalıştırılmış olmalı — `category` kolonu gerekli.)

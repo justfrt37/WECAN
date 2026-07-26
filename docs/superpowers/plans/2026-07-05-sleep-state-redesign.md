@@ -22,7 +22,7 @@
 ### Task 1: `LocalConversationStore.Stored` — `wokenUpAt`/`manualSleepAt` fields
 
 **Files:**
-- Modify: `aiGirlfriend/Services/LocalConversationStore.swift:16-77`
+- Modify: `Plumm/Services/LocalConversationStore.swift:16-77`
 
 **Interfaces:**
 - Produces: `Stored.wokenUpAt: Date?`, `Stored.manualSleepAt: Date?` — read/written by every later task in this plan via `LocalConversationStore.shared.load(for:)`/`.save(_:for:)`.
@@ -191,7 +191,7 @@ both encoded with `encodeIfPresent`.
 - [ ] **Step 3: Commit**
 
 ```bash
-git add aiGirlfriend/Services/LocalConversationStore.swift
+git add Plumm/Services/LocalConversationStore.swift
 git commit -m "$(cat <<'EOF'
 feat: add wokenUpAt/manualSleepAt fields to LocalConversationStore.Stored
 
@@ -205,7 +205,7 @@ EOF
 ### Task 2: `CharacterSleepState.isEffectivelyAsleep`
 
 **Files:**
-- Create: `aiGirlfriend/Services/CharacterSleepState.swift`
+- Create: `Plumm/Services/CharacterSleepState.swift`
 
 **Interfaces:**
 - Consumes: `LocalConversationStore.Stored` (Task 1), `ScheduleLookup.currentBlock(schedule:date:calendar:)` (existing, `ScheduleLookup.swift:11-32`).
@@ -244,7 +244,7 @@ positionally-matched by label, matching that signature exactly.
 - [ ] **Step 3: Commit**
 
 ```bash
-git add aiGirlfriend/Services/CharacterSleepState.swift
+git add Plumm/Services/CharacterSleepState.swift
 git commit -m "$(cat <<'EOF'
 feat: add CharacterSleepState.isEffectivelyAsleep
 
@@ -258,7 +258,7 @@ EOF
 ### Task 3: `ScheduleLookup.nextSleepBlockStart`
 
 **Files:**
-- Modify: `aiGirlfriend/Services/ScheduleLookup.swift`
+- Modify: `Plumm/Services/ScheduleLookup.swift`
 
 **Interfaces:**
 - Consumes: existing private `minutesFromHHmm(_:)` in the same file.
@@ -326,7 +326,7 @@ tomorrow.
 - [ ] **Step 3: Commit**
 
 ```bash
-git add aiGirlfriend/Services/ScheduleLookup.swift
+git add Plumm/Services/ScheduleLookup.swift
 git commit -m "$(cat <<'EOF'
 feat: add ScheduleLookup.nextSleepBlockStart
 
@@ -340,7 +340,7 @@ EOF
 ### Task 4: `SleepyContent` dialogue table
 
 **Files:**
-- Create: `aiGirlfriend/Services/Notifications/SleepyContent.swift`
+- Create: `Plumm/Services/Notifications/SleepyContent.swift`
 
 **Interfaces:**
 - Produces: `SleepyContent.question(language: String) -> String`, `SleepyContent.goodbye(language: String) -> String` — consumed by Task 6 (`NotificationDelegate`).
@@ -392,7 +392,7 @@ Confirm `ConversationLanguage.supported` is exactly `["tr", "en"]` (checked agai
 - [ ] **Step 3: Commit**
 
 ```bash
-git add aiGirlfriend/Services/Notifications/SleepyContent.swift
+git add Plumm/Services/Notifications/SleepyContent.swift
 git commit -m "$(cat <<'EOF'
 feat: add SleepyContent dialogue table for sleep notifications
 
@@ -406,7 +406,7 @@ EOF
 ### Task 5: `NotificationScheduler` — new kinds, shared one-shot helper, sleepy-goodnight pair
 
 **Files:**
-- Modify: `aiGirlfriend/Services/NotificationScheduler.swift`
+- Modify: `Plumm/Services/NotificationScheduler.swift`
 
 **Interfaces:**
 - Consumes: `LocalConversationStore.Stored` (Task 1), `Character` (existing model — `id: UUID`, `name: String`).
@@ -516,7 +516,7 @@ one (`from.addingTimeInterval(...)` for the pair, an absolute `Date` from
 - [ ] **Step 3: Commit**
 
 ```bash
-git add aiGirlfriend/Services/NotificationScheduler.swift
+git add Plumm/Services/NotificationScheduler.swift
 git commit -m "$(cat <<'EOF'
 feat: add sleepyQuestion/sleepyGoodbye/bedtime notification kinds + shared one-shot helper
 
@@ -530,7 +530,7 @@ EOF
 ### Task 6: `NotificationDelegate` — handle the 3 new kinds
 
 **Files:**
-- Modify: `aiGirlfriend/Services/NotificationDelegate.swift`
+- Modify: `Plumm/Services/NotificationDelegate.swift`
 
 **Interfaces:**
 - Consumes: `SleepyContent.question(language:)`/`.goodbye(language:)` (Task 4), `NotificationKind.sleepyQuestion`/`.sleepyGoodbye`/`.bedtime` (Task 5).
@@ -636,7 +636,7 @@ the single injection point for all dialogue-bearing kinds.
 - [ ] **Step 4: Commit**
 
 ```bash
-git add aiGirlfriend/Services/NotificationDelegate.swift
+git add Plumm/Services/NotificationDelegate.swift
 git commit -m "$(cat <<'EOF'
 feat: handle sleepyQuestion/sleepyGoodbye/bedtime notification taps
 
@@ -650,7 +650,7 @@ EOF
 ### Task 7: `ChatViewModel.handleWakeUpIfAsleep` rewrite
 
 **Files:**
-- Modify: `aiGirlfriend/ViewModels/ChatViewModel.swift:539-550`
+- Modify: `Plumm/ViewModels/ChatViewModel.swift:539-550`
 
 **Interfaces:**
 - Consumes: `CharacterSleepState.isEffectivelyAsleep(stored:now:)` (Task 2), `NotificationScheduler.shared.scheduleSleepyGoodnight(for:from:)`/`.cancelSleepyGoodnight(for:)` (Task 5).
@@ -726,7 +726,7 @@ the existing `updateCache()` pattern elsewhere in this file of load-mutate-save.
 - [ ] **Step 3: Commit**
 
 ```bash
-git add aiGirlfriend/ViewModels/ChatViewModel.swift
+git add Plumm/ViewModels/ChatViewModel.swift
 git commit -m "$(cat <<'EOF'
 fix: persist wake-up state instead of re-triggering the wake delay every message
 
@@ -740,7 +740,7 @@ EOF
 ### Task 8: `NotificationScheduler.rescheduleBedtime`
 
 **Files:**
-- Modify: `aiGirlfriend/Services/NotificationScheduler.swift`
+- Modify: `Plumm/Services/NotificationScheduler.swift`
 
 **Interfaces:**
 - Consumes: `ScheduleLookup.nextSleepBlockStart(schedule:from:calendar:)` (Task 3), `scheduleOneShot` (Task 5, private to this file).
@@ -816,7 +816,7 @@ its default `from: Date()`/`calendar: .current` (only `schedule:` passed explici
 - [ ] **Step 4: Commit**
 
 ```bash
-git add aiGirlfriend/Services/NotificationScheduler.swift
+git add Plumm/Services/NotificationScheduler.swift
 git commit -m "$(cat <<'EOF'
 feat: add daily bedtime announcement for level>=5 characters
 
@@ -830,7 +830,7 @@ EOF
 ### Task 9: Sleep-gating for the 4 existing notification triggers
 
 **Files:**
-- Modify: `aiGirlfriend/Services/NotificationScheduler.swift`
+- Modify: `Plumm/Services/NotificationScheduler.swift`
 
 **Interfaces:**
 - Consumes: `ScheduleLookup.currentBlock(schedule:date:calendar:)` (existing), `CharacterSleepState.isEffectivelyAsleep(stored:now:)` (Task 2).
@@ -966,7 +966,7 @@ given their tiny 2-10min/60s fire windows, per the spec).
 - [ ] **Step 5: Commit**
 
 ```bash
-git add aiGirlfriend/Services/NotificationScheduler.swift
+git add Plumm/Services/NotificationScheduler.swift
 git commit -m "$(cat <<'EOF'
 fix: gate Ghosted/Jealousy/LevelUp notifications against sleep state
 
@@ -980,7 +980,7 @@ EOF
 ### Task 10: LikedYou — randomize the fire hour, gate against that hour's sleep state
 
 **Files:**
-- Modify: `aiGirlfriend/Services/NotificationScheduler.swift`
+- Modify: `Plumm/Services/NotificationScheduler.swift`
 
 **Interfaces:**
 - Consumes: `ScheduleLookup.currentBlock(schedule:date:calendar:)`.
@@ -1048,7 +1048,7 @@ Note the schedule check here is effectively a no-op today (untalked bots never h
 - [ ] **Step 3: Commit**
 
 ```bash
-git add aiGirlfriend/Services/NotificationScheduler.swift
+git add Plumm/Services/NotificationScheduler.swift
 git commit -m "$(cat <<'EOF'
 feat: randomize LikedYou fire hour instead of fixed 13:00
 
@@ -1336,8 +1336,8 @@ EOF
 ### Task 12: Client wiring — `nearSleepTime` request field, `wentToSleep` response handling
 
 **Files:**
-- Modify: `aiGirlfriend/Services/ChatService.swift`
-- Modify: `aiGirlfriend/ViewModels/ChatViewModel.swift`
+- Modify: `Plumm/Services/ChatService.swift`
+- Modify: `Plumm/ViewModels/ChatViewModel.swift`
 
 **Interfaces:**
 - Consumes: Task 11's `nearSleepTime` request field / `wentToSleep` response field. `ScheduleLookup.currentBlock`/`nextSleepBlockStart` (existing/Task 3). `NotificationScheduler.shared.cancelSleepyGoodnight(for:)` (Task 5).
@@ -1345,7 +1345,7 @@ EOF
 
 - [ ] **Step 1: Add `nearSleepTime` to `ChatRequest` and `wentToSleep` to `ChatResponse`/`ChatReply`**
 
-In `aiGirlfriend/Services/ChatService.swift`, find:
+In `Plumm/Services/ChatService.swift`, find:
 
 ```swift
     let photoDownloadReaction: Bool?
@@ -1684,7 +1684,7 @@ avoids a force-unwrap).
 - [ ] **Step 5: Commit**
 
 ```bash
-git add aiGirlfriend/Services/ChatService.swift aiGirlfriend/ViewModels/ChatViewModel.swift
+git add Plumm/Services/ChatService.swift Plumm/ViewModels/ChatViewModel.swift
 git commit -m "$(cat <<'EOF'
 feat: wire nearSleepTime request + wentToSleep response into ChatViewModel.send
 

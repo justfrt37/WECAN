@@ -393,8 +393,8 @@ git commit -m "feat: add imageReactionChat flag and no-caption marker to chat fu
 ### Task 4: `ChatService.swift` — `generateChatImage` + `imageReactionChat` param
 
 **Files:**
-- Modify: `aiGirlfriend/Config.swift` (add `chatImageFunctionURL`)
-- Modify: `aiGirlfriend/Services/ChatService.swift`
+- Modify: `Plumm/Config.swift` (add `chatImageFunctionURL`)
+- Modify: `Plumm/Services/ChatService.swift`
 
 **Interfaces:**
 - Consumes: `Config.supabaseURL`, `Config.supabaseAnonKey`, `UserDefaultsManager.shared.accessToken` (all pre-existing).
@@ -537,14 +537,14 @@ Re-read the full edited `ChatService.swift` file and confirm:
 - Every existing call site of `sendWithLocalHistory` (grep `sendWithLocalHistory(` in `ChatViewModel.swift`) still compiles conceptually — both existing call sites use keyword arguments and omit `imageReactionChat`, which is fine since it has a default.
 
 ```bash
-grep -n "sendWithLocalHistory(" /Users/furkanozsoy/Desktop/Projects/aigf/WECAN/aiGirlfriend/ViewModels/ChatViewModel.swift
+grep -n "sendWithLocalHistory(" /Users/furkanozsoy/Desktop/Projects/aigf/WECAN/Plumm/ViewModels/ChatViewModel.swift
 ```
 Expected: 2 matches (inside `send()` and `sendVoiceRequest()`), neither passing `imageReactionChat:` — confirms the default keeps them compiling unchanged.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add aiGirlfriend/Config.swift aiGirlfriend/Services/ChatService.swift
+git add Plumm/Config.swift Plumm/Services/ChatService.swift
 git commit -m "feat: add generateChatImage service call and imageReactionChat flag"
 ```
 
@@ -553,7 +553,7 @@ git commit -m "feat: add generateChatImage service call and imageReactionChat fl
 ### Task 5: `ChatViewModel.swift` — `sendImageRequest()`
 
 **Files:**
-- Modify: `aiGirlfriend/ViewModels/ChatViewModel.swift`
+- Modify: `Plumm/ViewModels/ChatViewModel.swift`
 
 **Interfaces:**
 - Consumes: `ChatService.generateChatImage(character:prompt:)` and `sendWithLocalHistory(...:imageReactionChat:)` from Task 4.
@@ -655,7 +655,7 @@ Add directly after `sendVoiceRequest()` (after `ChatViewModel.swift:308`, before
 This is enforced at the call site in `ChatView` (Task 6), not inside the view model — `ChatViewModel` doesn't need a `didSet` observer since only two buttons ever toggle these two properties and both live in the same view. Confirm by grep that no other file sets `isVoiceArmed` or `isImageArmed`:
 
 ```bash
-grep -rn "isVoiceArmed = \|isImageArmed = " /Users/furkanozsoy/Desktop/Projects/aigf/WECAN/aiGirlfriend
+grep -rn "isVoiceArmed = \|isImageArmed = " /Users/furkanozsoy/Desktop/Projects/aigf/WECAN/Plumm
 ```
 Expected: only the two toggle sites you'll add in `ChatView.swift` in Task 6 (plus `sendVoiceRequest()`'s/`sendImageRequest()`'s own `= false` resets you just added/have).
 
@@ -681,7 +681,7 @@ Expected: `all caption-marker checks passed`.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add aiGirlfriend/ViewModels/ChatViewModel.swift
+git add Plumm/ViewModels/ChatViewModel.swift
 git commit -m "feat: add sendImageRequest to ChatViewModel"
 ```
 
@@ -690,7 +690,7 @@ git commit -m "feat: add sendImageRequest to ChatViewModel"
 ### Task 6: `ChatView.swift` — mode-button row, pending indicator, send routing
 
 **Files:**
-- Modify: `aiGirlfriend/Views/ChatView.swift`
+- Modify: `Plumm/Views/ChatView.swift`
 
 **Interfaces:**
 - Consumes: `ChatViewModel.isImageArmed`, `isSendingImageReply`, `sendImageRequest()` from Task 5.
@@ -826,7 +826,7 @@ Replace with:
 Read the existing `VoicePendingIndicator` struct first to match its exact visual pattern:
 
 ```bash
-sed -n '539,575p' /Users/furkanozsoy/Desktop/Projects/aigf/WECAN/aiGirlfriend/Views/ChatView.swift
+sed -n '539,575p' /Users/furkanozsoy/Desktop/Projects/aigf/WECAN/Plumm/Views/ChatView.swift
 ```
 
 Add a new private struct directly after `VoicePendingIndicator`'s closing brace, following the same pulsing-capsule pattern but with a camera glyph and a distinct label so it doesn't read as an audio waveform:
@@ -864,14 +864,14 @@ Re-read the full edited `quickReplyRow`, `inputBar`, and `messagesList` sections
 - No leftover reference to the deleted `quickReplies` array anywhere in the file.
 
 ```bash
-grep -n "quickReplies" /Users/furkanozsoy/Desktop/Projects/aigf/WECAN/aiGirlfriend/Views/ChatView.swift
+grep -n "quickReplies" /Users/furkanozsoy/Desktop/Projects/aigf/WECAN/Plumm/Views/ChatView.swift
 ```
 Expected: no matches.
 
 - [ ] **Step 8: Commit**
 
 ```bash
-git add aiGirlfriend/Views/ChatView.swift
+git add Plumm/Views/ChatView.swift
 git commit -m "feat: replace quick-reply chips with voice/photo mode buttons"
 ```
 
@@ -884,7 +884,7 @@ If Xcode is available: run the app, open a chat, tap "Send me a photo", type a d
 ### Task 7: `GeneratedPhotoService.swift` — fetch private photos
 
 **Files:**
-- Create: `aiGirlfriend/Services/GeneratedPhotoService.swift`
+- Create: `Plumm/Services/GeneratedPhotoService.swift`
 
 **Interfaces:**
 - Consumes: `generated_photos` table from Task 1 (`character_id`, `url`, RLS-scoped to `user_id = auth.uid()`).
@@ -942,7 +942,7 @@ Expected: `[]` (empty array, HTTP 200) — confirms the table/columns exist and 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add aiGirlfriend/Services/GeneratedPhotoService.swift
+git add Plumm/Services/GeneratedPhotoService.swift
 git commit -m "feat: add GeneratedPhotoService for private per-user chat photos"
 ```
 
@@ -951,7 +951,7 @@ git commit -m "feat: add GeneratedPhotoService for private per-user chat photos"
 ### Task 8: `GalleryView.swift` — "Your Photos" section
 
 **Files:**
-- Modify: `aiGirlfriend/Views/GalleryView.swift`
+- Modify: `Plumm/Views/GalleryView.swift`
 
 **Interfaces:**
 - Consumes: `GeneratedPhotoService.fetch(characterId:)` from Task 7.
@@ -1044,14 +1044,14 @@ Replace with:
 Re-read the full edited `GalleryView.swift` and confirm `columns` (used by both `yourPhotosSection` and the existing `section`) is still declared once as a shared `private let columns` and both grids reference the same instance — no duplicate declaration introduced.
 
 ```bash
-grep -n "private let columns" /Users/furkanozsoy/Desktop/Projects/aigf/WECAN/aiGirlfriend/Views/GalleryView.swift
+grep -n "private let columns" /Users/furkanozsoy/Desktop/Projects/aigf/WECAN/Plumm/Views/GalleryView.swift
 ```
 Expected: exactly 1 match.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add aiGirlfriend/Views/GalleryView.swift
+git add Plumm/Views/GalleryView.swift
 git commit -m "feat: add unlocked Your Photos section to GalleryView"
 ```
 

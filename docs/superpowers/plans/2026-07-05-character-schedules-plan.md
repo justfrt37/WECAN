@@ -23,8 +23,8 @@
 ### Task 1: `CharacterSchedule` model + `ScheduleLookup`
 
 **Files:**
-- Create: `aiGirlfriend/Models/CharacterSchedule.swift`
-- Create: `aiGirlfriend/Services/ScheduleLookup.swift`
+- Create: `Plumm/Models/CharacterSchedule.swift`
+- Create: `Plumm/Services/ScheduleLookup.swift`
 
 **Interfaces:**
 - Produces: `struct ScheduleBlock: Codable, Equatable { let start, end, label, detail: String }`, `struct CharacterSchedule: Codable, Equatable { let weekday, weekend: [ScheduleBlock] }`, `ScheduleLookup.currentBlock(schedule: CharacterSchedule, date: Date = Date(), calendar: Calendar = .current) -> ScheduleBlock?` — every later task depends on these exact names/signatures.
@@ -185,7 +185,7 @@ Expected: `all schedule lookup checks passed`.
 
 ```bash
 cd /Users/furkanozsoy/Desktop/Projects/aigf/WECAN
-git add aiGirlfriend/Models/CharacterSchedule.swift aiGirlfriend/Services/ScheduleLookup.swift
+git add Plumm/Models/CharacterSchedule.swift Plumm/Services/ScheduleLookup.swift
 git commit -m "feat: add CharacterSchedule model and ScheduleLookup"
 ```
 
@@ -520,7 +520,7 @@ git commit -m "feat: currentActivity tone shaping + schedule refinement in summa
 ### Task 4: `LocalConversationStore` — add `schedule` field
 
 **Files:**
-- Modify: `aiGirlfriend/Services/LocalConversationStore.swift`
+- Modify: `Plumm/Services/LocalConversationStore.swift`
 
 **Interfaces:**
 - Consumes: `CharacterSchedule` from Task 1.
@@ -623,14 +623,14 @@ with:
 Confirm every other `LocalConversationStore.Stored(...)` construction site in the codebase still compiles with the new trailing defaulted `schedule` param (it's defaulted, so omitting it is fine):
 
 ```bash
-grep -rn "LocalConversationStore.Stored(" /Users/furkanozsoy/Desktop/Projects/aigf/WECAN/aiGirlfriend
+grep -rn "LocalConversationStore.Stored(" /Users/furkanozsoy/Desktop/Projects/aigf/WECAN/Plumm
 ```
 Expected: 2 matches (`ChatViewModel.swift`'s `primeFromServer()` and `updateCache()`), neither passing `schedule:` — confirms the default keeps them compiling unchanged (they'll be updated to actually pass it in Task 6).
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add aiGirlfriend/Services/LocalConversationStore.swift
+git add Plumm/Services/LocalConversationStore.swift
 git commit -m "feat: add schedule field to LocalConversationStore.Stored"
 ```
 
@@ -639,8 +639,8 @@ git commit -m "feat: add schedule field to LocalConversationStore.Stored"
 ### Task 5: `ChatService.swift` — schedule generation + threading
 
 **Files:**
-- Modify: `aiGirlfriend/Config.swift`
-- Modify: `aiGirlfriend/Services/ChatService.swift`
+- Modify: `Plumm/Config.swift`
+- Modify: `Plumm/Services/ChatService.swift`
 
 **Interfaces:**
 - Consumes: `CharacterSchedule`/`ScheduleBlock` from Task 1; `character-schedule` endpoint from Task 2; `chat`'s extended summarize response from Task 3.
@@ -825,14 +825,14 @@ Add as a new method on `ChatService`, directly after `generateChatImage`:
 
 Re-read the full edited `ChatService.swift` and confirm every call site of `generateLocalSummary` and `sendWithLocalHistory` will be updated in Task 6 (they will not compile as-is until then — expected, this task only prepares the service layer):
 ```bash
-grep -n "generateLocalSummary(\|sendWithLocalHistory(" /Users/furkanozsoy/Desktop/Projects/aigf/WECAN/aiGirlfriend/ViewModels/ChatViewModel.swift
+grep -n "generateLocalSummary(\|sendWithLocalHistory(" /Users/furkanozsoy/Desktop/Projects/aigf/WECAN/Plumm/ViewModels/ChatViewModel.swift
 ```
 Expected: `generateLocalSummary(` once (in `triggerSummarizationIfNeeded`), `sendWithLocalHistory(` three times (`send`, `sendVoiceRequest`, `sendImageRequest`) — all four call sites get updated in Task 6.
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add aiGirlfriend/Config.swift aiGirlfriend/Services/ChatService.swift
+git add Plumm/Config.swift Plumm/Services/ChatService.swift
 git commit -m "feat: add generateInitialSchedule, thread currentActivity/schedule through ChatService"
 ```
 
@@ -841,7 +841,7 @@ git commit -m "feat: add generateInitialSchedule, thread currentActivity/schedul
 ### Task 6: `ChatViewModel.swift` — activity tracking + threading
 
 **Files:**
-- Modify: `aiGirlfriend/ViewModels/ChatViewModel.swift`
+- Modify: `Plumm/ViewModels/ChatViewModel.swift`
 
 **Interfaces:**
 - Consumes: everything from Task 5 (`ChatService.generateInitialSchedule`, updated `generateLocalSummary`/`sendWithLocalHistory`), `ScheduleLookup.currentBlock` from Task 1, `LocalConversationStore.updateSummary(...:schedule:)` from Task 4.
@@ -1085,14 +1085,14 @@ with:
 - [ ] **Step 7: Manual review pass (no Xcode in this sandbox)**
 
 ```bash
-grep -n "sendWithLocalHistory(\|generateLocalSummary(\|currentActivity" /Users/furkanozsoy/Desktop/Projects/aigf/WECAN/aiGirlfriend/ViewModels/ChatViewModel.swift
+grep -n "sendWithLocalHistory(\|generateLocalSummary(\|currentActivity" /Users/furkanozsoy/Desktop/Projects/aigf/WECAN/Plumm/ViewModels/ChatViewModel.swift
 ```
 Expected: all three `sendWithLocalHistory(` calls now include `currentActivity: currentActivity?.detail`; the single `generateLocalSummary(` call passes `previousSchedule:` and no longer treats the result as a bare `String`.
 
 - [ ] **Step 8: Commit**
 
 ```bash
-git add aiGirlfriend/ViewModels/ChatViewModel.swift
+git add Plumm/ViewModels/ChatViewModel.swift
 git commit -m "feat: track and thread currentActivity through ChatViewModel"
 ```
 
@@ -1101,7 +1101,7 @@ git commit -m "feat: track and thread currentActivity through ChatViewModel"
 ### Task 7: `ChatView.swift` — header status line
 
 **Files:**
-- Modify: `aiGirlfriend/Views/ChatView.swift`
+- Modify: `Plumm/Views/ChatView.swift`
 
 **Interfaces:**
 - Consumes: `ChatViewModel.currentActivity`, `ChatViewModel.startActivityRefreshLoop()` from Task 6.
@@ -1140,14 +1140,14 @@ Locate the existing `.task { viewModel.store = store; ... }` block (`ChatView.sw
 - [ ] **Step 3: Manual review pass (no Xcode in this sandbox)**
 
 ```bash
-grep -n 'Text("Online")\|startActivityRefreshLoop' /Users/furkanozsoy/Desktop/Projects/aigf/WECAN/aiGirlfriend/Views/ChatView.swift
+grep -n 'Text("Online")\|startActivityRefreshLoop' /Users/furkanozsoy/Desktop/Projects/aigf/WECAN/Plumm/Views/ChatView.swift
 ```
 Expected: no remaining bare `Text("Online")` (it's now `Text(viewModel.currentActivity?.label ?? String(localized: "Online"))`), and one `startActivityRefreshLoop` call site.
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add aiGirlfriend/Views/ChatView.swift
+git add Plumm/Views/ChatView.swift
 git commit -m "feat: show live schedule activity in chat header"
 ```
 

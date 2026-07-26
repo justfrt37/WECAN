@@ -1,7 +1,7 @@
 -- 013_review_mode.sql
 -- Review Mode — App Store inceleme sürecinde uygulamanın daha "güvenli" bir
 -- karakter seti göstermesi için uzaktan kontrol edilen anahtar + ayrı tablo.
--- İstemci tarafı: aiGirlfriend/Services/ReviewModeService.swift
+-- İstemci tarafı: Plumm/Services/ReviewModeService.swift
 --
 -- Anahtar `app_config.kokomombo` TRUE olduğunda uygulama karakterleri
 -- `characters` yerine `characters_review` tablosundan çeker.

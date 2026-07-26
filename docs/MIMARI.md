@@ -1,4 +1,4 @@
-# Plumm (aiGirlfriend) — Mimari Şablonu
+# Plumm (Plumm) — Mimari Şablonu
 
 Bu belge; backend'in ve iOS arayüzünün nasıl çalıştığını, verinin nereden gelip
 nereye gittiğini özetler. Yeni bir özellik eklerken "bu iş hangi katmanda?"
@@ -27,14 +27,14 @@ sorusunun cevabı burada.
 - **LLM:** Grok 4.1 Fast (xAI), `chat` edge function üzerinden.
 - **Kimlik:** Anonim giriş (kullanıcı adı/şifre yok). Her istek `access token`
   ile imzalanır; DB satırları RLS ile `user_id = auth.uid()`'e kilitli.
-- **Bağlantı ayarları:** `aiGirlfriend/Config.swift` (supabase URL + publishable
+- **Bağlantı ayarları:** `Plumm/Config.swift` (supabase URL + publishable
   anon key + edge function URL'leri).
 
 ---
 
 ## 2. iOS Katmanları
 
-### 2.1 Uygulama girişi — `aiGirlfriendApp.swift`
+### 2.1 Uygulama girişi — `PlummApp.swift`
 Kök `@State` store'lar oluşturulur ve `.environment(...)` ile tüm ağaca enjekte
 edilir: `NavigationCenter`, `AuthService`, `CharacterStore`, `TokenStore`,
 `OnboardingStore`.

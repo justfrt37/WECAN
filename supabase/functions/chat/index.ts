@@ -737,6 +737,31 @@ Deno.serve(async (req: Request) => {
       return json({ ok: true, conversationId: convo.id });
     }
 
+    // === SES MESAJI MODU (voiceMessage) === (foto ile simetrik)
+    //  - url YOK → "kilitli/açılmamış" ses (kind=voice_pending, content=requestText):
+    //    kullanıcı ses istedi ama henüz üretmedi. Reload'da yine kilitli balon.
+    //  - url VAR → üretildi: aynı requestText'li en son pending satırı gerçek sese
+    //    çevir (kind=voice, content=Storage URL); pending yoksa yeni voice satırı ekle.
+    if (body.voiceMessage && typeof body.voiceMessage === "object") {
+      if (!convo) return json({ ok: false, conversationId: null });
+      const reqText: string = String(body.voiceMessage.requestText ?? "");
+      const url: string | null = typeof body.voiceMessage.url === "string" ? body.voiceMessage.url : null;
+      if (url) {
+        const { data: pend } = await db.from("messages")
+          .select("id").eq("conversation_id", convo.id).eq("kind", "voice_pending").eq("content", reqText)
+          .order("created_at", { ascending: false }).limit(1);
+        if (pend && pend[0]) {
+          await db.from("messages").update({ content: url, kind: "voice" }).eq("id", pend[0].id);
+        } else {
+          await db.from("messages").insert({ conversation_id: convo.id, role: "assistant", content: url, kind: "voice" });
+        }
+      } else {
+        await db.from("messages").insert({ conversation_id: convo.id, role: "assistant", content: reqText, kind: "voice_pending" });
+      }
+      await db.from("conversations").update({ updated_at: new Date().toISOString() }).eq("id", convo.id);
+      return json({ ok: true, conversationId: convo.id });
+    }
+
     // === GEÇMİŞ MODU — clientHistory yoksa ===
     if (!useClientHistory && (!userMessage || userMessage.trim() === "")) {
       // Sohbeti açmak conversation OLUŞTURMAZ — yoksa boş geçmiş dön.
@@ -1006,7 +1031,11 @@ Deno.serve(async (req: Request) => {
     // kullanıcı promptu ZATEN foto isteği turunda (normal send) kaydedildi,
     // burada TEKRAR user mesajı yazma (aksi halde geçmişte çift "Fotoğraf
     // gönder" görünür) — sadece asistan caption'ı sakla.
-    if (imageReactionChat) {
+    if (voiceChat) {
+      // Ses cevabı METİN olarak SAKLANMAZ — client, TTS + Storage upload'dan
+      // sonra bunu `voiceMessage` (kind=voice, content=URL) olarak kalıcılaştırır.
+      // Aksi halde reload'da ses yerine metin görünürdü (bkz. kullanıcı talebi).
+    } else if (imageReactionChat) {
       await db.from("messages").insert([
         { conversation_id: conversationId, role: "assistant", content: reply, kind: "text" },
       ]);
