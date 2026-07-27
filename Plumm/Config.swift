@@ -63,4 +63,19 @@ enum Config {
     static var devUpdateCharacterFunctionURL: URL {
         URL(string: "\(supabaseURL)/functions/v1/dev-update-character")!
     }
+
+    // MARK: Real-time voice call (bkz. CallService, CallViewModel)
+
+    static var voiceCallStartFunctionURL: URL {
+        URL(string: "\(supabaseURL)/functions/v1/voice-call-start")!
+    }
+    static var voiceCallTurnFunctionURL: URL {
+        URL(string: "\(supabaseURL)/functions/v1/voice-call-turn")!
+    }
+    static var voiceCallCheckpointFunctionURL: URL {
+        URL(string: "\(supabaseURL)/functions/v1/voice-call-checkpoint")!
+    }
+    static var voiceCallEndFunctionURL: URL {
+        URL(string: "\(supabaseURL)/functions/v1/voice-call-end")!
+    }
 }
