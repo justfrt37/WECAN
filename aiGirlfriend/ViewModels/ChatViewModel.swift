@@ -891,8 +891,11 @@ final class ChatViewModel {
             showsTypingBubble = false
             store?.setTyping(character.id, false)
 
-            messages.append(Message(role: .assistant, content: trimmed))
-            updateCache()
+            let replyMsg = Message(role: .assistant, content: trimmed)
+            messages.append(replyMsg)
+            LocalConversationStore.shared.appendMessage(replyMsg, for: character.id, defaultLevel: relationshipLevel, defaultLevelProgress: levelProgress)
+            LocalConversationStore.shared.refreshDetectedLanguage(for: character.id)
+            store?.chatCache[character.id] = realMessages()
             store?.conversationsVersion += 1
         }
     }
