@@ -929,7 +929,9 @@ final class ChatViewModel {
             if let serverProgress { levelProgress = serverProgress }
         }
 
-        updateCache(msgCounter: counter)
+        LocalConversationStore.shared.updateFields(
+            for: character.id, level: relationshipLevel, levelProgress: levelProgress, msgCounter: counter
+        )
         if isVisible { markReadNow() }
 
         triggerSummarizationIfNeeded()
@@ -1058,27 +1060,4 @@ final class ChatViewModel {
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private func updateCache(msgCounter: Int? = nil) {
-        let real = realMessages()
-        guard !real.isEmpty else { return }
-        store?.chatCache[character.id] = real
-        let stored = LocalConversationStore.shared.load(for: character.id)
-        let updated = LocalConversationStore.Stored(
-            messages: real,
-            xp: stored?.xp ?? 0,
-            level: relationshipLevel,
-            summary: stored?.summary ?? "",
-            summarizedCount: stored?.summarizedCount ?? 0,
-            msgCounter: msgCounter ?? stored?.msgCounter ?? 0,
-            levelProgress: levelProgress,
-            detectedLanguage: ConversationLanguage.resolve(
-                latestAssistantText: real.last(where: { $0.role == .assistant })?.content,
-                previouslyDetected: stored?.detectedLanguage
-            ),
-            schedule: stored?.schedule,
-            wokenUpAt: stored?.wokenUpAt,
-            manualSleepAt: stored?.manualSleepAt
-        )
-        LocalConversationStore.shared.save(updated, for: character.id)
-    }
 }
