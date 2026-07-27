@@ -311,6 +311,9 @@ final class ChatViewModel {
                     presentInsufficientTokensPaywall()   // uyarı yok, paywall aç
                 } else {
                     errorMessage = error.localizedDescription
+                    if let idx = messages.firstIndex(where: { $0.id == userMsg.id }) {
+                        messages[idx].failed = true
+                    }
                 }
                 showsTypingBubble = false
                 store?.setTyping(character.id, false)
@@ -437,6 +440,9 @@ final class ChatViewModel {
                     presentInsufficientTokensPaywall()   // uyarı yok, paywall aç
                 } else {
                     errorMessage = error.localizedDescription
+                    if let idx = messages.firstIndex(where: { $0.id == userMsg.id }) {
+                        messages[idx].failed = true
+                    }
                 }
                 showsTypingBubble = false
                 store?.setTyping(character.id, false)
@@ -507,6 +513,9 @@ final class ChatViewModel {
                     presentInsufficientTokensPaywall()   // uyarı yok, paywall aç
                 } else {
                     errorMessage = error.localizedDescription
+                    if let idx = messages.firstIndex(where: { $0.id == userMsg.id }) {
+                        messages[idx].failed = true
+                    }
                 }
                 showsTypingBubble = false
                 store?.setTyping(character.id, false)
