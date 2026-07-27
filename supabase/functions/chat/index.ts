@@ -352,9 +352,8 @@ const VARIATION_RULE =
   "(bazen soru sorarak, bazen dolaylı bir göndermeyle, bazen kendi hislerini " +
   "itiraf ederek, bazen şakayla, bazen kısa ve öz, bazen daha açık). Aynı niyeti " +
   "anlatmak için ASLA ezberlenmiş/kalıplaşmış tek bir cümleye güvenme ve onu tekrar " +
-  "tekrar kullanma — özellikle resmî, robotik ya da kurumsal bir asistan gibi " +
-  "duyulan hiçbir ifadeye asla başvurma. Konuşmayı hep aynı noktaya kilitleme; " +
-  "her mesaj sohbeti bir adım ileri taşısın.";
+  "tekrar kullanma. Konuşmayı hep aynı noktaya kilitleme; her mesaj sohbeti bir " +
+  "adım ileri taşısın.";
 
 // Sistem promptu karakter oluşturulurken TEK SEFERLİK DB'ye yazılıyor
 // (create-character/index.ts) — bu kural burada, chat/index.ts'de olduğu için
@@ -379,9 +378,17 @@ const TEXTING_STYLE_RULE =
   "bir Türk'ün parmaklarından çıkmış gibi dursun. Aynı mantığı İngilizce/Almanca/ " +
   "Fransızca/İspanyolca/Portekizce/İtalyanca için de uygula — o dilin GERÇEK, " +
   "günlük mesajlaşma kısaltmalarını ve rahatlığını kullan (İngilizce'de örn. u, " +
-  "ur, rn, ngl, tbh, lol, gonna, wanna — ama hepsini bir mesaja tıkıştırma), asla " +
-  "resmi bir mektup ya da başka dilden çevrilmiş bir cümle gibi durma — o dilin " +
-  "ANADİLİ bir mesajlaşma kullanıcısı gibi yaz.";
+  "ur, rn, ngl, tbh, lol, gonna, wanna — ama hepsini bir mesaja tıkıştırma).";
+
+// Shared closing line for TEXTING_STYLE_RULE + VARIATION_RULE — both blocks
+// used to end with their own near-duplicate "don't sound formal/robotic/
+// translated" sentence (mechanics-focused in one, content-variety-focused
+// in the other); collapsed into one shared line appended once after both
+// in the system-prompt assembly below, instead of twice.
+const NEVER_SOUND_ROBOTIC_RULE =
+  "\n\nHiçbir zaman resmi bir mektup, çevrilmiş bir cümle ya da resmî/robotik/" +
+  "kurumsal bir asistan gibi durma — konuştuğun dilin ANADİLİ bir mesajlaşma " +
+  "kullanıcısı gibi yaz.";
 
 // Model bazen kendi bir önceki mesajına (soru, sitem, bekleyiş) verilen cevabı
 // görmezden gelip sanki hiç cevap gelmemiş gibi devam ediyor — özellikle o "önceki
@@ -965,6 +972,7 @@ Deno.serve(async (req: Request) => {
     system += languageDirective(detectedLanguage);
     system += TEXTING_STYLE_RULE;
     system += VARIATION_RULE;
+    system += NEVER_SOUND_ROBOTIC_RULE;
     system += CONTINUITY_RULE;
     system += humorDirective(currentLevel);
     system += engagementDirective(currentLevel);
