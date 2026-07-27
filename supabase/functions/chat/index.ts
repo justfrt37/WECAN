@@ -35,7 +35,7 @@ const MODEL = "grok-4-1-fast-non-reasoning";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
-const KEEP_RECENT = 20; // prompt'ta tutulan son mesaj sayısı (gerisi özete gider)
+const KEEP_RECENT = 12; // prompt'ta tutulan son mesaj sayısı (gerisi özete gider)
 
 const db = createClient(SUPABASE_URL, SERVICE_ROLE, {
   auth: { persistSession: false },
