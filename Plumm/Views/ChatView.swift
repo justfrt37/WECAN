@@ -23,6 +23,7 @@ struct ChatView: View {
 
     @State private var showProfile = false
     @State private var showTokenStore = false
+    @State private var showVoiceCall = false
     @State private var addSheetKind: NoteKind?
     @State private var showBlockConfirm = false
     @State private var showClearChatOptions = false
@@ -150,6 +151,9 @@ struct ChatView: View {
         }
         .fullScreenCover(isPresented: $showProfile) {
             CharacterProfileView(character: viewModel.character, showsChatButton: false)
+        }
+        .fullScreenCover(isPresented: $showVoiceCall) {
+            VoiceCallView(character: viewModel.character, conversationId: nil, tokenStore: tokenStore)
         }
         // PRO gerektiren her yerde onboarding paywall'ı (alttan fullscreen) açılır.
         .fullScreenCover(isPresented: $viewModel.showPaywall) { OnboardingPaywallView() }
@@ -316,6 +320,7 @@ struct ChatView: View {
                 // PRO değilse coin (kalp) rozeti yerine PRO butonu; PRO ise coin
                 // rozeti. Ayarlar hep yanında (bkz. kullanıcı talebi). Sohbette
                 // global overlay rozeti gizli (bkz. MainTabView).
+                headerButton("phone.fill", action: { showVoiceCall = true })
                 if PurchaseService.shared.isPro {
                     TokenBadge(tokenStore: tokenStore) { showTokenStore = true }
                 } else {

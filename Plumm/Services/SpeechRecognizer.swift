@@ -29,6 +29,13 @@ final class SpeechRecognizer {
     private var request: SFSpeechAudioBufferRecognitionRequest?
     private var task: SFSpeechRecognitionTask?
     private var recorder: AVAudioRecorder?
+    /// Mirrors the `configuresSession` a caller passed to the most recent
+    /// `start()` — `stop()` reads this so it only deactivates the shared
+    /// audio session when THIS instance is the one that activated it.
+    /// Without this, CallViewModel's mid-call `recognizer.cancel()` (barge-in
+    /// cleanup, mute) would deactivate the whole call's duplex session, not
+    /// just this recognition pass.
+    private var lastStartConfiguredSession = true
 
     /// İzinleri ister (mikrofon + konuşma tanıma).
     func requestAuthorization() async {
@@ -43,19 +50,27 @@ final class SpeechRecognizer {
         authorized = speechOK && micOK
     }
 
+    /// `configuresSession: false` skips the `.record`-category session setup —
+    /// used by CallViewModel, which owns a single `.playAndRecord`/`.voiceChat`
+    /// session for the whole call (duplex: listens while the AI is speaking for
+    /// barge-in). The normal tap-to-record voice-note flow (ChatView) always
+    /// passes the default `true`, unchanged.
     @discardableResult
-    func start() -> Bool {
+    func start(configuresSession: Bool = true) -> Bool {
         guard !isRecording else { return true }
         transcript = ""
         recordedFileURL = nil
 
-        do {
-            let session = AVAudioSession.sharedInstance()
-            try session.setCategory(.record, mode: .measurement, options: .duckOthers)
-            try session.setActive(true, options: .notifyOthersOnDeactivation)
-        } catch {
-            return false
+        if configuresSession {
+            do {
+                let session = AVAudioSession.sharedInstance()
+                try session.setCategory(.record, mode: .measurement, options: .duckOthers)
+                try session.setActive(true, options: .notifyOthersOnDeactivation)
+            } catch {
+                return false
+            }
         }
+        lastStartConfiguredSession = configuresSession
 
         // "Dinliyorum" sinyali — kullanıcıya kaydın gerçekten başladığını
         // hissettirir (bkz. plan: "listening cue").
@@ -138,7 +153,9 @@ final class SpeechRecognizer {
         recorder?.stop()
         recordedFileURL = recorder?.url
         recorder = nil
-        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        if lastStartConfiguredSession {
+            try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        }
     }
 
     /// Kayıttan vazgeçer — overlay'in Cancel butonu. Dosyayı diskten siler,
