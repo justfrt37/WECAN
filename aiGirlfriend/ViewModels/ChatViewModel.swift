@@ -253,8 +253,10 @@ final class ChatViewModel {
 
         // Zaman farkındalığı için — yeni mesajı eklemeden ÖNCEki son mesajın zamanı.
         let lastMessageAt = messages.last?.createdAt
-        messages.append(Message(role: .user, content: text))
-        updateCache()
+        let userMsg = Message(role: .user, content: text)
+        messages.append(userMsg)
+        LocalConversationStore.shared.appendMessage(userMsg, for: character.id, defaultLevel: relationshipLevel, defaultLevelProgress: levelProgress)
+        store?.chatCache[character.id] = realMessages()
         NotificationScheduler.shared.noteUserSent(character: character)
         inputText = ""
         isSending = true
@@ -376,11 +378,13 @@ final class ChatViewModel {
         let savedPath: String? = (try? Data(contentsOf: audioURL)).flatMap {
             VoicePlayer.saveVoiceMessage($0, messageID: messageID)
         }
-        messages.append(Message(
+        let userMsg = Message(
             id: messageID, role: .user, content: trimmed,
             voiceLocalPath: savedPath, voiceDuration: duration
-        ))
-        updateCache()
+        )
+        messages.append(userMsg)
+        LocalConversationStore.shared.appendMessage(userMsg, for: character.id, defaultLevel: relationshipLevel, defaultLevelProgress: levelProgress)
+        store?.chatCache[character.id] = realMessages()
         NotificationScheduler.shared.noteUserSent(character: character)
         isVoiceArmed = false
         isImageArmed = false
@@ -445,8 +449,10 @@ final class ChatViewModel {
         let lastMessageAt = messages.last?.createdAt
         let messageID = UUID()
         let savedPath = UserPhotoStore.saveUserPhoto(image, messageID: messageID)
-        messages.append(Message(id: messageID, role: .user, content: caption, localImagePath: savedPath))
-        updateCache()
+        let userMsg = Message(id: messageID, role: .user, content: caption, localImagePath: savedPath)
+        messages.append(userMsg)
+        LocalConversationStore.shared.appendMessage(userMsg, for: character.id, defaultLevel: relationshipLevel, defaultLevelProgress: levelProgress)
+        store?.chatCache[character.id] = realMessages()
         NotificationScheduler.shared.noteUserSent(character: character)
         isVoiceArmed = false
         isImageArmed = false
@@ -553,9 +559,13 @@ final class ChatViewModel {
         let text = typed.isEmpty ? String(localized: "Send me a voice") : typed
 
         let pendingID = UUID()
-        messages.append(Message(role: .user, content: text))
-        messages.append(Message(id: pendingID, role: .assistant, content: "", pendingVoiceRequest: true))
-        updateCache()
+        let userMsg = Message(role: .user, content: text)
+        let pendingMsg = Message(id: pendingID, role: .assistant, content: "", pendingVoiceRequest: true)
+        messages.append(userMsg)
+        messages.append(pendingMsg)
+        LocalConversationStore.shared.appendMessage(userMsg, for: character.id, defaultLevel: relationshipLevel, defaultLevelProgress: levelProgress)
+        LocalConversationStore.shared.appendMessage(pendingMsg, for: character.id, defaultLevel: relationshipLevel, defaultLevelProgress: levelProgress)
+        store?.chatCache[character.id] = realMessages()
         NotificationScheduler.shared.noteUserSent(character: character)
         inputText = ""
         isVoiceArmed = false
@@ -699,8 +709,10 @@ final class ChatViewModel {
         // (buton etiketiyle aynı) — mesaj balonunda bu görünür, tarif olarak da kullanılır.
         let text = typed.isEmpty ? String(localized: "Send me a photo") : typed
 
-        messages.append(Message(role: .user, content: text))
-        updateCache()
+        let userMsg = Message(role: .user, content: text)
+        messages.append(userMsg)
+        LocalConversationStore.shared.appendMessage(userMsg, for: character.id, defaultLevel: relationshipLevel, defaultLevelProgress: levelProgress)
+        store?.chatCache[character.id] = realMessages()
         NotificationScheduler.shared.noteUserSent(character: character)
         inputText = ""
         isImageArmed = false
