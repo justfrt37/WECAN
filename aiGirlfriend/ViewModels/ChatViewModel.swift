@@ -122,6 +122,31 @@ final class ChatViewModel {
         }
     }
 
+    /// Başarısız bir mesaj balonuna dokununca — eski (failed) mesajı kaldırır,
+    /// AYNI içerikle orijinal gönderim yolunu (send/sendUserVoice/sendUserPhoto)
+    /// yeniden çağırır. Hangi yolun kullanılacağı mesajın kendi alanlarından
+    /// çıkarılır: voiceLocalPath doluysa sesli mesaj, localImagePath doluysa
+    /// kullanıcı fotoğrafı, ikisi de yoksa düz metin.
+    func retrySend(messageID: UUID) {
+        guard let idx = messages.firstIndex(where: { $0.id == messageID }),
+              messages[idx].failed == true
+        else { return }
+        let failedMsg = messages[idx]
+        messages.remove(at: idx)
+        LocalConversationStore.shared.removeMessage(id: messageID, for: character.id)
+        store?.chatCache[character.id] = realMessages()
+
+        if let voicePath = failedMsg.voiceLocalPath {
+            let audioURL = VoicePlayer.voiceMessagesDirectory.appendingPathComponent(voicePath)
+            sendUserVoice(transcript: failedMsg.content, audioURL: audioURL)
+        } else if let photoPath = failedMsg.localImagePath,
+                  let image = UserPhotoStore.loadUserPhoto(relativePath: photoPath) {
+            sendUserPhoto(image: image, caption: failedMsg.content)
+        } else {
+            send(failedMsg.content)
+        }
+    }
+
     var canSend: Bool {
         let hasText = !inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         // Sesli/foto modunda metin ZORUNLU değil — boşsa varsayılan "Sesli mesaj
