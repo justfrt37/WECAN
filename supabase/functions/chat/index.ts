@@ -190,6 +190,49 @@ async function fetchDirective(characterId: string, role: string, level: number):
   return directive;
 }
 
+// Fetches the three pieces every reply-producing path needs (main reply +
+// photoDownloadReaction) in parallel instead of sequentially — none of the
+// three queries depend on each other's results. Callers keep their own
+// assembly order/wrapping (main path uses the raw directive, reaction path
+// wraps it via wrapDirective — that asymmetry is existing behavior, this
+// helper only shares the FETCH, not the string-building).
+async function fetchDirectiveMemoriesBehaviors(
+  characterId: string,
+  role: string,
+  level: number,
+  conversationId: string,
+): Promise<{
+  directive: string;
+  memories: { content: string }[];
+  behaviors: { content: string }[];
+}> {
+  const [directive, memoriesResult, behaviorsResult] = await Promise.all([
+    fetchDirective(characterId, role, level),
+    db.from("memories").select("content").eq("conversation_id", conversationId)
+      .order("created_at", { ascending: true }),
+    db.from("conversation_behaviors").select("content").eq("conversation_id", conversationId)
+      .order("created_at", { ascending: true }),
+  ]);
+  return {
+    directive,
+    memories: memoriesResult.data ?? [],
+    behaviors: behaviorsResult.data ?? [],
+  };
+}
+
+// Both the main reply path and photoDownloadReaction build these two blocks
+// with byte-identical formatting — shared here instead of duplicated.
+function memoriesBlock(memories: { content: string }[]): string {
+  if (memories.length === 0) return "";
+  return `\n\n[MEMORIES — facts to remember about the user/relationship]\n` +
+    memories.map((m) => `- ${m.content}`).join("\n");
+}
+function behaviorsBlock(behaviors: { content: string }[]): string {
+  if (behaviors.length === 0) return "";
+  return `\n\n[BEHAVIOR PREFERENCES — how the user wants you to act]\n` +
+    behaviors.map((b) => `- ${b.content}`).join("\n");
+}
+
 // Directive'i çıplak enjekte etmek modelin onu "söylenecek satır" gibi
 // okumasına, kelimesi kelimesine tekrar etmesine yol açıyordu (rapor: robotik/
 // ezber ton). Burada bir META-ÇERÇEVE ile sarılıyor — directive artık bir
