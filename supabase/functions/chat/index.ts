@@ -723,27 +723,30 @@ Deno.serve(async (req: Request) => {
       return json({ ok: true });
     }
 
-    // Fetch character personality role and ex_history
-    const { data: character, error: charErr } = await db
-      .from("characters")
-      .select("personality_role, ex_history, interests")
-      .eq("id", characterId)
-      .maybeSingle();
+    // Fetch character personality role/ex_history and the existing conversation
+    // row in parallel — neither depends on the other's result, only on
+    // uid/characterId which are already known at this point.
+    // 1) Konuşmayı bul ya da oluştur (kullanıcı + karakter). maybeSingle KULLANMA —
+    // eski dupe'lar varsa hata verip convo=null oluyor ve HER mesajda YENİ bir
+    // conversation ekleniyordu (dupe'lar böyle çoğalıyordu). En güncel olanı al.
+    const [{ data: character, error: charErr }, { data: convoRows }] = await Promise.all([
+      db
+        .from("characters")
+        .select("personality_role, ex_history, interests")
+        .eq("id", characterId)
+        .maybeSingle(),
+      db
+        .from("conversations")
+        .select("id, summary, summarized_count, xp, relationship_level, level_progress, schedule, woken_up_at, manual_sleep_at, ghosted_at, detected_language")
+        .eq("user_id", uid)
+        .eq("character_id", characterId)
+        .order("updated_at", { ascending: false })
+        .limit(1),
+    ]);
     if (charErr) console.error("char fetch err:", JSON.stringify(charErr));
     const personalityRole: string = character?.personality_role ?? "flirty";
     const interests: string[] = Array.isArray(character?.interests) ? character.interests : [];
     const exHistory: string | null = character?.ex_history ?? null;
-
-    // 1) Konuşmayı bul ya da oluştur (kullanıcı + karakter). maybeSingle KULLANMA —
-    // eski dupe'lar varsa hata verip convo=null oluyor ve HER mesajda YENİ bir
-    // conversation ekleniyordu (dupe'lar böyle çoğalıyordu). En güncel olanı al.
-    let { data: convoRows } = await db
-      .from("conversations")
-      .select("id, summary, summarized_count, xp, relationship_level, level_progress, schedule, woken_up_at, manual_sleep_at, ghosted_at, detected_language")
-      .eq("user_id", uid)
-      .eq("character_id", characterId)
-      .order("updated_at", { ascending: false })
-      .limit(1);
     let convo = convoRows?.[0];
     // NOT: conversation OLUŞTURMA burada YAPILMAZ. Sohbeti sadece AÇMAK (geçmiş
     // modu) boş bir conversation yaratıyordu → silsen bile açınca/liste
