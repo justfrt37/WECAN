@@ -11,7 +11,7 @@
 // anlıyor. Google TTS yolu bu durumda hiç çalışmaz, mevcut davranışı etkilemez.
 
 import { voiceNameFor } from "./voiceMap.ts";
-import { elevenVoiceIdFor } from "./elevenVoiceMap.ts";
+import { elevenVoiceIdFor } from "../_shared/elevenVoiceMap.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
