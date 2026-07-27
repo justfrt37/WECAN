@@ -995,22 +995,13 @@ Deno.serve(async (req: Request) => {
     // === CEVAP MODU: sistem promptunu hazırla ===
     const currentLevel: number = convo.relationship_level ?? 1;
     let system = systemPrompt;
-    const directive = await fetchDirective(characterId, personalityRole, currentLevel);
-    system += `\n\n${directive}`;
     // Kullanıcının "Anı Ekle" / "Davranış Ekle" ile eklediği kalıcı notlar
-    // (her rol için geçerli — ex'e özel değil). Fetch stays here; the actual
-    // `system +=` append happens further down, deliberately after all the
-    // static rule blocks — see the cache-ordering comment there.
-    const { data: memoryRows } = await db
-      .from("memories")
-      .select("content")
-      .eq("conversation_id", conversationId)
-      .order("created_at", { ascending: true });
-    const { data: behaviorRows } = await db
-      .from("conversation_behaviors")
-      .select("content")
-      .eq("conversation_id", conversationId)
-      .order("created_at", { ascending: true });
+    // (her rol için geçerli — ex'e özel değil). memoryRows/behaviorRows used
+    // further down, deliberately after all the static rule blocks — see the
+    // cache-ordering comment there.
+    const { directive, memories: memoryRows, behaviors: behaviorRows } =
+      await fetchDirectiveMemoriesBehaviors(characterId, personalityRole, currentLevel, conversationId);
+    system += `\n\n${directive}`;
 
     system += languageDirective(detectedLanguage);
     system += TEXTING_STYLE_RULE;
@@ -1046,14 +1037,8 @@ Deno.serve(async (req: Request) => {
     if (exHistory) {
       system += `\n\n[SHARED HISTORY — reference these memories naturally in conversation]\n${exHistory}`;
     }
-    if (memoryRows && memoryRows.length > 0) {
-      system += `\n\n[MEMORIES — facts to remember about the user/relationship]\n` +
-        memoryRows.map((m) => `- ${m.content}`).join("\n");
-    }
-    if (behaviorRows && behaviorRows.length > 0) {
-      system += `\n\n[BEHAVIOR PREFERENCES — how the user wants you to act]\n` +
-        behaviorRows.map((b) => `- ${b.content}`).join("\n");
-    }
+    system += memoriesBlock(memoryRows);
+    system += behaviorsBlock(behaviorRows);
     if (useClientHistory && localSummary && localSummary.trim() !== "") {
       system += `\n\n[Önceki konuşmalarınızın özeti]\n${stripVoiceTags(localSummary)}`;
     }
