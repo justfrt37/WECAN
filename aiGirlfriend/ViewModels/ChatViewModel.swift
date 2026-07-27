@@ -728,10 +728,12 @@ final class ChatViewModel {
         Task {
             let delay = Double.random(in: 0.5...1.0)
             try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            let pendingMsg = Message(role: .assistant, content: "", pendingImagePrompt: text)
             withAnimation(.spring(response: 0.45, dampingFraction: 0.72)) {
-                messages.append(Message(role: .assistant, content: "", pendingImagePrompt: text))
+                messages.append(pendingMsg)
             }
-            updateCache()
+            LocalConversationStore.shared.appendMessage(pendingMsg, for: character.id, defaultLevel: relationshipLevel, defaultLevelProgress: levelProgress)
+            store?.chatCache[character.id] = realMessages()
         }
     }
 
@@ -770,9 +772,13 @@ final class ChatViewModel {
                     messages[finalIdx].imageURL = imageResult.url
                     messages[finalIdx].pendingImagePrompt = nil
                 }
+                LocalConversationStore.shared.updateMessage(id: messageID, for: character.id) { msg in
+                    msg.imageURL = imageResult.url
+                    msg.pendingImagePrompt = nil
+                }
+                store?.chatCache[character.id] = realMessages()
                 generatingImageMessageIDs.remove(messageID)
                 handleTokenBalance(imageResult.tokenBalance)
-                updateCache()
 
                 // İsteğe bağlı metin tepkisi — sırayla, fotoğraftan SONRA gelir.
                 // `imageResult.redirected` true ise (orijinal istek reddedilip
@@ -808,7 +814,11 @@ final class ChatViewModel {
 
                 let caption = result.reply.trimmingCharacters(in: .whitespacesAndNewlines)
                 if !caption.isEmpty {
-                    messages.append(Message(role: .assistant, content: caption))
+                    let captionMsg = Message(role: .assistant, content: caption)
+                    messages.append(captionMsg)
+                    LocalConversationStore.shared.appendMessage(captionMsg, for: character.id, defaultLevel: relationshipLevel, defaultLevelProgress: levelProgress)
+                    LocalConversationStore.shared.refreshDetectedLanguage(for: character.id)
+                    store?.chatCache[character.id] = realMessages()
                 }
 
                 applyPostReplyEffects(gotPhoto: imageResult.url, stored: stored)
