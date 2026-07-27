@@ -429,6 +429,8 @@ struct ChatView: View {
                             withAnimation(.easeInOut(duration: 0.2)) {
                                 expandedMessageID = expandedMessageID == message.id ? nil : message.id
                             }
+                        }, onRetry: {
+                            viewModel.retrySend(messageID: message.id)
                         }, onSpeak: {
                             if voice.speakingMessageID == message.id {
                                 voice.stop()
@@ -745,6 +747,7 @@ private struct ChatBubble: View {
     var isSpeaking: Bool = false
     var showsTimestamp: Bool = false
     var onTap: (() -> Void)? = nil
+    var onRetry: (() -> Void)? = nil
     var onSpeak: (() -> Void)? = nil
     var isVoicePlaying: Bool = false
     var voiceIsActive: Bool = false
@@ -777,6 +780,13 @@ private struct ChatBubble: View {
 
             if showsTimestamp, message.isUser {
                 timestampLabel
+            }
+
+            if message.isUser, message.failed == true {
+                Image(systemName: "exclamationmark.circle.fill")
+                    .font(.system(size: 20))
+                    .foregroundStyle(.red)
+                    .onTapGesture { onRetry?() }
             }
 
             if message.isPendingImage {
