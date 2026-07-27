@@ -1153,6 +1153,7 @@ Deno.serve(async (req: Request) => {
         const convoText = toFold
           .map((m) => `${m.role === "user" ? "User" : "You"}: ${stripVoiceTags(m.content)}`)
           .join("\n");
+        const existingMemoryLines = (memoryRows ?? []).map((m) => `- ${m.content}`).join("\n") || "(none yet)";
         const summaryPrompt: WireMessage[] = [
           {
             role: "system",
@@ -1167,20 +1168,38 @@ Deno.serve(async (req: Request) => {
               "jokes or bits, commitments the character made) — so future turns stay consistent with how the " +
               "character has already been behaving, not just generic persona instructions.\n\n" +
               "Short bullet points under each heading. Keep prior summary content, fold in what's new, drop " +
-              "anything superseded or no longer relevant.",
+              "anything superseded or no longer relevant.\n\n" +
+              "SEPARATELY, also extract any NEW durable atomic facts worth permanently remembering (name, " +
+              "preferences, promises, key relationship moments) that are NOT already covered by the existing " +
+              "memories list you'll be given — do not repeat anything already in that list, even reworded. " +
+              "If there's nothing new, return an empty array.\n\n" +
+              'Respond with ONLY this JSON shape, nothing else: {"summary":"...","newMemories":["fact one",' +
+              '"fact two"]} — `summary` is the full updated USER/BOT summary text (same format as before), ' +
+              "`newMemories` is the new-facts array described above (can be empty).",
           },
           {
             role: "user",
             content:
               `Previous summary:\n${convo.summary || "(none)"}\n\n` +
-              `New conversation turns:\n${convoText}\n\nUpdated summary (USER / BOT):`,
+              `Existing memories (do not repeat these):\n${existingMemoryLines}\n\n` +
+              `New conversation turns:\n${convoText}\n\nUpdated JSON:`,
           },
         ];
         try {
-          const newSummary = await callGrok(summaryPrompt, 400);
+          const raw = await callGrok(summaryPrompt, 500);
+          const parsed = extractJson(raw);
+          const newSummary: string = typeof parsed?.summary === "string" ? parsed.summary : raw.trim();
           await db.from("conversations")
             .update({ summary: newSummary, summarized_count: agedOut })
             .eq("id", conversationId);
+          const newMemories: string[] = Array.isArray(parsed?.newMemories)
+            ? parsed.newMemories.filter((m: unknown): m is string => typeof m === "string" && m.trim().length > 0)
+            : [];
+          if (newMemories.length > 0) {
+            await db.from("memories").insert(
+              newMemories.map((content) => ({ conversation_id: conversationId, content: content.trim() }))
+            );
+          }
         } catch (e) {
           // Özetleme başarısız olsa bile sohbet bozulmaz; sadece logla.
           console.error("ozetleme hatasi:", String(e));
