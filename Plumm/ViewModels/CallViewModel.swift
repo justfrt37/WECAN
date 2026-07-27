@@ -66,7 +66,7 @@ final class CallViewModel: NSObject, AVAudioPlayerDelegate {
         }
 
         do {
-            callSessionId = try await service.start(characterId: character.id, conversationId: conversationId)
+            callSessionId = try await service.start(characterId: character.id.uuidString.lowercased(), conversationId: conversationId)
         } catch CallServiceError.insufficientTokens {
             state = .ended(reason: .insufficientTokens)
             return
