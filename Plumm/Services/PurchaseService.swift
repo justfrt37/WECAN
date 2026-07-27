@@ -26,6 +26,7 @@ import RevenueCat
 /// `priceValue` yalnızca ucuzdan pahalıya sıralamak için tutulur.
 struct PaywallPackage: Identifiable {
     let id: String            // RevenueCat package identifier
+    let productId: String     // StoreKit ürün id'si (ör. "weekly_pro_max")
     let title: String         // ürün başlığı (ör. "Weekly", "Annual")
     let periodName: String    // temiz İngilizce periyot adı: "Weekly"/"Monthly"/"Yearly"
     let localizedPrice: String // yerelleştirilmiş fiyat (ör. "₺1.499,99")
@@ -33,9 +34,39 @@ struct PaywallPackage: Identifiable {
     let periodLabel: String?   // "/wk", "/mo", "/yr" vb.
     let weeklyEquivalent: String? // varsa "$0.96 / week"
     let perWeekValue: Decimal? // haftalık eşdeğer ham fiyat (tasarruf % hesabı için)
+    let tokenAmount: Int      // bu ürünün verdiği token (abonelik dönem grant'ı / paket adedi)
     #if canImport(RevenueCat)
     let rcPackage: Package
     #endif
+}
+
+/// Ürün kataloğu — product id → tier ve token miktarı (dashboard fiyatları
+/// dinamik; bu iki alan sabit iş kuralı). Server (`sync-subscription`) ve
+/// dev-token-tools ile AYNI kalmalı.
+enum PlummCatalog {
+    /// Abonelik ürününün dönem başına verdiği token.
+    static let subscriptionTokens: [String: Int] = [
+        "weekly_pro_normal": 250, "monthly_pro_default": 1000, "yearly_pro_normal": 12000,
+        "weekly_pro_plus": 500,   "monthly_pro_plus": 2000,    "yearly_pro_plus": 25000,
+        "weekly_pro_max": 750,    "monthly_pro_max": 3000,     "yearly_pro_max": 35000,
+    ]
+    /// Tek seferlik token paketleri.
+    static let tokenPackTokens: [String: Int] = [
+        "token_100": 100, "token_250": 250, "token_500": 500,
+        "token_1000": 1000, "token_2000": 2000, "token_5000": 5000,
+    ]
+    static let productTier: [String: SubscriptionTier] = [
+        "weekly_pro_normal": .pro,     "monthly_pro_default": .pro,  "yearly_pro_normal": .pro,
+        "weekly_pro_plus": .proPlus,   "monthly_pro_plus": .proPlus, "yearly_pro_plus": .proPlus,
+        "weekly_pro_max": .max,        "monthly_pro_max": .max,      "yearly_pro_max": .max,
+    ]
+    static func tokens(for productId: String) -> Int {
+        subscriptionTokens[productId] ?? tokenPackTokens[productId] ?? 0
+    }
+    static func tier(for productId: String) -> SubscriptionTier {
+        productTier[productId] ?? .none
+    }
+    static func isTokenPack(_ productId: String) -> Bool { tokenPackTokens[productId] != nil }
 }
 
 /// Üç ödemeli seviye — entitlement kimlikleri RevenueCat dashboard'daki
@@ -90,10 +121,25 @@ final class PurchaseService {
     /// PaywallHostView) hiç değişmeden derlenmeye devam etsin diye korunuyor.
     var isPro: Bool { tier != .none }
 
-    /// Aktif offering'in paketleri — UCUZDAN PAHALIYA sıralı. Paywall'lar bunu
-    /// dinamik olarak listeler; en pahalı olan (`packages.last`) rozet alır.
-    private(set) var packages: [PaywallPackage] = []
+    // Tier başına abonelik paketleri (weekly→monthly→yearly sıralı) ve token
+    // paketleri. Ana paywall tier seçicisi bunları gösterir.
+    private(set) var proPackages: [PaywallPackage] = []
+    private(set) var proPlusPackages: [PaywallPackage] = []
+    private(set) var maxPackages: [PaywallPackage] = []
+    private(set) var tokenPackages: [PaywallPackage] = []   // ucuzdan pahalıya
     private(set) var isLoadingOfferings = false
+
+    /// Onboarding paywall'ı için geriye-uyumlu: Pro (default offering) paketleri.
+    var packages: [PaywallPackage] { proPackages }
+
+    func packages(for tier: SubscriptionTier) -> [PaywallPackage] {
+        switch tier {
+        case .pro:     return proPackages
+        case .proPlus: return proPlusPackages
+        case .max:     return maxPackages
+        case .none:    return []
+        }
+    }
 
     func configure() {
         #if canImport(RevenueCat)
@@ -110,53 +156,49 @@ final class PurchaseService {
         #endif
     }
 
-    /// Aktif offering'in paketlerini çeker, fiyata göre ucuzdan pahalıya sıralar.
+    /// Tüm offering'leri (default=Pro, plus=Pro+, max=Pro Max, tokens) çeker.
     func loadOfferings() async {
         #if canImport(RevenueCat)
         guard isConfigured else { return }
         isLoadingOfferings = true
         defer { isLoadingOfferings = false }
-
-        // DECISIVE PROBE: RevenueCat'i baypas edip doğrudan StoreKit'e sor.
-        // 2 ürün dönerse → StoreKit config ÇALIŞIYOR, sorun RC tarafında.
-        // 0 dönerse → StoreKit config uygulanmıyor/geçersiz (RC değil StoreKit sorunu).
-        do {
-            let sk = try await StoreKit.Product.products(for: ["weekly_pro", "yearly_pro_2"])
-            print("[PW-DIAG] ⚡️ StoreKit DOĞRUDAN ürün sayısı=\(sk.count) ids=\(sk.map(\.id)) fiyat=\(sk.map(\.displayPrice))")
-        } catch {
-            print("[PW-DIAG] ⚡️ StoreKit DOĞRUDAN HATA: \(error)")
-        }
-
         do {
             let offerings = try await Purchases.shared.offerings()
-            print("[PW-DIAG] offerings.all=\(offerings.all.keys) current=\(offerings.current?.identifier ?? "nil") pkgCount=\(offerings.current?.availablePackages.count ?? -1)")
-            guard let current = offerings.current else {
-                print("[PW-DIAG] current offering NIL — dashboard'da 'current' offering atanmamış olabilir.")
-                return
-            }
-            packages = current.availablePackages
-                .map { pkg in
-                    let product = pkg.storeProduct
-                    print("[PW-DIAG] pkg=\(pkg.identifier) product=\(product.productIdentifier) price=\(product.localizedPriceString)")
-                    return PaywallPackage(
-                        id: pkg.identifier,
-                        title: product.localizedTitle,
-                        periodName: Self.periodName(for: product),
-                        localizedPrice: product.localizedPriceString,
-                        priceValue: product.price,
-                        periodLabel: Self.periodLabel(for: product),
-                        weeklyEquivalent: Self.weeklyEquivalent(for: product),
-                        perWeekValue: Self.perWeekValue(for: product),
-                        rcPackage: pkg
-                    )
-                }
-                .sorted { $0.priceValue < $1.priceValue }
-            print("[PW-DIAG] packages yüklendi: \(packages.count)")
+            proPackages     = Self.mapPackages(offerings.all["default"])
+            proPlusPackages = Self.mapPackages(offerings.all["plus"])
+            maxPackages     = Self.mapPackages(offerings.all["max"])
+            tokenPackages   = Self.mapPackages(offerings.all["tokens"])
+            print("[PW] offerings yüklendi pro=\(proPackages.count) plus=\(proPlusPackages.count) max=\(maxPackages.count) tokens=\(tokenPackages.count)")
         } catch {
-            print("[PW-DIAG] offerings HATA: \(error)")
+            print("[PW] offerings HATA: \(error)")
         }
         #endif
     }
+
+    #if canImport(RevenueCat)
+    /// Bir offering'in paketlerini PaywallPackage'a çevirir, fiyata göre
+    /// (ucuzdan pahalıya) sıralar. Abonelikte weekly<monthly<yearly, tokende küçük<büyük.
+    private static func mapPackages(_ offering: Offering?) -> [PaywallPackage] {
+        guard let offering else { return [] }
+        return offering.availablePackages.map { pkg in
+            let p = pkg.storeProduct
+            return PaywallPackage(
+                id: pkg.identifier,
+                productId: p.productIdentifier,
+                title: p.localizedTitle,
+                periodName: Self.periodName(for: p),
+                localizedPrice: p.localizedPriceString,
+                priceValue: p.price,
+                periodLabel: Self.periodLabel(for: p),
+                weeklyEquivalent: Self.weeklyEquivalent(for: p),
+                perWeekValue: Self.perWeekValue(for: p),
+                tokenAmount: PlummCatalog.tokens(for: p.productIdentifier),
+                rcPackage: pkg
+            )
+        }
+        .sorted { $0.priceValue < $1.priceValue }
+    }
+    #endif
 
     /// Seçili paketi satın alır. Başarılıysa entitlement'i tazeler; iptal/hata → false.
     @discardableResult
@@ -166,21 +208,26 @@ final class PurchaseService {
         do {
             let result = try await Purchases.shared.purchase(package: package.rcPackage)
             guard !result.userCancelled else { return false }
-            await refreshEntitlement()
-            // Sunucudaki token ekonomisine köprü: subscription satırı + haftalık
-            // token'ları verir (RC entitlement'ı secret key ile sunucuda doğrulanır).
-            let balance = await syncWithServer()
-            print("[PW-DIAG] purchase tamam. isPro=\(isPro) tier=\(tier.rawValue) syncBalance=\(String(describing: balance))")
-            #if DEBUG
-            // Simülatör/DEBUG: RC sunucusu yerel StoreKit Testing ("xcode"
-            // environment) satın almalarını KAYDETMEZ, dolayısıyla sunucu
-            // doğrulaması (syncWithServer) tier'ı veremez. Bu durumda, StoreKit-2
-            // tarafından DOĞRULANMIŞ aktif aboneliği bulup tier'ı dev-token-tools
-            // ile ver (dönem başına idempotent). Production'da bu blok DERLENMEZ.
-            if tier == .none { await debugGrantFromStoreKit() }
-            #endif
-            // Satın alma TAMAMLANDIYSA (iptal/hata değil) paywall kapanmalı —
-            // entitlement/isPro propagasyonuna bağlamıyoruz.
+
+            if PlummCatalog.isTokenPack(package.productId) {
+                // Token PAKETİ (consumable): entitlement/subscription üretmez.
+                #if DEBUG
+                await debugGrantTokens(package.tokenAmount)
+                #endif
+                // (Production: ileride RC non_subscriptions doğrulamalı bir sunucu
+                //  akışı gerekli — şimdilik DEBUG grant.)
+            } else {
+                // Abonelik: sunucu token ekonomisine köprü.
+                await refreshEntitlement()
+                await syncWithServer()
+                #if DEBUG
+                // Simülatör: RC yerel StoreKit Testing satın almalarını sunucuya
+                // KAYDETMEZ → syncWithServer boş döner. Aktif aboneliği StoreKit'ten
+                // bulup ürüne özel token'ı dev-token-tools ile ver (dönem-idempotent).
+                if tier == .none { await debugGrantFromStoreKit() }
+                #endif
+            }
+            // Satın alma TAMAMLANDIYSA (iptal/hata değil) true — paywall kapanmalı.
             return true
         } catch {
             print("[PurchaseService] purchase hatası: \(error.localizedDescription)")
@@ -250,12 +297,26 @@ final class PurchaseService {
     }
 
     #if DEBUG
-    /// Satın alınan ürün id'sinden tier çıkarır (client tarafı fallback eşleme).
+    /// Satın alınan ürün id'sinden tier çıkarır (katalogdan).
     private func tier(forProductId productId: String) -> SubscriptionTier {
-        switch productId {
-        case "weekly_pro", "yearly_pro_2": return .pro
-        default: return .none
-        }
+        PlummCatalog.tier(for: productId)
+    }
+
+    /// SADECE DEBUG: bir token PAKETİ (consumable) satın alınınca adedini sunucuda
+    /// verir. Consumable entitlement/subscription üretmediği için normal sync yolu
+    /// bunu yakalamaz; dev-token-tools ile doğrudan grant edilir.
+    private func debugGrantTokens(_ amount: Int) async {
+        guard amount > 0,
+              let accessToken = UserDefaultsManager.shared.accessToken,
+              let url = URL(string: "\(Config.supabaseURL)/functions/v1/dev-token-tools")
+        else { return }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        req.httpBody = try? JSONSerialization.data(withJSONObject: ["action": "grant", "amount": amount])
+        _ = try? await URLSession.shared.data(for: req)
+        print("[PW] DEBUG token paketi grant: +\(amount)")
     }
 
     /// StoreKit-2'den ŞU AN aktif (doğrulanmış, süresi geçmemiş) abonelik ürününü
@@ -306,13 +367,9 @@ final class PurchaseService {
     }
     #endif
 
-    /// Ürüne göre verilecek token miktarı — haftalık 100, yıllık 1000.
+    /// Ürüne göre verilecek token miktarı (katalogdan).
     static func productTokens(for productId: String) -> Int {
-        switch productId {
-        case "weekly_pro":   return 100
-        case "yearly_pro_2": return 1000
-        default:             return 0
-        }
+        PlummCatalog.tokens(for: productId)
     }
 
     func refreshEntitlement() async {

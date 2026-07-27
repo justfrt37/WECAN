@@ -36,10 +36,15 @@ struct OnboardingPaywallView: View {
     /// Varsayılan seçim en pahalı (en avantajlı) paket — `packages.last`.
     @Environment(TokenStore.self) private var tokenStore
     @State private var purchases = PurchaseService.shared
+    @State private var selectedTier: SubscriptionTier = .pro
     @State private var selectedPackageID: String?
     @State private var isPurchasing = false
 
-    private var packages: [PaywallPackage] { purchases.packages }
+    private let tiers: [(tier: SubscriptionTier, label: String)] = [
+        (.pro, "Pro"), (.proPlus, "Pro+"), (.max, "Pro Max"),
+    ]
+
+    private var packages: [PaywallPackage] { purchases.packages(for: selectedTier) }
     private var selectedPackage: PaywallPackage? {
         packages.first { $0.id == selectedPackageID } ?? packages.last
     }
@@ -58,13 +63,15 @@ struct OnboardingPaywallView: View {
         onboarding.selectedCharacter?.selectedVideo ?? "onb4Video"
     }
 
-    private let features: [String] = [
-        "Voice conversations",
-        "Unlimited photos",
-        "Create your own girl",
-        "Unlimited access (24/7)",
-        "Long-term memory",
-    ]
+    /// Önceki özellik listesi (tik'li). Şimdilik tüm tier'larda aynı; tier'a göre
+    /// farklılaştırmak istenirse switch'e dönüştürülebilir.
+    private func features(for tier: SubscriptionTier) -> [String] {
+        ["Voice conversations",
+         "Unlimited photos",
+         "Create your own girl",
+         "Unlimited access (24/7)",
+         "Long-term memory"]
+    }
 
     var body: some View {
         ZStack {
@@ -132,34 +139,34 @@ struct OnboardingPaywallView: View {
     // MARK: Alt içerik
 
     private var content: some View {
-        VStack(spacing: 22) {
-            VStack(alignment: .leading, spacing: 12) {
-                ForEach(features, id: \.self) { f in
-                    HStack(spacing: 12) {
+        VStack(spacing: 14) {
+            // Özellikler (tik'li) — tier seçicinin ÜSTÜNDE.
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(features(for: selectedTier), id: \.self) { f in
+                    HStack(spacing: 10) {
                         Image(systemName: "checkmark.circle.fill")
-                            .font(.system(size: 22))
+                            .font(.system(size: 18))
                             .foregroundStyle(Color(hex: 0x34D399))
                         Text(f)
-                            .font(.system(size: 18, weight: .semibold))
+                            .font(.system(size: 19, weight: .semibold))
                             .foregroundStyle(.white)
                     }
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 30)
+            .padding(.horizontal, 24)
+
+            tierSelector
 
             if packages.isEmpty {
-                ProgressView()
-                    .tint(.white)
-                    .frame(height: 96)
+                ProgressView().tint(.white).frame(height: 200)
             } else {
-                HStack(spacing: 14) {
-                    // Ucuzdan pahalıya; en pahalıda (packages.last) tasarruf rozeti.
+                VStack(spacing: 8) {
+                    // Seçili tier'ın süre seçenekleri (dikey), en pahalıda rozet.
                     ForEach(packages) { pkg in
                         planCard(pkg, isTop: pkg.id == packages.last?.id)
                     }
                 }
-                .padding(.top, 10)   // üste taşan tasarruf rozetine yer
             }
 
             Button { unlock() } label: {
@@ -167,7 +174,7 @@ struct OnboardingPaywallView: View {
                     if isPurchasing {
                         ProgressView().tint(.white)
                     } else {
-                        Text("Continue").font(.system(size: 20, weight: .heavy))
+                        Text("Continue").font(.system(size: 25, weight: .heavy))
                     }
                 }
                 .foregroundStyle(.white)
@@ -179,45 +186,61 @@ struct OnboardingPaywallView: View {
             legalRow
         }
         .padding(.horizontal, 20)
-        .padding(.bottom, 10)   // buton yere daha yakın olsun
+        .padding(.bottom, 15)   // buton yere daha yakın olsun (5px daha yukarı)
     }
 
+    /// Üstteki yatay tier seçici — Pro / Pro+ / Pro Max.
+    private var tierSelector: some View {
+        HStack(spacing: 2) {
+            ForEach(tiers, id: \.tier) { item in
+                let selected = item.tier == selectedTier
+                Button {
+                    selectedTier = item.tier
+                    selectedPackageID = nil   // yeni tier → varsayılan (yıllık)
+                } label: {
+                    Text(item.label)
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundStyle(selected ? .white : .white.opacity(0.7))
+                        .frame(maxWidth: .infinity).padding(.vertical, 9)
+                        .background(selected ? OBTheme.buttonGradient : LinearGradient(colors: [.clear, .clear], startPoint: .top, endPoint: .bottom), in: Capsule())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(3)
+        .background(Color.white.opacity(0.10), in: Capsule())
+    }
+
+    /// Kompakt yatay süre kartı (dikey stack'e uygun) — sol periyot, sağ fiyat.
+    /// Token miktarı GÖSTERİLMEZ (bkz. kullanıcı talebi). En pahalıda tasarruf rozeti.
     private func planCard(_ pkg: PaywallPackage, isTop: Bool) -> some View {
         let selected = selectedPackage?.id == pkg.id
-        // Alt satır: haftalık eşdeğer varsa onu, yoksa periyot etiketini göster.
-        let sub = pkg.weeklyEquivalent ?? pkg.periodLabel ?? " "
         return Button { selectedPackageID = pkg.id } label: {
-            // Her iki kart AYNI içerik (başlık/fiyat/alt) → eşit boy. Rozet
-            // layout dışında, üste taşan overlay olarak durur (boyu etkilemez).
-            VStack(spacing: 5) {
-                Text(pkg.periodName).font(.system(size: 16, weight: .bold)).foregroundStyle(.white)
-                    .lineLimit(1).minimumScaleFactor(0.7)
-                Text(pkg.localizedPrice).font(.system(size: 22, weight: .heavy)).foregroundStyle(.white)
-                    .lineLimit(1).minimumScaleFactor(0.6)
-                Text(sub).font(.system(size: 12)).foregroundStyle(.white.opacity(0.7))
-                    .lineLimit(1).minimumScaleFactor(0.7)
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 18).padding(.horizontal, 8)
-            .background(
-                (selected ? OBTheme.coral.opacity(0.16) : Color.white.opacity(0.08)),
-                in: RoundedRectangle(cornerRadius: 20)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 20)
-                    .strokeBorder(selected ? OBTheme.coral : .white.opacity(0.18),
-                                  lineWidth: selected ? 2.5 : 1.5)
-            )
-            .overlay(alignment: .top) {
+            HStack(spacing: 10) {
+                Text(pkg.periodName).font(.system(size: 19, weight: .bold)).foregroundStyle(.white)
+                Spacer()
                 if isTop {
                     Text(savingsBadge(for: pkg))
-                        .font(.system(size: 11, weight: .heavy))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 12).padding(.vertical, 4)
+                        .font(.system(size: 11, weight: .heavy)).foregroundStyle(.white)
+                        .padding(.horizontal, 7).padding(.vertical, 3)
                         .background(OBTheme.buttonGradient, in: Capsule())
-                        .offset(y: -11)
+                }
+                VStack(alignment: .trailing, spacing: 0) {
+                    Text(pkg.localizedPrice).font(.system(size: 20, weight: .heavy)).foregroundStyle(.white)
+                    if let period = pkg.periodLabel {
+                        Text(period).font(.system(size: 13)).foregroundStyle(.white.opacity(0.5))
+                    }
                 }
             }
+            .padding(.vertical, 12).padding(.horizontal, 14)
+            .background(
+                (selected ? OBTheme.coral.opacity(0.16) : Color.white.opacity(0.08)),
+                in: RoundedRectangle(cornerRadius: 16)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 16)
+                    .strokeBorder(selected ? OBTheme.coral : .white.opacity(0.18), lineWidth: selected ? 2 : 1.5)
+            )
         }
         .buttonStyle(.plain)
     }
@@ -242,7 +265,7 @@ struct OnboardingPaywallView: View {
             Button("Terms of Use") { legalDocument = .terms }
             Button("Restore") { restore() }
         }
-        .font(.system(size: 11, weight: .medium))
+        .font(.system(size: 14, weight: .medium))
         .foregroundStyle(.white.opacity(0.5))
         .buttonStyle(.plain)
     }

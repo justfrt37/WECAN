@@ -33,13 +33,15 @@ const WEEKLY_TOKENS: Record<string, number> = { pro: 1000, pro_plus: 2500, max: 
 // Entitlement dashboard'da yapılandırılmamış olabilir — o durumda aktif
 // SUBSCRIPTION ürününü doğrudan tier'a eşle (entitlement'tan bağımsız).
 const PRODUCT_TIER: Record<string, string> = {
-  weekly_pro: "pro",
-  yearly_pro_2: "pro",
+  weekly_pro_normal: "pro", monthly_pro_default: "pro", yearly_pro_normal: "pro",
+  weekly_pro_plus: "pro_plus", monthly_pro_plus: "pro_plus", yearly_pro_plus: "pro_plus",
+  weekly_pro_max: "max", monthly_pro_max: "max", yearly_pro_max: "max",
 };
-// Ürüne özel token miktarı (dönem başına): haftalık 100, yıllık 1000.
+// Ürüne özel token miktarı (dönem başına).
 const PRODUCT_TOKENS: Record<string, number> = {
-  weekly_pro: 100,
-  yearly_pro_2: 1000,
+  weekly_pro_normal: 250, monthly_pro_default: 1000, yearly_pro_normal: 12000,
+  weekly_pro_plus: 500, monthly_pro_plus: 2000, yearly_pro_plus: 25000,
+  weekly_pro_max: 750, monthly_pro_max: 3000, yearly_pro_max: 35000,
 };
 
 function userIdFromJWT(authHeader: string | null): string | null {
