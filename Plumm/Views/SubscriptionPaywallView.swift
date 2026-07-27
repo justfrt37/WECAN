@@ -1,40 +1,30 @@
 //
 //  SubscriptionPaywallView.swift
-//  Abonelik paywall'u — RevenueCat Offerings'ten gelen abonelik paketleri
-//  (UCUZDAN PAHALIYA sıralı, en pahalıda "en avantajlı" rozeti) + tek seferlik
-//  token paketleri. "Upgrade" / "Go PRO" gibi her yerden `PaywallHostView` ile
-//  açılır. Coin Mağazası'ndaki (TokenStoreView) "Pro" butonu da bunu açar.
+//  Ana abonelik paywall'u. Üstte tier seçici (Pro / Pro+ / Pro Max), seçili
+//  tier'ın weekly/monthly/yearly paketleri (RevenueCat default/plus/max
+//  offering'lerinden), altında tek seferlik token paketleri (tokens offering).
 //
 
 import SwiftUI
-
-private struct TokenPack: Identifiable {
-    let id: String
-    let name: String
-    let price: String
-    let tokens: String
-}
-
-private let tokenPacks: [TokenPack] = [
-    .init(id: "small", name: "Small", price: "$5.99", tokens: "300"),
-    .init(id: "medium", name: "Medium", price: "$19.99", tokens: "1,000"),
-    .init(id: "large", name: "Large", price: "$59.99", tokens: "3,000"),
-]
 
 struct SubscriptionPaywallView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(TokenStore.self) private var tokenStore
     @State private var purchases = PurchaseService.shared
+    @State private var selectedTier: SubscriptionTier = .pro
     @State private var selectedPackageID: String?
     @State private var isPurchasing = false
 
-    private var packages: [PaywallPackage] { purchases.packages }
-    /// Seçili paket — varsayılan en pahalı (en avantajlı) paket.
+    private let tiers: [(tier: SubscriptionTier, label: String)] = [
+        (.pro, "Pro"), (.proPlus, "Pro+"), (.max, "Pro Max"),
+    ]
+
+    private var packages: [PaywallPackage] { purchases.packages(for: selectedTier) }
+    /// Seçili paket — varsayılan en pahalı (yıllık, en avantajlı).
     private var selectedPackage: PaywallPackage? {
         packages.first { $0.id == selectedPackageID } ?? packages.last
     }
 
-    /// En pahalı paketin haftalık eşdeğerine göre tasarruf yüzdesi.
     private func savingsBadge(for pkg: PaywallPackage) -> String {
         let maxPerWeek = packages.compactMap(\.perWeekValue).max()
         if let mine = pkg.perWeekValue, let top = maxPerWeek, top > 0, mine < top {
@@ -52,20 +42,19 @@ struct SubscriptionPaywallView: View {
                 VStack(spacing: 0) {
                     ScrollView {
                         VStack(spacing: 18) {
-                            Text("Get more tokens")
-                                .font(.system(size: 20, weight: .bold))
+                            Text("Go Premium")
+                                .font(.system(size: 22, weight: .bold))
                                 .foregroundStyle(.white)
                                 .padding(.top, 12)
 
+                            tierSelector
+
                             if packages.isEmpty {
-                                ProgressView()
-                                    .tint(.white)
-                                    .frame(height: 120)
+                                ProgressView().tint(.white).frame(height: 160)
                             } else {
                                 VStack(spacing: 10) {
-                                    // Ucuzdan pahalıya; en pahalıda tasarruf rozeti.
                                     ForEach(packages) { pkg in
-                                        packageCard(pkg, isTop: pkg.id == packages.last?.id)
+                                        planCard(pkg, isTop: pkg.id == packages.last?.id)
                                     }
                                 }
                             }
@@ -75,9 +64,7 @@ struct SubscriptionPaywallView: View {
                                 .foregroundStyle(.white.opacity(0.45))
                                 .padding(.top, 6)
 
-                            HStack(spacing: 8) {
-                                ForEach(tokenPacks) { pack in packCard(pack) }
-                            }
+                            tokenPackGrid
 
                             Button { restore() } label: {
                                 Text("Restore Purchases")
@@ -94,26 +81,16 @@ struct SubscriptionPaywallView: View {
                     stickyFooter
                 }
 
-                // Satın alma / geri yükleme sürerken loading overlay.
                 if isPurchasing {
-                    LinearGradient(
-                        colors: [.black.opacity(0.35), .black.opacity(0.55)],
-                        startPoint: .top, endPoint: .bottom
-                    )
-                    .ignoresSafeArea()
-                    .overlay {
-                        ProgressView()
-                            .controlSize(.large)
-                            .tint(.white)
-                    }
-                    .transition(.opacity)
+                    LinearGradient(colors: [.black.opacity(0.35), .black.opacity(0.55)], startPoint: .top, endPoint: .bottom)
+                        .ignoresSafeArea()
+                        .overlay { ProgressView().controlSize(.large).tint(.white) }
+                        .transition(.opacity)
                 }
             }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button { dismiss() } label: {
-                        Image(systemName: "xmark").foregroundStyle(.white)
-                    }
+                    Button { dismiss() } label: { Image(systemName: "xmark").foregroundStyle(.white) }
                 }
             }
         }
@@ -123,16 +100,38 @@ struct SubscriptionPaywallView: View {
         }
     }
 
-    private func packageCard(_ pkg: PaywallPackage, isTop: Bool) -> some View {
+    // MARK: Tier seçici (Pro / Pro+ / Pro Max)
+
+    private var tierSelector: some View {
+        HStack(spacing: 2) {
+            ForEach(tiers, id: \.tier) { item in
+                let selected = item.tier == selectedTier
+                Button {
+                    selectedTier = item.tier
+                    selectedPackageID = nil   // yeni tier → varsayılan (yıllık)
+                } label: {
+                    Text(item.label)
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(selected ? AppColor.bg : .white.opacity(0.7))
+                        .frame(maxWidth: .infinity).padding(.vertical, 9)
+                        .background(selected ? AppColor.amber : .clear, in: Capsule())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(3)
+        .background(AppColor.card, in: Capsule())
+    }
+
+    // MARK: Süre kartı (weekly / monthly / yearly)
+
+    private func planCard(_ pkg: PaywallPackage, isTop: Bool) -> some View {
         let selected = pkg.id == selectedPackage?.id
-        return Button {
-            selectedPackageID = pkg.id
-        } label: {
+        return Button { selectedPackageID = pkg.id } label: {
             VStack(alignment: .leading, spacing: 6) {
                 if isTop {
                     Text(savingsBadge(for: pkg))
-                        .font(.system(size: 9, weight: .heavy))
-                        .foregroundStyle(AppColor.bg)
+                        .font(.system(size: 9, weight: .heavy)).foregroundStyle(AppColor.bg)
                         .padding(.horizontal, 8).padding(.vertical, 2)
                         .background(AppColor.amber, in: Capsule())
                 }
@@ -143,20 +142,22 @@ struct SubscriptionPaywallView: View {
                             .background(Circle().fill(selected ? AppColor.amber : .clear).padding(3))
                             .frame(width: 16, height: 16)
                         Text(pkg.periodName).font(.system(size: 15, weight: .bold)).foregroundStyle(.white)
-                            .lineLimit(1).minimumScaleFactor(0.7)
                     }
                     Spacer()
                     HStack(alignment: .lastTextBaseline, spacing: 2) {
-                        Text(pkg.localizedPrice)
-                            .font(.system(size: 15, weight: .heavy)).foregroundStyle(AppColor.amber)
+                        Text(pkg.localizedPrice).font(.system(size: 15, weight: .heavy)).foregroundStyle(AppColor.amber)
                         if let period = pkg.periodLabel {
-                            Text(period)
-                                .font(.system(size: 10, weight: .semibold)).foregroundStyle(.white.opacity(0.5))
+                            Text(period).font(.system(size: 10, weight: .semibold)).foregroundStyle(.white.opacity(0.5))
                         }
                     }
                 }
-                if let weekly = pkg.weeklyEquivalent {
-                    benefitLine(weekly)
+                HStack(spacing: 6) {
+                    CoinIcon(size: 12)
+                    Text("\(pkg.tokenAmount.formatted()) tokens")
+                        .font(.system(size: 11.5)).foregroundStyle(.white.opacity(0.8))
+                    if let weekly = pkg.weeklyEquivalent {
+                        Text("· \(weekly)").font(.system(size: 11)).foregroundStyle(.white.opacity(0.5))
+                    }
                 }
             }
             .padding(14)
@@ -166,34 +167,28 @@ struct SubscriptionPaywallView: View {
         .buttonStyle(.plain)
     }
 
-    private func benefitLine(_ text: String) -> some View {
-        HStack(spacing: 6) {
-            Text("✓").font(.system(size: 11, weight: .heavy)).foregroundStyle(AppColor.amber)
-            Text(text).font(.system(size: 11.5)).foregroundStyle(.white.opacity(0.8))
-        }
-    }
+    // MARK: Token paketleri (tokens offering)
 
-    private func packCard(_ pack: TokenPack) -> some View {
-        VStack(spacing: 6) {
-            Text(pack.name).font(.system(size: 11, weight: .bold)).foregroundStyle(.white)
-            Text(pack.price).font(.system(size: 14, weight: .heavy)).foregroundStyle(AppColor.amber)
-            HStack(spacing: 4) {
-                CoinIcon(size: 11)
-                Text("\(pack.tokens)").font(.system(size: 10)).foregroundStyle(.white.opacity(0.6))
+    private var tokenPackGrid: some View {
+        let cols = [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)]
+        return LazyVGrid(columns: cols, spacing: 8) {
+            ForEach(purchases.tokenPackages) { pack in
+                VStack(spacing: 6) {
+                    CoinIcon(size: 16)
+                    Text("\(pack.tokenAmount.formatted())").font(.system(size: 13, weight: .heavy)).foregroundStyle(.white)
+                    Text(pack.localizedPrice).font(.system(size: 11, weight: .bold)).foregroundStyle(AppColor.amber)
+                    Button { buyTokenPack(pack) } label: {
+                        Text("Buy").font(.system(size: 10, weight: .bold)).foregroundStyle(.white)
+                            .frame(maxWidth: .infinity).padding(.vertical, 6)
+                            .background(AppColor.pink, in: RoundedRectangle(cornerRadius: 8))
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(10)
+                .frame(maxWidth: .infinity)
+                .background(AppColor.card, in: RoundedRectangle(cornerRadius: 14))
             }
-            Button {
-                buyTokenPack(pack)
-            } label: {
-                Text("Buy")
-                    .font(.system(size: 11, weight: .bold)).foregroundStyle(.white)
-                    .frame(maxWidth: .infinity).padding(.vertical, 7)
-                    .background(AppColor.pink, in: RoundedRectangle(cornerRadius: 8))
-            }
-            .buttonStyle(.plain)
         }
-        .padding(10)
-        .frame(maxWidth: .infinity)
-        .background(AppColor.card, in: RoundedRectangle(cornerRadius: 14))
     }
 
     private var stickyFooter: some View {
@@ -201,16 +196,13 @@ struct SubscriptionPaywallView: View {
             Divider().overlay(Color.white.opacity(0.08))
             Button { purchaseSelected() } label: {
                 Group {
-                    if isPurchasing {
-                        ProgressView().tint(AppColor.bg)
-                    } else if let pkg = selectedPackage {
+                    if let pkg = selectedPackage {
                         Text("Continue — \(pkg.periodName) \(pkg.localizedPrice)\(pkg.periodLabel ?? "")")
                     } else {
                         Text("Continue")
                     }
                 }
-                .font(.system(size: 15, weight: .bold))
-                .foregroundStyle(AppColor.bg)
+                .font(.system(size: 15, weight: .bold)).foregroundStyle(AppColor.bg)
                 .frame(maxWidth: .infinity).padding(.vertical, 14)
                 .background(AppColor.amber, in: RoundedRectangle(cornerRadius: 14))
             }
@@ -221,26 +213,24 @@ struct SubscriptionPaywallView: View {
         .background(AppColor.bg.opacity(0.9))
     }
 
-    // MARK: Satın alma aksiyonları
+    // MARK: Aksiyonlar
 
     private func purchaseSelected() {
         guard let pkg = selectedPackage else { return }
         Task {
             isPurchasing = true
             let ok = await purchases.purchase(pkg)
-            if ok { await tokenStore.refresh() }   // sunucu verdiği token'ları çek
+            if ok { await tokenStore.refresh() }
             isPurchasing = false
             if ok { dismiss() }
         }
     }
 
-    /// Token paketi id'si offering'te varsa satın alır (consumable'lar ayrı bir
-    /// offering'te tanımlıysa dashboard'da eşleştirilmeli).
-    private func buyTokenPack(_ pack: TokenPack) {
-        guard let match = packages.first(where: { $0.id == pack.id }) else { return }
+    private func buyTokenPack(_ pack: PaywallPackage) {
         Task {
             isPurchasing = true
-            _ = await purchases.purchase(match)
+            let ok = await purchases.purchase(pack)
+            if ok { await tokenStore.refresh() }
             isPurchasing = false
         }
     }

@@ -68,6 +68,14 @@ Deno.serve(async (req: Request) => {
       return json({ balance });
     }
 
+    // Özel miktar grant (token PAKETİ satın alması — consumable). Her çağrıda ekler.
+    if (action === "grant") {
+      const amount = typeof body.amount === "number" ? Math.trunc(body.amount) : 0;
+      if (amount <= 0) return json({ error: "invalid_amount" }, 400);
+      await db.rpc("grant_tokens", { p_user_id: uid, p_amount: amount, p_reason: "purchase" });
+      return json({ balance: await currentBalance(uid) });
+    }
+
     if (action === "set_tier") {
       const tier: string = body.tier;
       if (tier === "none") {

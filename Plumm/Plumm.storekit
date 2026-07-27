@@ -1,104 +1,329 @@
 {
-  "appPolicies" : {
-    "eula" : "",
-    "policies" : [
+  "appPolicies": {
+    "eula": "",
+    "policies": [
       {
-        "locale" : "en_US",
-        "policyText" : "",
-        "policyURL" : ""
+        "locale": "en_US",
+        "policyText": "",
+        "policyURL": ""
       }
     ]
   },
-  "identifier" : "89044F0C",
-  "nonRenewingSubscriptions" : [
-
-  ],
-  "products" : [
-
-  ],
-  "settings" : {
-    "_askToBuyEnabled" : false,
-    "_billingGracePeriodEnabled" : false,
-    "_billingIssuesEnabled" : false,
-    "_disableDialogs" : false,
-    "_failTransactionsEnabled" : false,
-    "_locale" : "en_US",
-    "_renewalBillingIssuesEnabled" : false,
-    "_storefront" : "USA",
-    "_storeKitErrors" : [
-
-    ],
-    "_timeRate" : 0
-  },
-  "subscriptionGroups" : [
+  "identifier": "2D65EE9D",
+  "nonRenewingSubscriptions": [],
+  "products": [
     {
-      "id" : "19AC6CD9",
-      "localizations" : [
-
-      ],
-      "name" : "Premium",
-      "subscriptions" : [
+      "displayPrice": "1.99",
+      "familyShareable": false,
+      "internalID": "2AB029CF",
+      "localizations": [
         {
-          "adHocOffers" : [
-
-          ],
-          "codeOffers" : [
-
-          ],
-          "displayPrice" : "4.99",
-          "familyShareable" : false,
-          "groupNumber" : 1,
-          "internalID" : "A6BD4F52",
-          "introductoryOffer" : null,
-          "localizations" : [
+          "description": "token_100",
+          "displayName": "token_100",
+          "locale": "en_US"
+        }
+      ],
+      "productID": "token_100",
+      "referenceName": "token_100",
+      "type": "Consumable"
+    },
+    {
+      "displayPrice": "3.99",
+      "familyShareable": false,
+      "internalID": "0A5C48C6",
+      "localizations": [
+        {
+          "description": "token_250",
+          "displayName": "token_250",
+          "locale": "en_US"
+        }
+      ],
+      "productID": "token_250",
+      "referenceName": "token_250",
+      "type": "Consumable"
+    },
+    {
+      "displayPrice": "6.99",
+      "familyShareable": false,
+      "internalID": "9E163E02",
+      "localizations": [
+        {
+          "description": "token_500",
+          "displayName": "token_500",
+          "locale": "en_US"
+        }
+      ],
+      "productID": "token_500",
+      "referenceName": "token_500",
+      "type": "Consumable"
+    },
+    {
+      "displayPrice": "11.99",
+      "familyShareable": false,
+      "internalID": "95C966E3",
+      "localizations": [
+        {
+          "description": "token_1000",
+          "displayName": "token_1000",
+          "locale": "en_US"
+        }
+      ],
+      "productID": "token_1000",
+      "referenceName": "token_1000",
+      "type": "Consumable"
+    },
+    {
+      "displayPrice": "19.99",
+      "familyShareable": false,
+      "internalID": "5A4B1D8F",
+      "localizations": [
+        {
+          "description": "token_2000",
+          "displayName": "token_2000",
+          "locale": "en_US"
+        }
+      ],
+      "productID": "token_2000",
+      "referenceName": "token_2000",
+      "type": "Consumable"
+    },
+    {
+      "displayPrice": "39.99",
+      "familyShareable": false,
+      "internalID": "615CA251",
+      "localizations": [
+        {
+          "description": "token_5000",
+          "displayName": "token_5000",
+          "locale": "en_US"
+        }
+      ],
+      "productID": "token_5000",
+      "referenceName": "token_5000",
+      "type": "Consumable"
+    }
+  ],
+  "settings": {
+    "_askToBuyEnabled": false,
+    "_billingGracePeriodEnabled": false,
+    "_billingIssuesEnabled": false,
+    "_disableDialogs": false,
+    "_failTransactionsEnabled": false,
+    "_locale": "en_US",
+    "_renewalBillingIssuesEnabled": false,
+    "_storefront": "USA",
+    "_storeKitErrors": [],
+    "_timeRate": 0
+  },
+  "subscriptionGroups": [
+    {
+      "id": "8AFDAEB5",
+      "localizations": [],
+      "name": "Premium",
+      "subscriptions": [
+        {
+          "adHocOffers": [],
+          "codeOffers": [],
+          "displayPrice": "3.00",
+          "familyShareable": false,
+          "groupNumber": 1,
+          "internalID": "7180B4C9",
+          "introductoryOffer": null,
+          "localizations": [
             {
-              "description" : "Plumm Pro weekly access",
-              "displayName" : "Plumm Pro (Weekly)",
-              "locale" : "en_US"
+              "description": "weekly_pro_normal",
+              "displayName": "weekly_pro_normal",
+              "locale": "en_US"
             }
           ],
-          "productID" : "weekly_pro",
-          "recurringSubscriptionPeriod" : "P1W",
-          "referenceName" : "Plumm Pro Weekly",
-          "subscriptionGroupID" : "19AC6CD9",
-          "type" : "RecurringSubscription",
-          "winbackOffers" : [
-
-          ]
+          "productID": "weekly_pro_normal",
+          "recurringSubscriptionPeriod": "P1W",
+          "referenceName": "weekly_pro_normal",
+          "subscriptionGroupID": "8AFDAEB5",
+          "type": "RecurringSubscription",
+          "winbackOffers": []
         },
         {
-          "adHocOffers" : [
-
-          ],
-          "codeOffers" : [
-
-          ],
-          "displayPrice" : "49.99",
-          "familyShareable" : false,
-          "groupNumber" : 1,
-          "internalID" : "9765324B",
-          "introductoryOffer" : null,
-          "localizations" : [
+          "adHocOffers": [],
+          "codeOffers": [],
+          "displayPrice": "10.00",
+          "familyShareable": false,
+          "groupNumber": 2,
+          "internalID": "94E50973",
+          "introductoryOffer": null,
+          "localizations": [
             {
-              "description" : "Plumm Pro yearly access",
-              "displayName" : "Plumm Pro (Yearly)",
-              "locale" : "en_US"
+              "description": "monthly_pro_default",
+              "displayName": "monthly_pro_default",
+              "locale": "en_US"
             }
           ],
-          "productID" : "yearly_pro_2",
-          "recurringSubscriptionPeriod" : "P1Y",
-          "referenceName" : "Plumm Pro Yearly",
-          "subscriptionGroupID" : "19AC6CD9",
-          "type" : "RecurringSubscription",
-          "winbackOffers" : [
-
-          ]
+          "productID": "monthly_pro_default",
+          "recurringSubscriptionPeriod": "P1M",
+          "referenceName": "monthly_pro_default",
+          "subscriptionGroupID": "8AFDAEB5",
+          "type": "RecurringSubscription",
+          "winbackOffers": []
+        },
+        {
+          "adHocOffers": [],
+          "codeOffers": [],
+          "displayPrice": "80.00",
+          "familyShareable": false,
+          "groupNumber": 3,
+          "internalID": "FA208BA9",
+          "introductoryOffer": null,
+          "localizations": [
+            {
+              "description": "yearly_pro_normal",
+              "displayName": "yearly_pro_normal",
+              "locale": "en_US"
+            }
+          ],
+          "productID": "yearly_pro_normal",
+          "recurringSubscriptionPeriod": "P1Y",
+          "referenceName": "yearly_pro_normal",
+          "subscriptionGroupID": "8AFDAEB5",
+          "type": "RecurringSubscription",
+          "winbackOffers": []
+        },
+        {
+          "adHocOffers": [],
+          "codeOffers": [],
+          "displayPrice": "5.00",
+          "familyShareable": false,
+          "groupNumber": 4,
+          "internalID": "D7AD30C2",
+          "introductoryOffer": null,
+          "localizations": [
+            {
+              "description": "weekly_pro_plus",
+              "displayName": "weekly_pro_plus",
+              "locale": "en_US"
+            }
+          ],
+          "productID": "weekly_pro_plus",
+          "recurringSubscriptionPeriod": "P1W",
+          "referenceName": "weekly_pro_plus",
+          "subscriptionGroupID": "8AFDAEB5",
+          "type": "RecurringSubscription",
+          "winbackOffers": []
+        },
+        {
+          "adHocOffers": [],
+          "codeOffers": [],
+          "displayPrice": "15.00",
+          "familyShareable": false,
+          "groupNumber": 5,
+          "internalID": "6D623020",
+          "introductoryOffer": null,
+          "localizations": [
+            {
+              "description": "monthly_pro_plus",
+              "displayName": "monthly_pro_plus",
+              "locale": "en_US"
+            }
+          ],
+          "productID": "monthly_pro_plus",
+          "recurringSubscriptionPeriod": "P1M",
+          "referenceName": "monthly_pro_plus",
+          "subscriptionGroupID": "8AFDAEB5",
+          "type": "RecurringSubscription",
+          "winbackOffers": []
+        },
+        {
+          "adHocOffers": [],
+          "codeOffers": [],
+          "displayPrice": "120.00",
+          "familyShareable": false,
+          "groupNumber": 6,
+          "internalID": "D664740C",
+          "introductoryOffer": null,
+          "localizations": [
+            {
+              "description": "yearly_pro_plus",
+              "displayName": "yearly_pro_plus",
+              "locale": "en_US"
+            }
+          ],
+          "productID": "yearly_pro_plus",
+          "recurringSubscriptionPeriod": "P1Y",
+          "referenceName": "yearly_pro_plus",
+          "subscriptionGroupID": "8AFDAEB5",
+          "type": "RecurringSubscription",
+          "winbackOffers": []
+        },
+        {
+          "adHocOffers": [],
+          "codeOffers": [],
+          "displayPrice": "7.00",
+          "familyShareable": false,
+          "groupNumber": 7,
+          "internalID": "E01EBA30",
+          "introductoryOffer": null,
+          "localizations": [
+            {
+              "description": "weekly_pro_max",
+              "displayName": "weekly_pro_max",
+              "locale": "en_US"
+            }
+          ],
+          "productID": "weekly_pro_max",
+          "recurringSubscriptionPeriod": "P1W",
+          "referenceName": "weekly_pro_max",
+          "subscriptionGroupID": "8AFDAEB5",
+          "type": "RecurringSubscription",
+          "winbackOffers": []
+        },
+        {
+          "adHocOffers": [],
+          "codeOffers": [],
+          "displayPrice": "20.00",
+          "familyShareable": false,
+          "groupNumber": 8,
+          "internalID": "9B73DB49",
+          "introductoryOffer": null,
+          "localizations": [
+            {
+              "description": "monthly_pro_max",
+              "displayName": "monthly_pro_max",
+              "locale": "en_US"
+            }
+          ],
+          "productID": "monthly_pro_max",
+          "recurringSubscriptionPeriod": "P1M",
+          "referenceName": "monthly_pro_max",
+          "subscriptionGroupID": "8AFDAEB5",
+          "type": "RecurringSubscription",
+          "winbackOffers": []
+        },
+        {
+          "adHocOffers": [],
+          "codeOffers": [],
+          "displayPrice": "160.00",
+          "familyShareable": false,
+          "groupNumber": 9,
+          "internalID": "31E51983",
+          "introductoryOffer": null,
+          "localizations": [
+            {
+              "description": "yearly_pro_max",
+              "displayName": "yearly_pro_max",
+              "locale": "en_US"
+            }
+          ],
+          "productID": "yearly_pro_max",
+          "recurringSubscriptionPeriod": "P1Y",
+          "referenceName": "yearly_pro_max",
+          "subscriptionGroupID": "8AFDAEB5",
+          "type": "RecurringSubscription",
+          "winbackOffers": []
         }
       ]
     }
   ],
-  "version" : {
-    "major" : 4,
-    "minor" : 0
+  "version": {
+    "major": 4,
+    "minor": 0
   }
 }
