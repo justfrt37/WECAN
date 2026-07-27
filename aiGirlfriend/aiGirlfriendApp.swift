@@ -54,6 +54,7 @@ struct aiGirlfriendApp: App {
                 // olabilir — zaten teslim edilmiş bildirimlerin mesajını işle.
                 delegate.catchUpOnDeliveredNotifications()
                 await tokenStore.refresh()
+                ImageCache.shared.evictIfNeeded()
             }
         }
         .onChange(of: scenePhase) { _, newPhase in
@@ -64,6 +65,7 @@ struct aiGirlfriendApp: App {
                 // Picks up newly-added characters (DEV curated creations, etc.)
                 // without requiring a reinstall — bkz. CharacterStore.refreshCharacters.
                 Task { await store.refreshCharacters() }
+                ImageCache.shared.evictIfNeeded()
             case .background:
                 NotificationScheduler.shared.onBackground(characters: store.characters)
             default:
