@@ -679,6 +679,14 @@ final class ChatViewModel {
                     messages[finalIdx].voiceDuration = duration
                     messages[finalIdx].pendingVoiceRequest = nil
                 }
+                LocalConversationStore.shared.updateMessage(id: messageID, for: character.id) { msg in
+                    msg.content = cleanedReply
+                    msg.voiceLocalPath = savedPath
+                    msg.voiceDuration = duration
+                    msg.pendingVoiceRequest = nil
+                }
+                LocalConversationStore.shared.refreshDetectedLanguage(for: character.id)
+                store?.chatCache[character.id] = realMessages()
                 generatingVoiceMessageIDs.remove(messageID)
 
                 applyPostReplyEffects(gotPhoto: nil, stored: stored)
