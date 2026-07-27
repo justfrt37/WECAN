@@ -709,17 +709,59 @@ Deno.serve(async (req: Request) => {
     const systemPrompt: string = body.systemPrompt ?? "";
     const userMessage: string | undefined = body.userMessage;
 
-    // === SOHBETİ TEMİZLE === İstemcinin "Clear Chat" eylemi — konuşma satırını
-    // siler (messages/memories cascade ile birlikte gider), bir sonraki açılışta
-    // sıfırdan (yeni bir "ilk selam" akışıyla) başlar.
+    // === SOHBETİ TEMİZLE === İstemcinin "Clear Chat" eylemi. Eskiden satırın
+    // TAMAMI silinirdi (messages/memories cascade ile) — artık isteğe bağlı
+    // olarak relationship_level/level_progress, memories, ve
+    // conversation_behaviors KORUNABİLİR (bkz. keepLevel/keepMemories/
+    // keepBehaviors) — bu yüzden satırın kendisi artık SİLİNMİYOR, hedefli
+    // delete/update yapılıyor. Mesajlar HER ZAMAN silinir; schedule/woken_up_at/
+    // manual_sleep_at/ghosted_at/detected_language HER ZAMAN sıfırlanır (keep
+    // seçeneği sunulmayan, geçici per-conversation durum alanları).
     if (body.clearConversation === true) {
-      // TÜM eşleşen conversation'ları sil (messages/memories cascade ile gider).
-      // maybeSingle KULLANMA — aynı user+character için birden çok satır varsa
-      // (eski dupe'lar) hata verip HİÇBİR ŞEY silmiyordu → mesajlar geri geliyordu.
-      await db.from("conversations")
-        .delete()
+      const keepLevel: boolean = body.keepLevel === true;
+      const keepMemories: boolean = body.keepMemories === true;
+      const keepBehaviors: boolean = body.keepBehaviors === true;
+
+      // TÜM eşleşen conversation satırlarını bul (dupe'lar dahil) — en güncel
+      // olan ASIL temizlenen satır, gerisi (eski dupe'lar) her zaman tamamen
+      // silinir (keep seçenekleri sadece asıl satıra uygulanır).
+      const { data: rows } = await db
+        .from("conversations")
+        .select("id")
         .eq("user_id", uid)
-        .eq("character_id", characterId);
+        .eq("character_id", characterId)
+        .order("updated_at", { ascending: false });
+
+      if (!rows || rows.length === 0) return json({ ok: true });
+
+      const [primary, ...dupes] = rows;
+      if (dupes.length > 0) {
+        await db.from("conversations").delete().in("id", dupes.map((d) => d.id));
+      }
+
+      await db.from("messages").delete().eq("conversation_id", primary.id);
+      if (!keepMemories) {
+        await db.from("memories").delete().eq("conversation_id", primary.id);
+      }
+      if (!keepBehaviors) {
+        await db.from("conversation_behaviors").delete().eq("conversation_id", primary.id);
+      }
+
+      const update: Record<string, unknown> = {
+        summary: "",
+        summarized_count: 0,
+        schedule: null,
+        woken_up_at: null,
+        manual_sleep_at: null,
+        ghosted_at: null,
+        detected_language: null,
+      };
+      if (!keepLevel) {
+        update.relationship_level = 1;
+        update.level_progress = 0;
+      }
+      await db.from("conversations").update(update).eq("id", primary.id);
+
       return json({ ok: true });
     }
 
