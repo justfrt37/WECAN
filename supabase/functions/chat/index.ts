@@ -150,24 +150,44 @@ function applyRelationshipGain(
   return { level: lvl, progress: prog };
 }
 
+// In-memory cache for fetchDirective — directives only change on level-up
+// or a developer hand-editing character_level_overrides/role_level_scripts
+// (active during current tuning work), hence a 5-minute TTL rather than
+// caching forever per warm instance. Module-level so it survives across
+// invocations on the same warm edge-function instance.
+const directiveCache = new Map<string, { directive: string; expiresAt: number }>();
+const DIRECTIVE_TTL_MS = 5 * 60_000;
+
 // Fetch role-aware intimacy directive from DB.
 // Checks character_level_overrides first, falls back to role_level_scripts.
 async function fetchDirective(characterId: string, role: string, level: number): Promise<string> {
+  const key = `${characterId}:${role}:${level}`;
+  const now = Date.now();
+  const cached = directiveCache.get(key);
+  if (cached && cached.expiresAt > now) return cached.directive;
+
   const { data: override } = await db
     .from("character_level_overrides")
     .select("directive")
     .eq("character_id", characterId)
     .eq("level", level)
     .maybeSingle();
-  if (override?.directive) return override.directive;
 
-  const { data: script } = await db
-    .from("role_level_scripts")
-    .select("directive")
-    .eq("role", role)
-    .eq("level", level)
-    .maybeSingle();
-  return script?.directive ?? `İlişki seviyesi ${level}/10. Doğal ve sıcak ol.`;
+  let directive: string;
+  if (override?.directive) {
+    directive = override.directive;
+  } else {
+    const { data: script } = await db
+      .from("role_level_scripts")
+      .select("directive")
+      .eq("role", role)
+      .eq("level", level)
+      .maybeSingle();
+    directive = script?.directive ?? `İlişki seviyesi ${level}/10. Doğal ve sıcak ol.`;
+  }
+
+  directiveCache.set(key, { directive, expiresAt: now + DIRECTIVE_TTL_MS });
+  return directive;
 }
 
 // Directive'i çıplak enjekte etmek modelin onu "söylenecek satır" gibi
