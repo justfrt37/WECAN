@@ -938,31 +938,15 @@ Deno.serve(async (req: Request) => {
 
       const reactionLevel: number = convo.relationship_level ?? 1;
       const reactionProgress: number = typeof convo.level_progress === "number" ? convo.level_progress : 0;
-      const reactionDirective = await fetchDirective(characterId, personalityRole, reactionLevel);
+      const { directive: reactionDirective, memories: reactionMemoryRows, behaviors: reactionBehaviorRows } =
+        await fetchDirectiveMemoriesBehaviors(characterId, personalityRole, reactionLevel, conversationId);
       let reactionSystem = systemPrompt;
       reactionSystem += wrapDirective(reactionDirective, Math.round(reactionProgress * 100));
       if (exHistory) {
         reactionSystem += `\n\n[SHARED HISTORY — reference these memories naturally in conversation]\n${exHistory}`;
       }
-
-      const { data: reactionMemoryRows } = await db
-        .from("memories")
-        .select("content")
-        .eq("conversation_id", conversationId)
-        .order("created_at", { ascending: true });
-      const { data: reactionBehaviorRows } = await db
-        .from("conversation_behaviors")
-        .select("content")
-        .eq("conversation_id", conversationId)
-        .order("created_at", { ascending: true });
-      if (reactionMemoryRows && reactionMemoryRows.length > 0) {
-        reactionSystem += `\n\n[MEMORIES — facts to remember about the user/relationship]\n` +
-          reactionMemoryRows.map((m) => `- ${m.content}`).join("\n");
-      }
-      if (reactionBehaviorRows && reactionBehaviorRows.length > 0) {
-        reactionSystem += `\n\n[BEHAVIOR PREFERENCES — how the user wants you to act]\n` +
-          reactionBehaviorRows.map((b) => `- ${b.content}`).join("\n");
-      }
+      reactionSystem += memoriesBlock(reactionMemoryRows);
+      reactionSystem += behaviorsBlock(reactionBehaviorRows);
 
       reactionSystem += languageDirective(detectedLanguage);
       reactionSystem += PHOTO_DOWNLOAD_REACTION_RULE;
