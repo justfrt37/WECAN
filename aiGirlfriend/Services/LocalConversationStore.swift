@@ -237,4 +237,13 @@ final class LocalConversationStore {
             mem[key]?[id]?.levelProgress = 0
         }
     }
+
+    /// Belirli bir mesajı kayıttan kaldırır — retrySend'in başarısız mesajı
+    /// silip aynı içerikle yenisini eklemesi için (bkz. ChatViewModel.retrySend).
+    /// Kayıt ya da mesaj bulunamazsa hiçbir şey yapmaz.
+    func removeMessage(id: UUID, for characterId: UUID) {
+        lock.lock(); defer { lock.unlock() }
+        let key = userKey()
+        mem[key]?[characterId]?.messages.removeAll(where: { $0.id == id })
+    }
 }
