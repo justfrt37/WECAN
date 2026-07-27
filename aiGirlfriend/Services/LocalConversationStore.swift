@@ -154,4 +154,62 @@ final class LocalConversationStore {
         if let schedule { stored.schedule = schedule }
         mem[userKey(), default: [:]][id] = stored
     }
+
+    // MARK: - Yerinde güncelleme (tam Stored yeniden inşa etmeden)
+
+    /// Var olan bir kayda TEK bir mesaj ekler — mevcut dizinin sonuna in-place
+    /// append yapar, `Stored`'un TÜMÜNÜ yeniden inşa etmez. Kayıt bu karakter
+    /// için henüz yoksa (ör. senkron ilk-selamdan sonraki ilk gerçek mesaj —
+    /// bkz. ChatViewModel.attachFirstHello, synthetic:true dalı hiç save()
+    /// çağırmıyor) `defaultLevel`/`defaultLevelProgress` ile SIFIRDAN bir
+    /// kayıt oluşturur — eski `updateCache()`'in "stored yoksa da çalış"
+    /// davranışıyla birebir.
+    func appendMessage(_ message: Message, for id: UUID, defaultLevel: Int, defaultLevelProgress: Double) {
+        lock.lock(); defer { lock.unlock() }
+        let key = userKey()
+        if mem[key]?[id] != nil {
+            mem[key]?[id]?.messages.append(message)
+        } else {
+            mem[key, default: [:]][id] = Stored(
+                messages: [message], xp: 0, level: defaultLevel, summary: "",
+                summarizedCount: 0, levelProgress: defaultLevelProgress
+            )
+        }
+    }
+
+    /// Var olan bir mesajı id'sinden bulup yerinde günceller (ör. bekleyen
+    /// bir foto/ses balonunun üretim sonucu gelince doldurulması) — tüm
+    /// mesaj dizisini kopyalamadan tek elemanı mutate eder. Kayıt ya da
+    /// mesaj bulunamazsa sessizce hiçbir şey yapmaz.
+    func updateMessage(id: UUID, for characterId: UUID, mutate: (inout Message) -> Void) {
+        lock.lock(); defer { lock.unlock() }
+        let key = userKey()
+        guard let idx = mem[key]?[characterId]?.messages.firstIndex(where: { $0.id == id }) else { return }
+        mutate(&mem[key]![characterId]!.messages[idx])
+    }
+
+    /// Seviye/ilerleme/mesaj-sayacı alanlarını yerinde günceller — mesaj
+    /// dizisine dokunmaz. Kayıt yoksa hiçbir şey yapmaz (bu üç alan sadece
+    /// `applyPostReplyEffects`'ten, yani bir mesaj zaten eklenmiş bir turun
+    /// sonunda çağrılır — kayıt bu noktada zaten var olmalı).
+    func updateFields(for id: UUID, level: Int, levelProgress: Double, msgCounter: Int) {
+        lock.lock(); defer { lock.unlock() }
+        let key = userKey()
+        guard mem[key]?[id] != nil else { return }
+        mem[key]?[id]?.level = level
+        mem[key]?[id]?.levelProgress = levelProgress
+        mem[key]?[id]?.msgCounter = msgCounter
+    }
+
+    /// `detectedLanguage`'ı en son asistan mesajından yeniden hesaplar
+    /// (bkz. ConversationLanguage.resolve) — SADECE yeni bir asistan mesajı
+    /// eklendiği anlarda çağrılmalı (bkz. ChatViewModel call site'ları).
+    /// Kayıt ya da asistan mesajı yoksa hiçbir şey yapmaz.
+    func refreshDetectedLanguage(for id: UUID) {
+        lock.lock(); defer { lock.unlock() }
+        let key = userKey()
+        guard let latest = mem[key]?[id]?.messages.last(where: { $0.role == .assistant })?.content else { return }
+        let previous = mem[key]?[id]?.detectedLanguage
+        mem[key]?[id]?.detectedLanguage = ConversationLanguage.resolve(latestAssistantText: latest, previouslyDetected: previous)
+    }
 }
