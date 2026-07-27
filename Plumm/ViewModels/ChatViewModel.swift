@@ -118,7 +118,7 @@ final class ChatViewModel {
         ReadTracker.setSeen(character.id, realAssistantCount)
     }
 
-    func clearChat() {
+    func clearChat(keepLevel: Bool = false, keepMemories: Bool = false, keepBehaviors: Bool = false) {
         // Temizle = sohbet BOŞ kalır. Eskiden hemen ardından loadHistory()
         // çağrılıyordu; o da boş sohbette yeni conversation + "ilk selam"
         // oluşturup mesajı ANINDA geri getiriyordu (bkz. kullanıcı talebi:
@@ -127,7 +127,37 @@ final class ChatViewModel {
         messages = []
         hasSyntheticOpening = false
         Task {
-            if let store { await ChatMaintenance.clearChat(character: character, store: store) }
+            if let store {
+                await ChatMaintenance.clearChat(
+                    character: character, store: store,
+                    keepLevel: keepLevel, keepMemories: keepMemories, keepBehaviors: keepBehaviors
+                )
+            }
+        }
+    }
+
+    /// Başarısız bir mesaj balonuna dokununca — eski (failed) mesajı kaldırır,
+    /// AYNI içerikle orijinal gönderim yolunu (send/sendUserVoice/sendUserPhoto)
+    /// yeniden çağırır. Hangi yolun kullanılacağı mesajın kendi alanlarından
+    /// çıkarılır: voiceLocalPath doluysa sesli mesaj, localImagePath doluysa
+    /// kullanıcı fotoğrafı, ikisi de yoksa düz metin.
+    func retrySend(messageID: UUID) {
+        guard let idx = messages.firstIndex(where: { $0.id == messageID }),
+              messages[idx].failed == true
+        else { return }
+        let failedMsg = messages[idx]
+        messages.remove(at: idx)
+        LocalConversationStore.shared.removeMessage(id: messageID, for: character.id)
+        store?.chatCache[character.id] = realMessages()
+
+        if let voicePath = failedMsg.voiceLocalPath {
+            let audioURL = VoicePlayer.voiceMessagesDirectory.appendingPathComponent(voicePath)
+            sendUserVoice(transcript: failedMsg.content, audioURL: audioURL)
+        } else if let photoPath = failedMsg.localImagePath,
+                  let image = UserPhotoStore.loadUserPhoto(relativePath: photoPath) {
+            sendUserPhoto(image: image, caption: failedMsg.content)
+        } else {
+            send(failedMsg.content)
         }
     }
 
@@ -281,8 +311,10 @@ final class ChatViewModel {
 
         // Zaman farkındalığı için — yeni mesajı eklemeden ÖNCEki son mesajın zamanı.
         let lastMessageAt = messages.last?.createdAt
-        messages.append(Message(role: .user, content: text))
-        updateCache()
+        let userMsg = Message(role: .user, content: text)
+        messages.append(userMsg)
+        LocalConversationStore.shared.appendMessage(userMsg, for: character.id, defaultLevel: relationshipLevel, defaultLevelProgress: levelProgress)
+        store?.chatCache[character.id] = realMessages()
         NotificationScheduler.shared.noteUserSent(character: character)
         inputText = ""
         isSending = true
@@ -332,6 +364,9 @@ final class ChatViewModel {
                     presentInsufficientTokensPaywall()   // uyarı yok, paywall aç
                 } else {
                     errorMessage = error.localizedDescription
+                    if let idx = messages.firstIndex(where: { $0.id == userMsg.id }) {
+                        messages[idx].failed = true
+                    }
                 }
                 showsTypingBubble = false
                 store?.setTyping(character.id, false)
@@ -371,8 +406,12 @@ final class ChatViewModel {
             }
             showsTypingBubble = false
             store?.setTyping(character.id, false)
-            messages.append(Message(role: .assistant, content: segment.text))
+            let replyMsg = Message(role: .assistant, content: segment.text)
+            messages.append(replyMsg)
+            LocalConversationStore.shared.appendMessage(replyMsg, for: character.id, defaultLevel: relationshipLevel, defaultLevelProgress: levelProgress)
         }
+        LocalConversationStore.shared.refreshDetectedLanguage(for: character.id)
+        store?.chatCache[character.id] = realMessages()
     }
 
     /// Gerçek yatma saatine 1 saatten yakın mı (ya da içinde miyiz) — bkz.
@@ -404,11 +443,13 @@ final class ChatViewModel {
         let savedPath: String? = (try? Data(contentsOf: audioURL)).flatMap {
             VoicePlayer.saveVoiceMessage($0, messageID: messageID)
         }
-        messages.append(Message(
+        let userMsg = Message(
             id: messageID, role: .user, content: trimmed,
             voiceLocalPath: savedPath, voiceDuration: duration
-        ))
-        updateCache()
+        )
+        messages.append(userMsg)
+        LocalConversationStore.shared.appendMessage(userMsg, for: character.id, defaultLevel: relationshipLevel, defaultLevelProgress: levelProgress)
+        store?.chatCache[character.id] = realMessages()
         NotificationScheduler.shared.noteUserSent(character: character)
         isVoiceArmed = false
         isImageArmed = false
@@ -452,6 +493,9 @@ final class ChatViewModel {
                     presentInsufficientTokensPaywall()   // uyarı yok, paywall aç
                 } else {
                     errorMessage = error.localizedDescription
+                    if let idx = messages.firstIndex(where: { $0.id == userMsg.id }) {
+                        messages[idx].failed = true
+                    }
                 }
                 showsTypingBubble = false
                 store?.setTyping(character.id, false)
@@ -473,8 +517,10 @@ final class ChatViewModel {
         let lastMessageAt = messages.last?.createdAt
         let messageID = UUID()
         let savedPath = UserPhotoStore.saveUserPhoto(image, messageID: messageID)
-        messages.append(Message(id: messageID, role: .user, content: caption, localImagePath: savedPath))
-        updateCache()
+        let userMsg = Message(id: messageID, role: .user, content: caption, localImagePath: savedPath)
+        messages.append(userMsg)
+        LocalConversationStore.shared.appendMessage(userMsg, for: character.id, defaultLevel: relationshipLevel, defaultLevelProgress: levelProgress)
+        store?.chatCache[character.id] = realMessages()
         NotificationScheduler.shared.noteUserSent(character: character)
         isVoiceArmed = false
         isImageArmed = false
@@ -520,6 +566,9 @@ final class ChatViewModel {
                     presentInsufficientTokensPaywall()   // uyarı yok, paywall aç
                 } else {
                     errorMessage = error.localizedDescription
+                    if let idx = messages.firstIndex(where: { $0.id == userMsg.id }) {
+                        messages[idx].failed = true
+                    }
                 }
                 showsTypingBubble = false
                 store?.setTyping(character.id, false)
@@ -581,9 +630,13 @@ final class ChatViewModel {
         let text = typed.isEmpty ? String(localized: "Send me a voice") : typed
 
         let pendingID = UUID()
-        messages.append(Message(role: .user, content: text))
-        messages.append(Message(id: pendingID, role: .assistant, content: "", pendingVoiceRequest: true))
-        updateCache()
+        let userMsg = Message(role: .user, content: text)
+        let pendingMsg = Message(id: pendingID, role: .assistant, content: "", pendingVoiceRequest: true)
+        messages.append(userMsg)
+        messages.append(pendingMsg)
+        LocalConversationStore.shared.appendMessage(userMsg, for: character.id, defaultLevel: relationshipLevel, defaultLevelProgress: levelProgress)
+        LocalConversationStore.shared.appendMessage(pendingMsg, for: character.id, defaultLevel: relationshipLevel, defaultLevelProgress: levelProgress)
+        store?.chatCache[character.id] = realMessages()
         NotificationScheduler.shared.noteUserSent(character: character)
         inputText = ""
         isVoiceArmed = false
@@ -702,6 +755,14 @@ final class ChatViewModel {
                     messages[finalIdx].voiceRemoteURL = voiceRemoteURL
                     messages[finalIdx].pendingVoiceRequest = nil
                 }
+                LocalConversationStore.shared.updateMessage(id: messageID, for: character.id) { msg in
+                    msg.content = cleanedReply
+                    msg.voiceLocalPath = savedPath
+                    msg.voiceDuration = duration
+                    msg.pendingVoiceRequest = nil
+                }
+                LocalConversationStore.shared.refreshDetectedLanguage(for: character.id)
+                store?.chatCache[character.id] = realMessages()
                 generatingVoiceMessageIDs.remove(messageID)
                 updateCache()
 
@@ -807,9 +868,13 @@ final class ChatViewModel {
                     messages[finalIdx].imageURL = imageResult.url
                     messages[finalIdx].pendingImagePrompt = nil
                 }
+                LocalConversationStore.shared.updateMessage(id: messageID, for: character.id) { msg in
+                    msg.imageURL = imageResult.url
+                    msg.pendingImagePrompt = nil
+                }
+                store?.chatCache[character.id] = realMessages()
                 generatingImageMessageIDs.remove(messageID)
                 handleTokenBalance(imageResult.tokenBalance)
-                updateCache()
 
                 // Üretilen fotoğrafı SUNUCUDA sakla: aynı prompt'lu "açılmamış"
                 // (image_pending) satır gerçek görsele (kind=image) çevrilir; yoksa
@@ -854,7 +919,11 @@ final class ChatViewModel {
 
                 let caption = result.reply.trimmingCharacters(in: .whitespacesAndNewlines)
                 if !caption.isEmpty {
-                    messages.append(Message(role: .assistant, content: caption))
+                    let captionMsg = Message(role: .assistant, content: caption)
+                    messages.append(captionMsg)
+                    LocalConversationStore.shared.appendMessage(captionMsg, for: character.id, defaultLevel: relationshipLevel, defaultLevelProgress: levelProgress)
+                    LocalConversationStore.shared.refreshDetectedLanguage(for: character.id)
+                    store?.chatCache[character.id] = realMessages()
                 }
 
                 applyPostReplyEffects(gotPhoto: imageResult.url, stored: stored)
@@ -925,8 +994,11 @@ final class ChatViewModel {
             showsTypingBubble = false
             store?.setTyping(character.id, false)
 
-            messages.append(Message(role: .assistant, content: trimmed))
-            updateCache()
+            let replyMsg = Message(role: .assistant, content: trimmed)
+            messages.append(replyMsg)
+            LocalConversationStore.shared.appendMessage(replyMsg, for: character.id, defaultLevel: relationshipLevel, defaultLevelProgress: levelProgress)
+            LocalConversationStore.shared.refreshDetectedLanguage(for: character.id)
+            store?.chatCache[character.id] = realMessages()
             store?.conversationsVersion += 1
         }
     }

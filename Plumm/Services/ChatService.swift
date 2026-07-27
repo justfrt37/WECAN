@@ -60,6 +60,11 @@ private struct ChatRequest: Codable {
     /// atlayıp platonik/arkadaş-canlısı bir direktif uygular (bkz. ReviewModeService,
     /// chat/index.ts). Varsayılan nil (memberwise init'i bozmaz).
     var reviewMode: Bool? = nil
+    /// "Clear Chat" seçenekleri — sadece `clearConversation: true` ile
+    /// birlikte anlamlı. bkz. ClearChatOptionsSheet, chat/index.ts clear branch.
+    let keepLevel: Bool?
+    let keepMemories: Bool?
+    let keepBehaviors: Bool?
 }
 
 private struct WireMessage: Codable {
@@ -542,10 +547,12 @@ struct ChatService {
         return schedule
     }
 
-    /// "Sohbeti Temizle" — sunucudaki conversation/messages satırlarını siler
-    /// (cascade ile memories de gider). İstemci ayrıca kendi yerel kopyasını temizler.
-    func clearConversation(character: Character) async throws {
-        _ = try await perform(character: character, userMessage: nil, extra: .clear)
+    /// "Sohbeti Temizle" — varsayılan (üç bayrak da false) TÜM sunucu verisini
+    /// sıfırlar; `keepLevel`/`keepMemories`/`keepBehaviors` true verilirse o
+    /// veri korunur (bkz. chat/index.ts clear branch, ClearChatOptionsSheet).
+    /// İstemci ayrıca kendi yerel kopyasını temizler (bkz. ChatMaintenance).
+    func clearConversation(character: Character, keepLevel: Bool = false, keepMemories: Bool = false, keepBehaviors: Bool = false) async throws {
+        _ = try await perform(character: character, userMessage: nil, extra: .clear(keepLevel: keepLevel, keepMemories: keepMemories, keepBehaviors: keepBehaviors))
     }
 
 
@@ -572,7 +579,7 @@ struct ChatService {
 
     private enum RequestExtra {
         case none
-        case clear
+        case clear(keepLevel: Bool, keepMemories: Bool, keepBehaviors: Bool)
         case localHistory([WireHistoryMessage], summary: String?)
         case summarize([WireHistoryMessage], existing: String)
         case photoDownloadReaction([WireHistoryMessage], summary: String?, photoURL: String)
@@ -599,6 +606,9 @@ struct ChatService {
         imageRedirected: Bool = false
     ) async throws -> ChatResponse {
         var clearConversation: Bool? = nil
+        var keepLevel: Bool? = nil
+        var keepMemories: Bool? = nil
+        var keepBehaviors: Bool? = nil
         var clientHistory: [WireHistoryMessage]? = nil
         var localSummary: String? = nil
         var summarizeMessages: [WireHistoryMessage]? = nil
@@ -609,8 +619,11 @@ struct ChatService {
         switch extra {
         case .none:
             break
-        case .clear:
+        case .clear(let kl, let km, let kb):
             clearConversation = true
+            keepLevel = kl
+            keepMemories = km
+            keepBehaviors = kb
         case .localHistory(let h, let s):
             clientHistory = h
             localSummary = s
@@ -647,7 +660,10 @@ struct ChatService {
             nearSleepTime: nearSleepTime,
             userImageBase64: userImageBase64,
             imageRedirected: imageRedirected,
-            reviewMode: ReviewModeService.isEnabledSnapshot ? true : nil
+            reviewMode: ReviewModeService.isEnabledSnapshot ? true : nil,
+            keepLevel: keepLevel,
+            keepMemories: keepMemories,
+            keepBehaviors: keepBehaviors
         )
         let bodyData = try JSONEncoder().encode(body)
 

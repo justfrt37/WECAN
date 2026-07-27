@@ -35,7 +35,7 @@ const MODEL = "grok-4-1-fast-non-reasoning";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
-const KEEP_RECENT = 20; // prompt'ta tutulan son mesaj sayısı (gerisi özete gider)
+const KEEP_RECENT = 12; // prompt'ta tutulan son mesaj sayısı (gerisi özete gider)
 
 const db = createClient(SUPABASE_URL, SERVICE_ROLE, {
   auth: { persistSession: false },
@@ -150,24 +150,87 @@ function applyRelationshipGain(
   return { level: lvl, progress: prog };
 }
 
+// In-memory cache for fetchDirective — directives only change on level-up
+// or a developer hand-editing character_level_overrides/role_level_scripts
+// (active during current tuning work), hence a 5-minute TTL rather than
+// caching forever per warm instance. Module-level so it survives across
+// invocations on the same warm edge-function instance.
+const directiveCache = new Map<string, { directive: string; expiresAt: number }>();
+const DIRECTIVE_TTL_MS = 5 * 60_000;
+
 // Fetch role-aware intimacy directive from DB.
 // Checks character_level_overrides first, falls back to role_level_scripts.
 async function fetchDirective(characterId: string, role: string, level: number): Promise<string> {
+  const key = `${characterId}:${role}:${level}`;
+  const now = Date.now();
+  const cached = directiveCache.get(key);
+  if (cached && cached.expiresAt > now) return cached.directive;
+
   const { data: override } = await db
     .from("character_level_overrides")
     .select("directive")
     .eq("character_id", characterId)
     .eq("level", level)
     .maybeSingle();
-  if (override?.directive) return override.directive;
 
-  const { data: script } = await db
-    .from("role_level_scripts")
-    .select("directive")
-    .eq("role", role)
-    .eq("level", level)
-    .maybeSingle();
-  return script?.directive ?? `İlişki seviyesi ${level}/10. Doğal ve sıcak ol.`;
+  let directive: string;
+  if (override?.directive) {
+    directive = override.directive;
+  } else {
+    const { data: script } = await db
+      .from("role_level_scripts")
+      .select("directive")
+      .eq("role", role)
+      .eq("level", level)
+      .maybeSingle();
+    directive = script?.directive ?? `İlişki seviyesi ${level}/10. Doğal ve sıcak ol.`;
+  }
+
+  directiveCache.set(key, { directive, expiresAt: now + DIRECTIVE_TTL_MS });
+  return directive;
+}
+
+// Fetches the three pieces every reply-producing path needs (main reply +
+// photoDownloadReaction) in parallel instead of sequentially — none of the
+// three queries depend on each other's results. Callers keep their own
+// assembly order/wrapping (main path uses the raw directive, reaction path
+// wraps it via wrapDirective — that asymmetry is existing behavior, this
+// helper only shares the FETCH, not the string-building).
+async function fetchDirectiveMemoriesBehaviors(
+  characterId: string,
+  role: string,
+  level: number,
+  conversationId: string,
+): Promise<{
+  directive: string;
+  memories: { content: string }[];
+  behaviors: { content: string }[];
+}> {
+  const [directive, memoriesResult, behaviorsResult] = await Promise.all([
+    fetchDirective(characterId, role, level),
+    db.from("memories").select("content").eq("conversation_id", conversationId)
+      .order("created_at", { ascending: true }),
+    db.from("conversation_behaviors").select("content").eq("conversation_id", conversationId)
+      .order("created_at", { ascending: true }),
+  ]);
+  return {
+    directive,
+    memories: memoriesResult.data ?? [],
+    behaviors: behaviorsResult.data ?? [],
+  };
+}
+
+// Both the main reply path and photoDownloadReaction build these two blocks
+// with byte-identical formatting — shared here instead of duplicated.
+function memoriesBlock(memories: { content: string }[]): string {
+  if (memories.length === 0) return "";
+  return `\n\n[MEMORIES — facts to remember about the user/relationship]\n` +
+    memories.map((m) => `- ${m.content}`).join("\n");
+}
+function behaviorsBlock(behaviors: { content: string }[]): string {
+  if (behaviors.length === 0) return "";
+  return `\n\n[BEHAVIOR PREFERENCES — how the user wants you to act]\n` +
+    behaviors.map((b) => `- ${b.content}`).join("\n");
 }
 
 // Review Mode (App Store inceleme) direktifi — flört/romantizm İÇERMEZ. Rol
@@ -341,9 +404,8 @@ const VARIATION_RULE =
   "(bazen soru sorarak, bazen dolaylı bir göndermeyle, bazen kendi hislerini " +
   "itiraf ederek, bazen şakayla, bazen kısa ve öz, bazen daha açık). Aynı niyeti " +
   "anlatmak için ASLA ezberlenmiş/kalıplaşmış tek bir cümleye güvenme ve onu tekrar " +
-  "tekrar kullanma — özellikle resmî, robotik ya da kurumsal bir asistan gibi " +
-  "duyulan hiçbir ifadeye asla başvurma. Konuşmayı hep aynı noktaya kilitleme; " +
-  "her mesaj sohbeti bir adım ileri taşısın.";
+  "tekrar kullanma. Konuşmayı hep aynı noktaya kilitleme; her mesaj sohbeti bir " +
+  "adım ileri taşısın.";
 
 // Sistem promptu karakter oluşturulurken TEK SEFERLİK DB'ye yazılıyor
 // (create-character/index.ts) — bu kural burada, chat/index.ts'de olduğu için
@@ -368,9 +430,17 @@ const TEXTING_STYLE_RULE =
   "bir Türk'ün parmaklarından çıkmış gibi dursun. Aynı mantığı İngilizce/Almanca/ " +
   "Fransızca/İspanyolca/Portekizce/İtalyanca için de uygula — o dilin GERÇEK, " +
   "günlük mesajlaşma kısaltmalarını ve rahatlığını kullan (İngilizce'de örn. u, " +
-  "ur, rn, ngl, tbh, lol, gonna, wanna — ama hepsini bir mesaja tıkıştırma), asla " +
-  "resmi bir mektup ya da başka dilden çevrilmiş bir cümle gibi durma — o dilin " +
-  "ANADİLİ bir mesajlaşma kullanıcısı gibi yaz.";
+  "ur, rn, ngl, tbh, lol, gonna, wanna — ama hepsini bir mesaja tıkıştırma).";
+
+// Shared closing line for TEXTING_STYLE_RULE + VARIATION_RULE — both blocks
+// used to end with their own near-duplicate "don't sound formal/robotic/
+// translated" sentence (mechanics-focused in one, content-variety-focused
+// in the other); collapsed into one shared line appended once after both
+// in the system-prompt assembly below, instead of twice.
+const NEVER_SOUND_ROBOTIC_RULE =
+  "\n\nHiçbir zaman resmi bir mektup, çevrilmiş bir cümle ya da resmî/robotik/" +
+  "kurumsal bir asistan gibi durma — konuştuğun dilin ANADİLİ bir mesajlaşma " +
+  "kullanıcısı gibi yaz.";
 
 // Model bazen kendi bir önceki mesajına (soru, sitem, bekleyiş) verilen cevabı
 // görmezden gelip sanki hiç cevap gelmemiş gibi devam ediyor — özellikle o "önceki
@@ -651,41 +721,86 @@ Deno.serve(async (req: Request) => {
     // arkadaş-canlısı bir direktif uygulanır (bkz. ReviewModeService.swift).
     const reviewMode: boolean = body.reviewMode === true;
 
-    // === SOHBETİ TEMİZLE === İstemcinin "Clear Chat" eylemi — konuşma satırını
-    // siler (messages/memories cascade ile birlikte gider), bir sonraki açılışta
-    // sıfırdan (yeni bir "ilk selam" akışıyla) başlar.
+    // === SOHBETİ TEMİZLE === İstemcinin "Clear Chat" eylemi. Eskiden satırın
+    // TAMAMI silinirdi (messages/memories cascade ile) — artık isteğe bağlı
+    // olarak relationship_level/level_progress, memories, ve
+    // conversation_behaviors KORUNABİLİR (bkz. keepLevel/keepMemories/
+    // keepBehaviors) — bu yüzden satırın kendisi artık SİLİNMİYOR, hedefli
+    // delete/update yapılıyor. Mesajlar HER ZAMAN silinir; schedule/woken_up_at/
+    // manual_sleep_at/ghosted_at/detected_language HER ZAMAN sıfırlanır (keep
+    // seçeneği sunulmayan, geçici per-conversation durum alanları).
     if (body.clearConversation === true) {
-      // TÜM eşleşen conversation'ları sil (messages/memories cascade ile gider).
-      // maybeSingle KULLANMA — aynı user+character için birden çok satır varsa
-      // (eski dupe'lar) hata verip HİÇBİR ŞEY silmiyordu → mesajlar geri geliyordu.
-      await db.from("conversations")
-        .delete()
+      const keepLevel: boolean = body.keepLevel === true;
+      const keepMemories: boolean = body.keepMemories === true;
+      const keepBehaviors: boolean = body.keepBehaviors === true;
+
+      // TÜM eşleşen conversation satırlarını bul (dupe'lar dahil) — en güncel
+      // olan ASIL temizlenen satır, gerisi (eski dupe'lar) her zaman tamamen
+      // silinir (keep seçenekleri sadece asıl satıra uygulanır).
+      const { data: rows } = await db
+        .from("conversations")
+        .select("id")
         .eq("user_id", uid)
-        .eq("character_id", characterId);
+        .eq("character_id", characterId)
+        .order("updated_at", { ascending: false });
+
+      if (!rows || rows.length === 0) return json({ ok: true });
+
+      const [primary, ...dupes] = rows;
+      if (dupes.length > 0) {
+        await db.from("conversations").delete().in("id", dupes.map((d) => d.id));
+      }
+
+      await db.from("messages").delete().eq("conversation_id", primary.id);
+      if (!keepMemories) {
+        await db.from("memories").delete().eq("conversation_id", primary.id);
+      }
+      if (!keepBehaviors) {
+        await db.from("conversation_behaviors").delete().eq("conversation_id", primary.id);
+      }
+
+      const update: Record<string, unknown> = {
+        summary: "",
+        summarized_count: 0,
+        schedule: null,
+        woken_up_at: null,
+        manual_sleep_at: null,
+        ghosted_at: null,
+        detected_language: null,
+      };
+      if (!keepLevel) {
+        update.relationship_level = 1;
+        update.level_progress = 0;
+      }
+      await db.from("conversations").update(update).eq("id", primary.id);
+
       return json({ ok: true });
     }
 
-    // Fetch character personality role and ex_history
-    const { data: character, error: charErr } = await db
-      .from("characters")
-      .select("personality_role, ex_history, interests")
-      .eq("id", characterId)
-      .maybeSingle();
+    // Fetch character personality role/ex_history and the existing conversation
+    // row in parallel — neither depends on the other's result, only on
+    // uid/characterId which are already known at this point.
+    // 1) Konuşmayı bul ya da oluştur (kullanıcı + karakter). maybeSingle KULLANMA —
+    // eski dupe'lar varsa hata verip convo=null oluyor ve HER mesajda YENİ bir
+    // conversation ekleniyordu (dupe'lar böyle çoğalıyordu). En güncel olanı al.
+    const [{ data: character, error: charErr }, { data: convoRows }] = await Promise.all([
+      db
+        .from("characters")
+        .select("personality_role, ex_history, interests")
+        .eq("id", characterId)
+        .maybeSingle(),
+      db
+        .from("conversations")
+        .select("id, summary, summarized_count, xp, relationship_level, level_progress, schedule, woken_up_at, manual_sleep_at, ghosted_at, detected_language")
+        .eq("user_id", uid)
+        .eq("character_id", characterId)
+        .order("updated_at", { ascending: false })
+        .limit(1),
+    ]);
     if (charErr) console.error("char fetch err:", JSON.stringify(charErr));
     const personalityRole: string = character?.personality_role ?? "flirty";
     const interests: string[] = Array.isArray(character?.interests) ? character.interests : [];
     const exHistory: string | null = character?.ex_history ?? null;
-
-    // 1) Konuşmayı bul ya da oluştur (kullanıcı + karakter). maybeSingle KULLANMA —
-    // eski dupe'lar varsa hata verip convo=null oluyor ve HER mesajda YENİ bir
-    // conversation ekleniyordu (dupe'lar böyle çoğalıyordu). En güncel olanı al.
-    let { data: convoRows } = await db
-      .from("conversations")
-      .select("id, summary, summarized_count, xp, relationship_level, level_progress, schedule, woken_up_at, manual_sleep_at, ghosted_at, detected_language")
-      .eq("user_id", uid)
-      .eq("character_id", characterId)
-      .order("updated_at", { ascending: false })
-      .limit(1);
     let convo = convoRows?.[0];
     // NOT: conversation OLUŞTURMA burada YAPILMAZ. Sohbeti sadece AÇMAK (geçmiş
     // modu) boş bir conversation yaratıyordu → silsen bile açınca/liste
@@ -937,33 +1052,16 @@ Deno.serve(async (req: Request) => {
 
       const reactionLevel: number = convo.relationship_level ?? 1;
       const reactionProgress: number = typeof convo.level_progress === "number" ? convo.level_progress : 0;
-      const reactionDirective = reviewMode
-        ? REVIEW_DIRECTIVE
-        : await fetchDirective(characterId, personalityRole, reactionLevel);
+      const { directive: fetchedReactionDirective, memories: reactionMemoryRows, behaviors: reactionBehaviorRows } =
+        await fetchDirectiveMemoriesBehaviors(characterId, personalityRole, reactionLevel, conversationId);
+      const reactionDirective = reviewMode ? REVIEW_DIRECTIVE : fetchedReactionDirective;
       let reactionSystem = systemPrompt;
       reactionSystem += wrapDirective(reactionDirective, Math.round(reactionProgress * 100));
       if (exHistory) {
         reactionSystem += `\n\n[SHARED HISTORY — reference these memories naturally in conversation]\n${exHistory}`;
       }
-
-      const { data: reactionMemoryRows } = await db
-        .from("memories")
-        .select("content")
-        .eq("conversation_id", conversationId)
-        .order("created_at", { ascending: true });
-      const { data: reactionBehaviorRows } = await db
-        .from("conversation_behaviors")
-        .select("content")
-        .eq("conversation_id", conversationId)
-        .order("created_at", { ascending: true });
-      if (reactionMemoryRows && reactionMemoryRows.length > 0) {
-        reactionSystem += `\n\n[MEMORIES — facts to remember about the user/relationship]\n` +
-          reactionMemoryRows.map((m) => `- ${m.content}`).join("\n");
-      }
-      if (reactionBehaviorRows && reactionBehaviorRows.length > 0) {
-        reactionSystem += `\n\n[BEHAVIOR PREFERENCES — how the user wants you to act]\n` +
-          reactionBehaviorRows.map((b) => `- ${b.content}`).join("\n");
-      }
+      reactionSystem += memoriesBlock(reactionMemoryRows);
+      reactionSystem += behaviorsBlock(reactionBehaviorRows);
 
       reactionSystem += languageDirective(detectedLanguage);
       reactionSystem += PHOTO_DOWNLOAD_REACTION_RULE;
@@ -996,28 +1094,19 @@ Deno.serve(async (req: Request) => {
     // === CEVAP MODU: sistem promptunu hazırla ===
     const currentLevel: number = convo.relationship_level ?? 1;
     let system = systemPrompt;
-    const directive = reviewMode
-      ? REVIEW_DIRECTIVE
-      : await fetchDirective(characterId, personalityRole, currentLevel);
-    system += `\n\n${directive}`;
     // Kullanıcının "Anı Ekle" / "Davranış Ekle" ile eklediği kalıcı notlar
-    // (her rol için geçerli — ex'e özel değil). Fetch stays here; the actual
-    // `system +=` append happens further down, deliberately after all the
-    // static rule blocks — see the cache-ordering comment there.
-    const { data: memoryRows } = await db
-      .from("memories")
-      .select("content")
-      .eq("conversation_id", conversationId)
-      .order("created_at", { ascending: true });
-    const { data: behaviorRows } = await db
-      .from("conversation_behaviors")
-      .select("content")
-      .eq("conversation_id", conversationId)
-      .order("created_at", { ascending: true });
+    // (her rol için geçerli — ex'e özel değil). memoryRows/behaviorRows used
+    // further down, deliberately after all the static rule blocks — see the
+    // cache-ordering comment there.
+    const { directive: fetchedDirective, memories: memoryRows, behaviors: behaviorRows } =
+      await fetchDirectiveMemoriesBehaviors(characterId, personalityRole, currentLevel, conversationId);
+    const directive = reviewMode ? REVIEW_DIRECTIVE : fetchedDirective;
+    system += `\n\n${directive}`;
 
     system += languageDirective(detectedLanguage);
     system += TEXTING_STYLE_RULE;
     system += VARIATION_RULE;
+    system += NEVER_SOUND_ROBOTIC_RULE;
     system += CONTINUITY_RULE;
     // Review modda mizah/ilgi direktifleri de romantik/flörtöz/cinsel tona
     // kayabildiği için atlanır — engagementDirective özellikle level 1'den
@@ -1054,14 +1143,8 @@ Deno.serve(async (req: Request) => {
     if (exHistory) {
       system += `\n\n[SHARED HISTORY — reference these memories naturally in conversation]\n${exHistory}`;
     }
-    if (memoryRows && memoryRows.length > 0) {
-      system += `\n\n[MEMORIES — facts to remember about the user/relationship]\n` +
-        memoryRows.map((m) => `- ${m.content}`).join("\n");
-    }
-    if (behaviorRows && behaviorRows.length > 0) {
-      system += `\n\n[BEHAVIOR PREFERENCES — how the user wants you to act]\n` +
-        behaviorRows.map((b) => `- ${b.content}`).join("\n");
-    }
+    system += memoriesBlock(memoryRows);
+    system += behaviorsBlock(behaviorRows);
     if (useClientHistory && localSummary && localSummary.trim() !== "") {
       system += `\n\n[Önceki konuşmalarınızın özeti]\n${stripVoiceTags(localSummary)}`;
     }
@@ -1153,7 +1236,7 @@ Deno.serve(async (req: Request) => {
       { role: "user", content: finalUserContent },
     ];
 
-    const rawReply = await callGrok(grokMessages, 600, conversationId);
+    const rawReply = await callGrok(grokMessages, 350, conversationId);
     // [PAUSE:n] parsing only makes sense for plain-text turns — voice/image-
     // reaction turns never get DRAMATIC_PACING_RULE injected, so `segments`
     // is always empty for them and `replySegments` stays unset in the response.

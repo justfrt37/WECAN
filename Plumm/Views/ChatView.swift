@@ -25,6 +25,7 @@ struct ChatView: View {
     @State private var showTokenStore = false
     @State private var addSheetKind: NoteKind?
     @State private var showBlockConfirm = false
+    @State private var showClearChatOptions = false
     @State private var isBlocked: Bool
     @State private var recognizer = SpeechRecognizer()
     @State private var voice = VoicePlayer()
@@ -164,6 +165,11 @@ struct ChatView: View {
         }
         .sheet(item: $addSheetKind) { kind in
             AddCharacterNoteSheet(character: viewModel.character, kind: kind)
+        }
+        .sheet(isPresented: $showClearChatOptions) {
+            ClearChatOptionsSheet(character: viewModel.character) { keepLevel, keepMemories, keepBehaviors in
+                viewModel.clearChat(keepLevel: keepLevel, keepMemories: keepMemories, keepBehaviors: keepBehaviors)
+            }
         }
         .fullScreenCover(isPresented: Binding(
             get: { fullscreenLocalImage != nil },
@@ -386,7 +392,7 @@ struct ChatView: View {
                 Button { showProfile = true } label: { Label("View Profile", systemImage: "person.circle") }
                 Button { addSheetKind = .memory } label: { Label("Add Memory", systemImage: "sparkles") }
                 Button { addSheetKind = .behavior } label: { Label("Add Behavior", systemImage: "face.smiling") }
-                Button(role: .destructive) { viewModel.clearChat() } label: { Label("Clear Chat", systemImage: "trash") }
+                Button(role: .destructive) { showClearChatOptions = true } label: { Label("Clear Chat", systemImage: "trash") }
                 if isBlocked {
                     Button {
                         BlockedCharactersStore.unblock(viewModel.character.id)
@@ -433,6 +439,8 @@ struct ChatView: View {
                             withAnimation(.easeInOut(duration: 0.2)) {
                                 expandedMessageID = expandedMessageID == message.id ? nil : message.id
                             }
+                        }, onRetry: {
+                            viewModel.retrySend(messageID: message.id)
                         }, onSpeak: {
                             if voice.speakingMessageID == message.id {
                                 voice.stop()
@@ -764,6 +772,7 @@ private struct ChatBubble: View {
     let message: Message
     var showsTimestamp: Bool = false
     var onTap: (() -> Void)? = nil
+    var onRetry: (() -> Void)? = nil
     var onSpeak: (() -> Void)? = nil
     /// Gözlemlenen oynatıcı — SADECE yaprak VoiceMessageBubble'a geçirilir,
     /// ChatBubble.body burada hiçbir oynatma özelliğini OKUMAZ (aksi halde her
@@ -796,6 +805,13 @@ private struct ChatBubble: View {
 
             if showsTimestamp, message.isUser {
                 timestampLabel
+            }
+
+            if message.isUser, message.failed == true {
+                Image(systemName: "exclamationmark.circle.fill")
+                    .font(.system(size: 20))
+                    .foregroundStyle(.red)
+                    .onTapGesture { onRetry?() }
             }
 
             if message.isPendingImage {

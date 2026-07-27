@@ -43,12 +43,17 @@ struct Message: Identifiable, Codable, Hashable {
     /// isteği (bkz. ChatViewModel.generatePendingVoice). Metin tarifi tutmaz —
     /// asıl bot cevabı da dokunulunca üretilir, o anki sohbet geçmişinden gelir.
     var pendingVoiceRequest: Bool?
+    /// true ise bu mesajın gönderimi başarısız oldu (ağ hatası vb., 402 hariç —
+    /// bkz. ChatViewModel.isInsufficientTokensError) — balon üzerinde bir hata
+    /// göstergesi gösterilir, dokununca yeniden denenir (bkz. ChatViewModel.retrySend).
+    var failed: Bool?
 
     init(
         id: UUID = UUID(), role: ChatRole, content: String, createdAt: Date = Date(),
         imageURL: URL? = nil, voiceLocalPath: String? = nil, voiceDuration: Double? = nil,
         voiceRemoteURL: URL? = nil,
-        localImagePath: String? = nil, pendingImagePrompt: String? = nil, pendingVoiceRequest: Bool? = nil
+        localImagePath: String? = nil, pendingImagePrompt: String? = nil, pendingVoiceRequest: Bool? = nil,
+        failed: Bool? = nil
     ) {
         self.id = id
         self.role = role
@@ -61,6 +66,7 @@ struct Message: Identifiable, Codable, Hashable {
         self.localImagePath = localImagePath
         self.pendingImagePrompt = pendingImagePrompt
         self.pendingVoiceRequest = pendingVoiceRequest
+        self.failed = failed
     }
 
     /// Sunucudan gelen bir satırdan (role/content/kind) görüntülenebilir Message

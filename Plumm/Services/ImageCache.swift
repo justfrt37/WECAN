@@ -147,4 +147,43 @@ final class ImageCache {
             }
         }
     }
+
+    /// Bir seferlik LRU temizliği — disk cache 1GB'ı aşıyorsa en eski
+    /// erişilmiş dosyalardan başlayarak %80'e (800MB) inene kadar siler.
+    /// Her yazımda DEĞİL, oturum başına bir kez (launch/foreground) çağrılır
+    /// — bkz. PlummApp.swift. Ana thread'i asla bloklamaz.
+    func evictIfNeeded() {
+        let diskCacheDir = self.diskCacheDir
+        Task.detached(priority: .background) {
+            let capBytes = 1_000_000_000   // 1 GB
+            let targetBytes = 800_000_000  // 800 MB (cap'in %80'i)
+            let fm = FileManager.default
+            let keys: [URLResourceKey] = [.fileSizeKey, .contentAccessDateKey, .contentModificationDateKey]
+            guard let urls = try? fm.contentsOfDirectory(
+                at: diskCacheDir,
+                includingPropertiesForKeys: keys,
+                options: [.skipsHiddenFiles]
+            ) else { return }
+
+            struct Entry { let url: URL; let size: Int; let date: Date }
+            var entries: [Entry] = []
+            var total = 0
+            for url in urls {
+                guard let values = try? url.resourceValues(forKeys: Set(keys)) else { continue }
+                let size = values.fileSize ?? 0
+                let date = values.contentAccessDate ?? values.contentModificationDate ?? .distantPast
+                entries.append(Entry(url: url, size: size, date: date))
+                total += size
+            }
+            guard total > capBytes else { return }
+
+            entries.sort { $0.date < $1.date }
+            var remaining = total
+            for entry in entries {
+                if remaining <= targetBytes { break }
+                try? fm.removeItem(at: entry.url)
+                remaining -= entry.size
+            }
+        }
+    }
 }

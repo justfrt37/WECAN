@@ -63,6 +63,7 @@ struct PlummApp: App {
                 // Sunucudaki abonelik tier'ını yükle → açılışta isPro DOĞRU olsun
                 // (restore'a basmadan pro görünür; Pro butonu yerine token gösterilir).
                 await PurchaseService.shared.refreshServerTier()
+                ImageCache.shared.evictIfNeeded()
             }
         }
         .onChange(of: scenePhase) { _, newPhase in
@@ -73,6 +74,7 @@ struct PlummApp: App {
                 // Picks up newly-added characters (DEV curated creations, etc.)
                 // without requiring a reinstall — bkz. CharacterStore.refreshCharacters.
                 Task { await store.refreshCharacters() }
+                ImageCache.shared.evictIfNeeded()
             case .background:
                 NotificationScheduler.shared.onBackground(characters: store.characters)
             default:
