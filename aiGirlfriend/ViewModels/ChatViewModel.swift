@@ -345,8 +345,12 @@ final class ChatViewModel {
             }
             showsTypingBubble = false
             store?.setTyping(character.id, false)
-            messages.append(Message(role: .assistant, content: segment.text))
+            let replyMsg = Message(role: .assistant, content: segment.text)
+            messages.append(replyMsg)
+            LocalConversationStore.shared.appendMessage(replyMsg, for: character.id, defaultLevel: relationshipLevel, defaultLevelProgress: levelProgress)
         }
+        LocalConversationStore.shared.refreshDetectedLanguage(for: character.id)
+        store?.chatCache[character.id] = realMessages()
     }
 
     /// Gerçek yatma saatine 1 saatten yakın mı (ya da içinde miyiz) — bkz.
