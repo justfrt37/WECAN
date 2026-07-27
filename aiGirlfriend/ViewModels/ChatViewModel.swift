@@ -282,22 +282,11 @@ final class ChatViewModel {
                     nearSleepTime: isNearSleepTime()
                 )
 
-                // Cevap hazır olsa bile, balon en az "bunu yazmak ne kadar sürerdi"
-                // kadar açık kalsın (2x insan hızı, ama üst sınırla sıkıştırılmış).
-                let elapsed = Date().timeIntervalSince(bubbleStartedAt)
-                let wanted = TypingTiming.duration(forReplyLength: result.reply.count)
-                let remaining = wanted - elapsed
-                if remaining > 0 {
-                    try? await Task.sleep(nanoseconds: UInt64(remaining * 1_000_000_000))
-                }
-                showsTypingBubble = false
-                store?.setTyping(character.id, false)
-
                 // Eski otomatik-foto sistemi (metinde "foto" geçince statik
                 // havuzdan rastgele fotoğraf ekleme) KALDIRILDI — artık foto/ses
                 // sadece ilgili düğmeyle gönderilir (bkz. MEDIA_REQUEST_RULE,
                 // chat/index.ts). Grok bu turda düğmeyi kullanmasını önerir.
-                messages.append(Message(role: .assistant, content: result.reply))
+                await deliverSegments(result, bubbleStartedAt: bubbleStartedAt)
                 handleTokenBalance(result.tokenBalance)
 
                 applyPostReplyEffects(gotPhoto: nil, stored: stored,
@@ -320,6 +309,41 @@ final class ChatViewModel {
                 store?.setTyping(character.id, false)
             }
             isSending = false
+        }
+    }
+
+    /// `send()`/`sendUserVoice()`/`sendUserPhoto()` ortak balon teslim mantığı —
+    /// üçünde de aynı 20 satırlık "kalan süre kadar bekle, balonu kapat, mesajı
+    /// ekle" bloğu tekrarlanıyordu, artık tek yerde. `result.replySegments`
+    /// doluysa (bkz. DRAMATIC_PACING_RULE) her parçayı ayrı bir balon olarak,
+    /// aralarında `delaySeconds` kadar "yazıyor..." göstererek art arda ekler;
+    /// boşsa/nil ise eski tek-balon davranışına düşer (voice/image-reaction
+    /// turları ve her türlü eski sunucu cevabı için sıfır riskli geri dönüş).
+    private func deliverSegments(_ result: ChatReply, bubbleStartedAt: Date) async {
+        let segments: [ReplySegment] = (result.replySegments?.isEmpty == false)
+            ? result.replySegments!
+            : [ReplySegment(text: result.reply, delaySeconds: 0)]
+
+        for (index, segment) in segments.enumerated() {
+            if index == 0 {
+                // İlk parça: mevcut davranış — balon zaten çağrı ÖNCESİNDE
+                // açılmıştı, sadece "bunu yazmak ne kadar sürerdi" kadar tamamla.
+                let elapsed = Date().timeIntervalSince(bubbleStartedAt)
+                let wanted = TypingTiming.duration(forReplyLength: segment.text.count)
+                let remaining = wanted - elapsed
+                if remaining > 0 {
+                    try? await Task.sleep(nanoseconds: UInt64(remaining * 1_000_000_000))
+                }
+            } else {
+                // Sonraki parçalar: balonu YENİDEN aç, dramatik duraklamayı
+                // "yazıyor..." animasyonuyla göster.
+                showsTypingBubble = true
+                store?.setTyping(character.id, true)
+                try? await Task.sleep(nanoseconds: UInt64(segment.delaySeconds * 1_000_000_000))
+            }
+            showsTypingBubble = false
+            store?.setTyping(character.id, false)
+            messages.append(Message(role: .assistant, content: segment.text))
         }
     }
 
@@ -383,16 +407,7 @@ final class ChatViewModel {
                     nearSleepTime: isNearSleepTime()
                 )
 
-                let elapsed = Date().timeIntervalSince(bubbleStartedAt)
-                let wanted = TypingTiming.duration(forReplyLength: result.reply.count)
-                let remaining = wanted - elapsed
-                if remaining > 0 {
-                    try? await Task.sleep(nanoseconds: UInt64(remaining * 1_000_000_000))
-                }
-                showsTypingBubble = false
-                store?.setTyping(character.id, false)
-
-                messages.append(Message(role: .assistant, content: result.reply))
+                await deliverSegments(result, bubbleStartedAt: bubbleStartedAt)
                 handleTokenBalance(result.tokenBalance)
                 applyPostReplyEffects(gotPhoto: nil, stored: stored,
                                       serverLevel: result.level, serverProgress: result.levelProgress)
@@ -459,16 +474,7 @@ final class ChatViewModel {
                     nearSleepTime: isNearSleepTime()
                 )
 
-                let elapsed = Date().timeIntervalSince(bubbleStartedAt)
-                let wanted = TypingTiming.duration(forReplyLength: result.reply.count)
-                let remaining = wanted - elapsed
-                if remaining > 0 {
-                    try? await Task.sleep(nanoseconds: UInt64(remaining * 1_000_000_000))
-                }
-                showsTypingBubble = false
-                store?.setTyping(character.id, false)
-
-                messages.append(Message(role: .assistant, content: result.reply))
+                await deliverSegments(result, bubbleStartedAt: bubbleStartedAt)
                 handleTokenBalance(result.tokenBalance)
                 // `gotPhoto: nil` — bu bir GELEN fotoğraf. Seviye/ilerleme sunucudan gelir.
                 applyPostReplyEffects(gotPhoto: nil, stored: stored,
