@@ -1074,7 +1074,7 @@ Deno.serve(async (req: Request) => {
       { role: "user", content: finalUserContent },
     ];
 
-    const rawReply = await callGrok(grokMessages, 600, conversationId);
+    const rawReply = await callGrok(grokMessages, 350, conversationId);
     // [PAUSE:n] parsing only makes sense for plain-text turns — voice/image-
     // reaction turns never get DRAMATIC_PACING_RULE injected, so `segments`
     // is always empty for them and `replySegments` stays unset in the response.
