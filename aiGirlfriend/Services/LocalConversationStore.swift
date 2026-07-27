@@ -212,4 +212,29 @@ final class LocalConversationStore {
         let previous = mem[key]?[id]?.detectedLanguage
         mem[key]?[id]?.detectedLanguage = ConversationLanguage.resolve(latestAssistantText: latest, previouslyDetected: previous)
     }
+
+    /// "Sohbeti Temizle" yerel sıfırlama — mesajları/özeti/durumu HER ZAMAN
+    /// sıfırlar (server ile birebir aynı alanlar — bkz. chat/index.ts clear
+    /// branch); relationship_level/level_progress SADECE `keepLevel` false
+    /// ise sıfırlanır. Memories/behaviors istemcide hiç tutulmuyor (sadece
+    /// server tablosu) — bu yüzden bu fonksiyonun keepMemories/keepBehaviors
+    /// parametresi yok, o iki bayrak sadece ChatService çağrısını etkiler.
+    /// Kayıt bu karakter için hiç yoksa hiçbir şey yapmaz.
+    func resetKeeping(for id: UUID, keepLevel: Bool) {
+        lock.lock(); defer { lock.unlock() }
+        let key = userKey()
+        guard mem[key]?[id] != nil else { return }
+        mem[key]?[id]?.messages = []
+        mem[key]?[id]?.summary = ""
+        mem[key]?[id]?.summarizedCount = 0
+        mem[key]?[id]?.schedule = nil
+        mem[key]?[id]?.wokenUpAt = nil
+        mem[key]?[id]?.manualSleepAt = nil
+        mem[key]?[id]?.ghostedAt = nil
+        mem[key]?[id]?.detectedLanguage = nil
+        if !keepLevel {
+            mem[key]?[id]?.level = 1
+            mem[key]?[id]?.levelProgress = 0
+        }
+    }
 }
