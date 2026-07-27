@@ -104,7 +104,7 @@ final class ChatViewModel {
         ReadTracker.setSeen(character.id, realAssistantCount)
     }
 
-    func clearChat() {
+    func clearChat(keepLevel: Bool = false, keepMemories: Bool = false, keepBehaviors: Bool = false) {
         // Temizle = sohbet BOŞ kalır. Eskiden hemen ardından loadHistory()
         // çağrılıyordu; o da boş sohbette yeni conversation + "ilk selam"
         // oluşturup mesajı ANINDA geri getiriyordu (bkz. kullanıcı talebi:
@@ -113,7 +113,12 @@ final class ChatViewModel {
         messages = []
         hasSyntheticOpening = false
         Task {
-            if let store { await ChatMaintenance.clearChat(character: character, store: store) }
+            if let store {
+                await ChatMaintenance.clearChat(
+                    character: character, store: store,
+                    keepLevel: keepLevel, keepMemories: keepMemories, keepBehaviors: keepBehaviors
+                )
+            }
         }
     }
 
