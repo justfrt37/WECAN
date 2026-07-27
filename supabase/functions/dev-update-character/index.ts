@@ -9,10 +9,13 @@
 //
 // Full-replace semantics for character_photos: the submitted `chatPhotos`
 // array is the complete desired set (kept rows the dev didn't remove, edited
-// descriptions, and any newly-uploaded ones) — existing rows for this
-// character are deleted and the submitted list is reinserted, rather than
-// diffing add/remove/update. Simpler and matches how the form displays them
-// (one flat editable list).
+// descriptions, and any newly-uploaded ones) — existing CATALOG rows (chat
+// pool + profile pic + gallery, user_id IS NULL) for this character are
+// deleted and the submitted list is reinserted, rather than diffing
+// add/remove/update. Simpler and matches how the form displays them (one
+// flat editable list). Users' private per-user generated photos (user_id
+// set — see migration 013) are explicitly excluded from the delete and
+// always survive an edit untouched.
 //
 // Does NOT touch `created_by` — a curated character stays a catalog row
 // (created_by stays NULL) exactly like before the edit.
@@ -22,12 +25,14 @@
 // curated-character creation/editing is retired.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { translateTagline } from "../_shared/tagline-i18n.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+const XAI_API_KEY = Deno.env.get("XAI_API_KEY") ?? "";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const db = createClient(SUPABASE_URL, SERVICE_ROLE, { auth: { persistSession: false } });
@@ -126,11 +131,19 @@ Deno.serve(async (req: Request) => {
     // row's age and keep it.
     const { data: existing, error: fetchErr } = await db
       .from("characters")
-      .select("age")
+      .select("age, tagline, tagline_i18n")
       .eq("id", characterId)
       .maybeSingle();
     if (fetchErr || !existing) return json({ error: "character not found" }, 404);
     const age: number = existing.age ?? 23;
+
+    // Only re-translate when the bio actually changed — avoids an LLM call
+    // (and the risk of it failing) on every unrelated edit.
+    let taglineI18n: Record<string, string> = existing.tagline_i18n ?? {};
+    if (bio !== existing.tagline) {
+      taglineI18n = { tr: bio };
+      try { taglineI18n = await translateTagline(bio, XAI_API_KEY); } catch (e) { console.error("tagline translation failed:", e); }
+    }
 
     const langRule = "Her zaman Türkçe konuş. Kullanıcı başka dilde yazarsa veya başka dil isterse o dile geç; aksi takdirde SADECE Türkçe.";
     const naturalVariationNote =
@@ -155,6 +168,7 @@ Deno.serve(async (req: Request) => {
       .update({
         name,
         tagline: bio,
+        tagline_i18n: taglineI18n,
         system_prompt: systemPrompt,
         profession,
         category,
@@ -173,22 +187,52 @@ Deno.serve(async (req: Request) => {
 
     if (error) return json({ error: error.message }, 500);
 
-    // Full-replace character_photos for this character.
-    const { error: delErr } = await db.from("character_photos").delete().eq("character_id", characterId);
+    // Full-replace the CATALOG rows only (chat pool + profile pic + gallery)
+    // for this character. Scoped to user_id IS NULL — users' private
+    // per-user generated photos (user_id set, see migration 013) live in
+    // this same table and must survive a dev edit untouched.
+    const { error: delErr } = await db
+      .from("character_photos")
+      .delete()
+      .eq("character_id", characterId)
+      .is("user_id", null);
     if (delErr) console.error("character_photos delete failed:", delErr.message);
 
-    if (chatPhotos.length > 0) {
-      const rows = chatPhotos.map((p, i) => ({
+    const photoRows: Record<string, unknown>[] = [];
+
+    for (const p of chatPhotos) {
+      photoRows.push({
         character_id: characterId,
         url: p.url,
         description: p.description ?? null,
         mood: p.mood ?? null,
         tags: p.tags ?? [],
-        sort: i,
-      }));
-      const { error: photoErr } = await db.from("character_photos").insert(rows);
-      if (photoErr) console.error("character_photos insert failed:", photoErr.message);
+        sort: photoRows.length,
+        is_uploaded: true,
+        show_in_chat: true,
+      });
     }
+
+    photoRows.push({
+      character_id: characterId,
+      url: profileUrl,
+      is_uploaded: true,
+      show_as_profile_picture: true,
+    });
+
+    const galleryList = galleryUrls.length ? galleryUrls : [profileUrl];
+    for (const [i, url] of galleryList.entries()) {
+      photoRows.push({
+        character_id: characterId,
+        url,
+        sort: i,
+        is_uploaded: true,
+        show_in_gallery: true,
+      });
+    }
+
+    const { error: photoErr } = await db.from("character_photos").insert(photoRows);
+    if (photoErr) console.error("character_photos insert failed:", photoErr.message);
 
     return json(character);
   } catch (e) {

@@ -20,6 +20,7 @@
 // retired.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { translateTagline } from "../_shared/tagline-i18n.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -153,6 +154,9 @@ Deno.serve(async (req: Request) => {
       try { bio = (await grok(bioPrompt, 120)).trim(); } catch (_) { bio = "Seninle tanışmayı çok istiyorum 💕"; }
     }
 
+    let taglineI18n: Record<string, string> = { tr: bio };
+    try { taglineI18n = await translateTagline(bio, XAI_API_KEY); } catch (e) { console.error("tagline translation failed:", e); }
+
     // System prompt — identical role-aware logic to create-character/index.ts.
     const langRule = "Her zaman Türkçe konuş. Kullanıcı başka dilde yazarsa veya başka dil isterse o dile geç; aksi takdirde SADECE Türkçe.";
     const naturalVariationNote =
@@ -178,6 +182,7 @@ Deno.serve(async (req: Request) => {
     const { data: character, error } = await db.from("characters").insert({
       name,
       tagline: bio,
+      tagline_i18n: taglineI18n,
       system_prompt: systemPrompt,
       avatar_symbol: "sparkles",
       age,
@@ -199,18 +204,43 @@ Deno.serve(async (req: Request) => {
 
     if (error) return json({ error: error.message }, 500);
 
-    if (chatPhotos.length > 0) {
-      const rows = chatPhotos.map((p, i) => ({
+    // character_photos is the single catalog for every photo this character
+    // has — chat pool, profile picture, and gallery — see migration 013.
+    const photoRows: Record<string, unknown>[] = [];
+
+    for (const p of chatPhotos) {
+      photoRows.push({
         character_id: character.id,
         url: p.url,
         description: p.description ?? null,
         mood: p.mood ?? null,
         tags: p.tags ?? [],
-        sort: i,
-      }));
-      const { error: photoErr } = await db.from("character_photos").insert(rows);
-      if (photoErr) console.error("character_photos insert failed:", photoErr.message);
+        sort: photoRows.length,
+        is_uploaded: true,
+        show_in_chat: true,
+      });
     }
+
+    photoRows.push({
+      character_id: character.id,
+      url: profileUrl,
+      is_uploaded: true,
+      show_as_profile_picture: true,
+    });
+
+    const galleryList = galleryUrls.length ? galleryUrls : [profileUrl];
+    for (const [i, url] of galleryList.entries()) {
+      photoRows.push({
+        character_id: character.id,
+        url,
+        sort: i,
+        is_uploaded: true,
+        show_in_gallery: true,
+      });
+    }
+
+    const { error: photoErr } = await db.from("character_photos").insert(photoRows);
+    if (photoErr) console.error("character_photos insert failed:", photoErr.message);
 
     return json(character);
   } catch (e) {

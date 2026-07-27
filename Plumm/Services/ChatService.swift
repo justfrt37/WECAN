@@ -70,9 +70,28 @@ private struct WireMessage: Codable {
     let kind: String?
 }
 
+private struct WireReplySegment: Codable {
+    let text: String
+    let delaySeconds: Double
+}
+
+/// One paced bubble of a bot reply — see chat/index.ts parseReplySegments.
+/// `delaySeconds` for the FIRST segment is always 0 (existing typing-bubble
+/// timing already covers it); later segments show the typing indicator for
+/// `delaySeconds` before appearing.
+struct ReplySegment: Codable, Hashable {
+    let text: String
+    let delaySeconds: Double
+}
+
 private struct ChatResponse: Codable {
     let conversationId: String?
     let reply: String?
+    /// Paced multi-bubble breakdown of `reply` (see DRAMATIC_PACING_RULE /
+    /// parseReplySegments server-side). Absent or empty for voice/image-
+    /// reaction turns and any older response shape — callers must fall back
+    /// to a single bubble built from `reply` in that case.
+    let replySegments: [WireReplySegment]?
     let history: [WireMessage]?
     let xp: Int?
     let level: Int?
@@ -101,6 +120,8 @@ struct ChatHistory {
 
 struct ChatReply {
     let reply: String
+    /// See `ChatResponse.replySegments`.
+    let replySegments: [ReplySegment]?
     let level: Int      // SUNUCUDA hesaplanan güncel seviye (istemci sadece gösterir)
     let levelProgress: Double?   // güncel seviyenin ilerleme oranı (0..1), sunucudan
     let photoURL: URL?
@@ -293,6 +314,7 @@ struct ChatService {
         let resp = try await call(character: character, userMessage: userMessage, level: level, lastMessageAt: lastMessageAt)
         return ChatReply(
             reply: resp.reply ?? "",
+            replySegments: resp.replySegments?.map { ReplySegment(text: $0.text, delaySeconds: $0.delaySeconds) },
             level: resp.level ?? level,
             levelProgress: resp.levelProgress,
             photoURL: resp.photoUrl.flatMap(URL.init(string:)),
@@ -338,6 +360,7 @@ struct ChatService {
         )
         return ChatReply(
             reply: resp.reply ?? "",
+            replySegments: resp.replySegments?.map { ReplySegment(text: $0.text, delaySeconds: $0.delaySeconds) },
             level: resp.level ?? level,
             levelProgress: resp.levelProgress,
             photoURL: resp.photoUrl.flatMap(URL.init(string:)),
@@ -379,6 +402,7 @@ struct ChatService {
         )
         return ChatReply(
             reply: resp.reply ?? "",
+            replySegments: resp.replySegments?.map { ReplySegment(text: $0.text, delaySeconds: $0.delaySeconds) },
             level: resp.level ?? level,
             levelProgress: resp.levelProgress,
             photoURL: resp.photoUrl.flatMap(URL.init(string:)),

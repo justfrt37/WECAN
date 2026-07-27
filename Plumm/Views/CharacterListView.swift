@@ -24,7 +24,7 @@ struct CharacterListView: View {
                         Text(character.name)
                             .font(.headline)
                             .foregroundStyle(.primary)
-                        Text(character.tagline)
+                        Text(character.localizedTagline)
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                             .lineLimit(2)
