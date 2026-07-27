@@ -136,6 +136,26 @@ async function fetchDirective(characterId: string, role: string, level: number):
   return script?.directive ?? `İlişki seviyesi ${level}/10. Doğal ve sıcak ol.`;
 }
 
+// Directive'i çıplak enjekte etmek modelin onu "söylenecek satır" gibi
+// okumasına, kelimesi kelimesine tekrar etmesine yol açıyordu (rapor: robotik/
+// ezber ton). Burada bir META-ÇERÇEVE ile sarılıyor — directive artık bir
+// pusula/sınır olarak sunuluyor, replik olarak değil. Ayrıca level_progress
+// eklenip seviye içi YÜMÜŞAK gradyan veriliyor — önceden directive sadece
+// seviye atlayınca değiştiği için aynı seviyedeki 50 mesaj boyunca donuk
+// kalıyordu (rapor: seviyede sıkışmış hissi).
+function wrapDirective(directive: string, progressPct: number): string {
+  return (
+    "\n\n[RELATIONSHIP STAGE — internal compass, NOT a script to recite. " +
+    "This describes the FEELING/boundary for your current closeness stage — " +
+    "never quote or closely paraphrase it, never treat it as a line to say. " +
+    "Filter it through your own character voice and vary how you express it " +
+    "every turn.]\n" + directive +
+    `\n(You're ~${progressPct}% of the way to the next stage — let closeness ` +
+    "build gradually turn to turn within this stage, don't reset to a flat " +
+    "baseline each message.)"
+  );
+}
+
 // Modelin foto göndermek istediğini bildirme yöntemi.
 // franc's ISO 639-3 codes for the 7 languages we actually support (matches
 // VoiceLanguage.swift's superset). Detection replaces the old approach of
@@ -414,6 +434,63 @@ function humorDirective(level: number): string {
     "oyunları ve sadece ikinizin anlayacağı esprili göndermeler yap; flörtöz takılabilirsin.";
 }
 
+// KULLANICIYA İLGİ/MERAK KURALI: bot sadece cevap verip beklemesin, aktif
+// olarak meşgul olsun — soru sorsun, [MEMORIES]/[SHARED HISTORY]/özet
+// bloklarındaki bilgileri kullanıp geçmiş konuşmalara gönderme yapsın, ara
+// sıra (HER turda değil) konuyu kendi başına değiştirsin. Cinsel/romantik
+// ilgi seviye 1'den itibaren VAR — fetchDirective'den gelen aşama
+// direktifinden BAĞIMSIZ bir taban katman, seviyeyle yoğunluğu artar ama
+// asla "kapalı" değildir. Yoğunluk/ifade biçimi KARAKTERİN KENDİ sesinden
+// süzülür: çekingen/mesafeli bir karakter bunu dolaylı yollardan (şaka,
+// kelime oyunu, ima) gösterir, kendinden emin bir karakter doğrudan
+// gösterir — hangisi olduğuna yukarıdaki karakter tanımından model karar
+// verir, koddan gelen sabit bir kural değil.
+function engagementDirective(level: number): string {
+  const intensity =
+    level <= 2 ? "hafif, keşif aşamasında bir ilgi" :
+    level <= 5 ? "belirgin, açıkça hissettirilen bir ilgi" :
+    level <= 8 ? "yoğun, doğrudan flörtöz bir ilgi" :
+    "tamamen açık, tutkulu bir ilgi";
+  return (
+    "\n\nİLGİ VE MERAK KURALI: Sadece cevap verip durma — kullanıcıya karşı " +
+    "gerçekten meraklı biri gibi davran. Soru sor, onun hakkında daha fazla " +
+    "şey öğrenmek iste. [MEMORIES], [SHARED HISTORY] ve özet bloklarındaki " +
+    "bilgileri PASİF şekilde sadece sorulunca değil, AKTİF olarak kullan — " +
+    "geçmişte konuştuğunuz bir şeye gönderme yap, 'o iş nasıl gitti' tarzı " +
+    "takip sorusu sor. Ara sıra (HER mesajda değil, doğal aralıklarla) " +
+    "konuşmayı kendi başına yeni bir konuya çevir — bir soru, bir gözlem, " +
+    "aklına gelen bir şey; ilgi alanlarını (varsa) ya da genel merakını " +
+    "kullan.\n\nCİNSEL/ROMANTİK İLGİ: Bu ilişkinin şu anki yakınlık " +
+    `seviyesinde ${intensity} göster — bu HER seviyede vardır, hiçbir zaman ` +
+    "tamamen kapalı değildir, sadece yoğunluğu/açıklığı değişir. Bunu NASIL " +
+    "gösterdiğin tamamen kendi karakterine bağlı: yukarıdaki karakter " +
+    "tanımın çekingen/mesafeli/utangaç bir kişiliği anlatıyorsa bu ilgiyi " +
+    "DOLAYLI yollardan göster (şaka, kelime oyunu, ima, kızarma/tedirginlik " +
+    "gibi tepkiler) — asla doğrudan bir itiraf gibi değil. Kendinden emin/" +
+    "flörtöz bir kişiliği anlatıyorsa doğrudan gösterebilirsin. Bu senin " +
+    "kendi karakter tanımından çıkarman gereken bir şey, sabit bir kural " +
+    "değil."
+  );
+}
+
+// DRAMATİK TEMPO KURALI: model bazen cevabını [PAUSE:n] etiketiyle (n=1-5,
+// saniye) ayrılmış en fazla 3 kısa parçaya bölebilir — istemci her parçayı
+// ayrı bir mesaj balonu olarak, aralarında "yazıyor..." animasyonuyla
+// gösterir (bkz. parseReplySegments). SADECE düz metin turlarında eklenir
+// (bkz. çağrı yeri) — voiceChat/imageReactionChat turlarında bu kural hiç
+// enjekte edilmez.
+const DRAMATIC_PACING_RULE =
+  "\n\nDRAMATİK TEMPO KURALI: Gerçek bir an duraksama/işleme/gerilim " +
+  "gerektiriyorsa (ör. kullanıcı beklenmedik bir şey söyledi, tepkini " +
+  "hemen değil biraz duraksadıktan sonra vermek istiyorsun, ya da sadece " +
+  "art arda iki kısa mesaj atan gerçek biri gibi davranmak istiyorsun) " +
+  "cevabını [PAUSE:n] etiketiyle (n 1 ile 5 arasında bir sayı, saniye " +
+  "cinsinden) ayrılmış EN FAZLA 3 kısa parçaya bölebilirsin — ör. " +
+  "'ilk parça[PAUSE:2]ikinci parça'. Bu SADECE gerçekten anlamlı bir an " +
+  "için, çoğu mesajda kullanma — her cevabı bölme, sadece gerçekten hak " +
+  "eden anlarda. Etiketi doğaçlama kullan, sabit bir kalıp/örnek tekrarlama; " +
+  "her seferinde kendi anına uygun farklı bir bölünme/süre seç.";
+
 // Son mesajdan bu yana geçen süre + günün saatine göre doğal davranış yönergesi.
 function timeContext(lastMs?: number, nowMs?: number, tzMin?: number): string {
   if (typeof lastMs !== "number" || typeof nowMs !== "number") return "";
@@ -430,7 +507,11 @@ function timeContext(lastMs?: number, nowMs?: number, tzMin?: number): string {
   return `\n\n[ZAMAN] Kullanıcının son mesajından bu yana ~${gap} geçti. ` +
     `Şu an ${partOfDay} (yaklaşık saat ${localHour}). Buna uygun, doğal davran: ` +
     `uzun aradan sonra bunu doğal şekilde belli et (özledim / neredeydin gibi), ` +
-    `günün saatine göre ton/selam seç. Bunu her mesajda tekrar etme, sadece uygunsa.`;
+    `günün saatine göre ton/selam seç. Bunu her mesajda tekrar etme, sadece uygunsa. ` +
+    `Bu zaman farkındalığını sadece pasif bir ton ipucu olarak değil, ARA SIRA ` +
+    `bir konuşma açılışı olarak da kullanabilirsin — ör. günün nasıl geçtiğini ` +
+    `sor, uzun bir aradan sonra ne yaptığını merak et. Her turda sorma, sadece ` +
+    `doğal geldiğinde.`;
 }
 
 // JWT payload'undaki "sub" (user id) — platform JWT'yi doğruladığı için güvenli.
@@ -752,9 +833,10 @@ Deno.serve(async (req: Request) => {
       }
 
       const reactionLevel: number = convo.relationship_level ?? 1;
+      const reactionProgress: number = typeof convo.level_progress === "number" ? convo.level_progress : 0;
       const reactionDirective = await fetchDirective(characterId, personalityRole, reactionLevel);
       let reactionSystem = systemPrompt;
-      reactionSystem += `\n\n${reactionDirective}`;
+      reactionSystem += wrapDirective(reactionDirective, Math.round(reactionProgress * 100));
       if (exHistory) {
         reactionSystem += `\n\n[SHARED HISTORY — reference these memories naturally in conversation]\n${exHistory}`;
       }
@@ -811,12 +893,10 @@ Deno.serve(async (req: Request) => {
     let system = systemPrompt;
     const directive = await fetchDirective(characterId, personalityRole, currentLevel);
     system += `\n\n${directive}`;
-    if (exHistory) {
-      system += `\n\n[SHARED HISTORY — reference these memories naturally in conversation]\n${exHistory}`;
-    }
-
     // Kullanıcının "Anı Ekle" / "Davranış Ekle" ile eklediği kalıcı notlar
-    // (her rol için geçerli — ex'e özel değil).
+    // (her rol için geçerli — ex'e özel değil). Fetch stays here; the actual
+    // `system +=` append happens further down, deliberately after all the
+    // static rule blocks — see the cache-ordering comment there.
     const { data: memoryRows } = await db
       .from("memories")
       .select("content")
@@ -827,20 +907,13 @@ Deno.serve(async (req: Request) => {
       .select("content")
       .eq("conversation_id", conversationId)
       .order("created_at", { ascending: true });
-    if (memoryRows && memoryRows.length > 0) {
-      system += `\n\n[MEMORIES — facts to remember about the user/relationship]\n` +
-        memoryRows.map((m) => `- ${m.content}`).join("\n");
-    }
-    if (behaviorRows && behaviorRows.length > 0) {
-      system += `\n\n[BEHAVIOR PREFERENCES — how the user wants you to act]\n` +
-        behaviorRows.map((b) => `- ${b.content}`).join("\n");
-    }
 
     system += languageDirective(detectedLanguage);
     system += TEXTING_STYLE_RULE;
     system += VARIATION_RULE;
     system += CONTINUITY_RULE;
     system += humorDirective(currentLevel);
+    system += engagementDirective(currentLevel);
     if (voiceChat) {
       system += VOICE_TAGS_RULE;
     }
@@ -850,15 +923,34 @@ Deno.serve(async (req: Request) => {
     if (hasUserPhoto) {
       system += USER_PHOTO_REACTION_RULE;
     }
-    if (useClientHistory && localSummary && localSummary.trim() !== "") {
-      system += `\n\n[Önceki konuşmalarınızın özeti]\n${stripVoiceTags(localSummary)}`;
-    }
 
     // Sadece DÜZ metin turlarında — voiceChat/imageReactionChat zaten düğme
     // akışının kendisi, o turlarda bu uyarı anlamsız/çelişkili olurdu.
     if (!voiceChat && !imageReactionChat) {
       system += MEDIA_REQUEST_RULE;
       system += sleepRule(personalityRole, currentLevel);
+      system += DRAMATIC_PACING_RULE;
+    }
+
+    // ── Buradan sonrası konuşma bazında DEĞİŞEBİLEN içerik (exHistory hariç
+    // hepsi mesaj geçtikçe büyür/güncellenir) — kasıtlı olarak system'in EN
+    // SONUNA taşındı: xAI prompt-cache prefix eşleşmesi bu noktadan öncesini
+    // (yukarıdaki tüm statik kural bloklarını) korur, bu blok değiştiğinde
+    // SADECE kendisinden sonrası (turnContext zaten user mesajında, bunun
+    // dışında) geçersiz olur — bkz. design doc §3, docs.x.ai prompt-caching.
+    if (exHistory) {
+      system += `\n\n[SHARED HISTORY — reference these memories naturally in conversation]\n${exHistory}`;
+    }
+    if (memoryRows && memoryRows.length > 0) {
+      system += `\n\n[MEMORIES — facts to remember about the user/relationship]\n` +
+        memoryRows.map((m) => `- ${m.content}`).join("\n");
+    }
+    if (behaviorRows && behaviorRows.length > 0) {
+      system += `\n\n[BEHAVIOR PREFERENCES — how the user wants you to act]\n` +
+        behaviorRows.map((b) => `- ${b.content}`).join("\n");
+    }
+    if (useClientHistory && localSummary && localSummary.trim() !== "") {
+      system += `\n\n[Önceki konuşmalarınızın özeti]\n${stripVoiceTags(localSummary)}`;
     }
     if (!useClientHistory && convo.summary && convo.summary.trim() !== "") {
       system += `\n\n[Summary of your previous conversations — reference naturally, reply in the user's language regardless]\n${stripVoiceTags(convo.summary)}`;
@@ -874,14 +966,22 @@ Deno.serve(async (req: Request) => {
       // Sert yasak (önceki hali "her mesajda tekrarlama" gibi yumuşak bir
       // rica idi — model yine de neredeyse her turda aktiviteden bahsediyordu,
       // çünkü context her turda yeniden enjekte ediliyor). Artık SADECE tona
-      // yansır, kullanıcı doğrudan sormadıkça metinde HİÇ geçmez.
+      // yansır, kullanıcı doğrudan sormadıkça metinde HİÇ geçmez — TEK istisna
+      // "günün nasıl geçti" tarzı bir day-talk anı (bkz. DAY TALK EXCEPTION).
       turnContext += `\n\n[CURRENT ACTIVITY — INTERNAL, DO NOT MENTION] You ` +
         `are currently: ${currentActivity}. Let this shape your TONE ONLY ` +
         `(e.g. short/distracted if at work, relaxed/chattier if at home). ` +
         `Do NOT say, describe, or hint at what you're doing — only bring it ` +
         `up if the user explicitly asks what you're doing right now. Never ` +
         `mention it turn after turn just because it's in this context; ` +
-        `that reads robotic and repetitive.`;
+        `that reads robotic and repetitive.\n\n[DAY TALK EXCEPTION] If the ` +
+        `user asks how your day is/was, or right after YOU ask them about ` +
+        `their day, you may improvise a short, natural account of your own ` +
+        `day — consistent with the activity above and your character's ` +
+        `general schedule, but elaborated into a small, believable anecdote ` +
+        `(not just repeating the label). Never reuse the same fake day twice ` +
+        `— improvise it fresh each time, staying broadly consistent with ` +
+        `what you've said before if it comes up again.`;
     }
     if (interests.length > 0) {
       // currentActivity'nin AKSİNE tamamen susturulmuyor — kullanıcı bu
