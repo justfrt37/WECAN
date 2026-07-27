@@ -68,6 +68,40 @@ function extractJson(raw: string): any | null {
   try { return JSON.parse(match[0]); } catch { return null; }
 }
 
+// [PAUSE:n] etiketiyle bölünmüş bir cevabı zamanlı parçalara ayırır (bkz.
+// DRAMATIC_PACING_RULE). Modelin ne yazarsa yazsın: gecikme 1-5 saniyeye
+// sıkıştırılır, toplam parça sayısı 3 ile sınırlanır (3'ten fazlası son
+// parçaya birleştirilir) — savunma amaçlı, kural zaten modele bu sınırları
+// söylüyor ama sunucu asla modele güvenmez.
+function parseReplySegments(raw: string): {
+  plainText: string;
+  segments: { text: string; delaySeconds: number }[];
+} {
+  const parts = raw.split(/\[PAUSE:(\d+)\]/);
+  // split with a capturing group interleaves text/delay/text/delay/...text
+  const rawSegments: { text: string; delaySeconds: number }[] = [];
+  for (let i = 0; i < parts.length; i += 2) {
+    const text = parts[i].trim();
+    if (!text) continue;
+    const delaySeconds = i > 0 ? Math.min(5, Math.max(1, parseInt(parts[i - 1], 10) || 1)) : 0;
+    rawSegments.push({ text, delaySeconds });
+  }
+  if (rawSegments.length === 0) return { plainText: raw.trim(), segments: [] };
+  const capped = rawSegments.length > 3
+    ? [
+        ...rawSegments.slice(0, 2),
+        {
+          text: rawSegments.slice(2).map((s) => s.text).join(" "),
+          delaySeconds: rawSegments[2].delaySeconds,
+        },
+      ]
+    : rawSegments;
+  return {
+    plainText: capped.map((s) => s.text).join(" "),
+    segments: capped,
+  };
+}
+
 // İstemci tarafındaki temizleme (bkz. ChatViewModel.stripVoiceTags) sadece
 // BUNDAN SONRA yazılan yeni mesajları korur — halihazırda cihazda/summary'de
 // duran eski [laughs]/[whispers] etiketli içerik (fix'ten ÖNCE kaydedilmiş,
@@ -1040,7 +1074,12 @@ Deno.serve(async (req: Request) => {
       { role: "user", content: finalUserContent },
     ];
 
-    const reply = await callGrok(grokMessages, 600, conversationId);
+    const rawReply = await callGrok(grokMessages, 600, conversationId);
+    // [PAUSE:n] parsing only makes sense for plain-text turns — voice/image-
+    // reaction turns never get DRAMATIC_PACING_RULE injected, so `segments`
+    // is always empty for them and `replySegments` stays unset in the response.
+    const { plainText: reply, segments: replySegments } =
+      (!voiceChat && !imageReactionChat) ? parseReplySegments(rawReply) : { plainText: rawReply, segments: [] };
 
     // Gerçek atomik düşüm — cevap başarıyla üretildi, şimdi tahsil et.
     let tokenBalanceAfterCharge: number | undefined;
@@ -1091,7 +1130,7 @@ Deno.serve(async (req: Request) => {
 
     // 5) Özetleme — sadece DB modunda (clientHistory modunda istemci geçmişi yönetiyor)
     if (useClientHistory) {
-      return json({ conversationId, reply, level: newLevel, levelProgress: newProgress, wentToSleep, tokenBalance: tokenBalanceAfterCharge });
+      return json({ conversationId, reply, replySegments, level: newLevel, levelProgress: newProgress, wentToSleep, tokenBalance: tokenBalanceAfterCharge });
     }
 
     const { count: total } = await db
@@ -1149,7 +1188,7 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    return json({ conversationId, reply, level: newLevel, levelProgress: newProgress, wentToSleep, tokenBalance: tokenBalanceAfterCharge });
+    return json({ conversationId, reply, replySegments, level: newLevel, levelProgress: newProgress, wentToSleep, tokenBalance: tokenBalanceAfterCharge });
   } catch (e) {
     console.error(String(e));
     return json({ error: String(e) }, 500);
