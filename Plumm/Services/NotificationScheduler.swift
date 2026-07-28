@@ -70,15 +70,15 @@ final class NotificationScheduler {
 
     private static let likedYouIDPrefix = "notif.liked."
 
-    /// Günde bir kere çağrılır (bkz. LikedByStore.hasPickedToday) — seçilen bot
-    /// LikedByStore'a kalıcı olarak eklenir (bkz. LikesView), bir daha asla
+    /// Günde bir kere çağrılır (bkz. LikedByStore.isEligibleForPick) — seçilen
+    /// bot LikedByStore'a kalıcı olarak eklenir (bkz. LikesView), bir daha asla
     /// tekrar seçilmez. Zaten seçilmiş botlar `eligible`den hariç tutulur.
     func rescheduleLikedYou(characters: [Character]) {
-        guard !LikedByStore.hasPickedToday() else { return }
+        guard LikedByStore.isEligibleForPick() else { return }
         center.removePendingNotificationRequests(withIdentifiers: [Self.likedYouIDPrefix + "0"])
         let alreadyLiked = LikedByStore.likedCharacterIDs()
         // Saat aralığının ALT sınırını şu anki saate çek — aksi halde çekilen saat
-        // şu andan erkense iOS bildirimi YARINA atar ve hasPickedToday kilidiyle
+        // şu andan erkense iOS bildirimi YARINA atar ve günlük kilitle
         // "bugün beğenildin" hiç ateşlenmez. Gece 22'den sonra bugünkü pencere
         // kapandığı için bugüne çizelgelenecek bir şey yok, atla.
         let currentHour = Calendar.current.component(.hour, from: Date())
@@ -104,8 +104,22 @@ final class NotificationScheduler {
             return true
         }
         guard let bot = eligible.randomElement() else { return }
-        LikedByStore.recordLike(bot.id)
+        // Sonraki seçim YARININ penceresine (09:00) ötelenir — bu ekranın
+        // semantiği "günde bir beğeni" (bkz. rescheduleMissedYou'daki aynı
+        // günlük kilit). LikedByStore API'si serbest bir gecikme aldığı için
+        // günlük kilidi burada süreyi vererek kuruyoruz.
+        LikedByStore.recordLike(bot.id, nextPickDelay: Self.secondsUntilTomorrowWindow())
         scheduleLikedYou(bot: bot, slotIndex: 0, hour: hour)
+    }
+
+    /// Yarının "beğenildin" penceresinin (09:00) başlangıcına kalan süre.
+    /// Hesaplanamazsa 24 saat (güvenli varsayılan).
+    private static func secondsUntilTomorrowWindow() -> TimeInterval {
+        let cal = Calendar.current
+        guard let tomorrow = cal.date(byAdding: .day, value: 1, to: Date()),
+              let window = cal.date(bySettingHour: 9, minute: 0, second: 0, of: tomorrow)
+        else { return 24 * 60 * 60 }
+        return max(0, window.timeIntervalSinceNow)
     }
 
     private func scheduleLikedYou(bot: Character, slotIndex: Int, hour: Int) {
@@ -387,7 +401,7 @@ final class NotificationScheduler {
     /// non-ghosted, non-blocked, under-cap bots — deliberately NO sleep-
     /// schedule check, the fiction is she's texting despite the hour. Time
     /// and bot are locked in for the day once picked (mirrors
-    /// LikedByStore.hasPickedToday) so re-foregrounding doesn't reroll it.
+    /// LikedByStore.isEligibleForPick) so re-foregrounding doesn't reroll it.
     func rescheduleMissedYou(characters: [Character]) {
         guard !hasPickedMissedYouToday else { return }
         let eligible = characters.filter { character in
