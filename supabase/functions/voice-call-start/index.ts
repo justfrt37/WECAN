@@ -27,6 +27,10 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const db = createClient(SUPABASE_URL, SERVICE_ROLE, { auth: { persistSession: false } });
 
+const XAI_API_KEY = Deno.env.get("XAI_API_KEY") ?? "";
+const XAI_URL = "https://api.x.ai/v1/chat/completions";
+const MODEL = "grok-4-1-fast-non-reasoning";
+
 const ELEVENLABS_API_KEY = Deno.env.get("ELEVEN_LABS") ?? "";
 // TEMP: hardcoded instead of the ELEVENLABS_AGENT_ID secret — CLI account
 // isn't an org Owner so `supabase secrets set` is blocked. Move back to
@@ -97,6 +101,39 @@ async function finalizeOrphaned(uid: string) {
   }
 }
 
+// Generates the greeting the Agent speaks first, in-character — uses the
+// same system prompt so it matches personality/relationship level. Falls
+// back to a plain greeting if Grok fails, since a missing first message
+// isn't worth failing the whole call start over.
+async function generateFirstMessage(systemPrompt: string): Promise<string> {
+  const fallback = "Hey!";
+  try {
+    const resp = await fetch(XAI_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${XAI_API_KEY}` },
+      body: JSON.stringify({
+        model: MODEL,
+        messages: [
+          { role: "system", content: systemPrompt },
+          {
+            role: "user",
+            content: "[The call just connected. Say a short, natural opening greeting — 1 sentence, " +
+              "in character, like you just picked up the phone. Nothing else, no explanation.]",
+          },
+        ],
+        temperature: 0.9,
+        max_tokens: 40,
+      }),
+    });
+    if (!resp.ok) return fallback;
+    const data = await resp.json();
+    const text = (data?.choices?.[0]?.message?.content ?? "").trim();
+    return text || fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 async function fetchConversationToken(): Promise<{ token: string; conversationId: string }> {
   const url = `https://api.elevenlabs.io/v1/convai/conversation/token?agent_id=${ELEVENLABS_AGENT_ID}`;
   const resp = await fetch(url, { headers: { "xi-api-key": ELEVENLABS_API_KEY } });
@@ -146,6 +183,7 @@ Deno.serve(async (req: Request) => {
 
     const voiceId = character?.voice_id || elevenVoiceIdFor(personalityRole, vibe);
     const stability = stabilityFor(personalityRole);
+    const firstMessage = await generateFirstMessage(systemPrompt);
 
     const { data: session, error } = await db.from("call_sessions").insert({
       user_id: uid,
@@ -174,6 +212,7 @@ Deno.serve(async (req: Request) => {
       systemPrompt,
       voiceId,
       stability,
+      firstMessage,
     });
   } catch (e) {
     console.error(String(e));

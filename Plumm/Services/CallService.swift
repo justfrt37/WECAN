@@ -35,6 +35,7 @@ struct CallService {
         let systemPrompt: String
         let voiceId: String
         let stability: Double
+        let firstMessage: String
     }
 
     func start(characterId: String, conversationId: String?, reviewMode: Bool, language: String) async throws -> StartResult {
@@ -51,6 +52,7 @@ struct CallService {
             let systemPrompt: String
             let voiceId: String
             let stability: Double
+            let firstMessage: String
         }
         guard let decoded = try? JSONDecoder().decode(Response.self, from: data) else { throw CallServiceError.decoding }
         return StartResult(
@@ -58,7 +60,8 @@ struct CallService {
             conversationToken: decoded.conversationToken,
             systemPrompt: decoded.systemPrompt,
             voiceId: decoded.voiceId,
-            stability: decoded.stability
+            stability: decoded.stability,
+            firstMessage: decoded.firstMessage
         )
     }
 

@@ -87,7 +87,9 @@ final class CallViewModel {
         callSessionId = result.callSessionId
 
         let config = ConversationConfig(
-            agentOverrides: AgentOverrides(prompt: result.systemPrompt, language: Language(rawValue: languageCode)),
+            agentOverrides: AgentOverrides(
+                prompt: result.systemPrompt, firstMessage: result.firstMessage, language: Language(rawValue: languageCode)
+            ),
             ttsOverrides: TTSOverrides(voiceId: result.voiceId, stability: result.stability),
             customLlmExtraBody: ["callSessionId": result.callSessionId],
             onDisconnect: { [weak self] reason in
