@@ -9,6 +9,9 @@ struct VoiceCallView: View {
     @State private var viewModel: CallViewModel
     @Environment(\.dismiss) private var dismiss
     let tokenStore: TokenStore
+    @State private var typedText = ""
+    @FocusState private var textFieldFocused: Bool
+    @State private var chargeOpacity: Double = 0
 
     init(character: Character, conversationId: String?, tokenStore: TokenStore) {
         _viewModel = State(initialValue: CallViewModel(character: character, conversationId: conversationId))
@@ -46,6 +49,25 @@ struct VoiceCallView: View {
                     .font(.system(size: 15, weight: .medium))
                     .foregroundStyle(.white.opacity(0.7))
 
+                if case .ended = viewModel.state {} else {
+                    TimelineView(.periodic(from: .now, by: 1)) { _ in
+                        Text(elapsedLabel)
+                            .font(.system(size: 13, weight: .medium, design: .monospaced))
+                            .foregroundStyle(.white.opacity(0.5))
+                    }
+                }
+
+                if let tokensCharged = viewModel.tokensCharged {
+                    HStack(spacing: 4) {
+                        Image("heartCoin").resizable().scaledToFit().frame(width: 14, height: 14)
+                        Text("-\(tokensCharged)")
+                            .font(.system(size: 15, weight: .bold, design: .rounded))
+                    }
+                    .foregroundStyle(AppColor.amber)
+                    .opacity(chargeOpacity)
+                    .onAppear { withAnimation(.easeOut(duration: 0.3)) { chargeOpacity = 1 } }
+                }
+
                 Spacer()
 
                 if let errorMessage = viewModel.errorMessage {
@@ -55,6 +77,26 @@ struct VoiceCallView: View {
                         .padding(.horizontal, 32)
                         .multilineTextAlignment(.center)
                 }
+
+                HStack(spacing: 8) {
+                    TextField("Type instead of speaking…", text: $typedText)
+                        .focused($textFieldFocused)
+                        .textFieldStyle(.plain)
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 20))
+                        .submitLabel(.send)
+                        .onSubmit(sendTypedText)
+
+                    Button(action: sendTypedText) {
+                        Image(systemName: "arrow.up.circle.fill")
+                            .font(.system(size: 30))
+                            .foregroundStyle(typedText.trimmingCharacters(in: .whitespaces).isEmpty ? .white.opacity(0.3) : AppColor.pink)
+                    }
+                    .disabled(typedText.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+                .padding(.horizontal, 24)
 
                 HStack(spacing: 40) {
                     Button { viewModel.toggleMute() } label: {
@@ -80,6 +122,33 @@ struct VoiceCallView: View {
                 }
                 .padding(.bottom, 40)
             }
+
+            // TEMP DEBUG overlay — remove once voice call pipeline is verified on device.
+            VStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("DEBUG")
+                        .font(.system(size: 12, weight: .heavy))
+                        .foregroundStyle(.yellow)
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 2) {
+                            ForEach(Array(viewModel.debugLog.enumerated()), id: \.offset) { _, line in
+                                Text(line)
+                                    .font(.system(size: 10, design: .monospaced))
+                                    .foregroundStyle(.white)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .frame(maxHeight: 180)
+                }
+                .padding(8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(.black.opacity(0.75), in: RoundedRectangle(cornerRadius: 8))
+                .padding(.horizontal, 12)
+                .padding(.top, 8)
+                Spacer()
+            }
         }
         .onAppear {
             viewModel.tokenStore = tokenStore
@@ -88,7 +157,10 @@ struct VoiceCallView: View {
         .onChange(of: viewModel.state) { _, newState in
             if case .ended = newState {
                 Task {
-                    try? await Task.sleep(nanoseconds: 800_000_000)
+                    // Longer when there's a charge to show — give the "-N" fade-in
+                    // time to actually be seen before the screen disappears.
+                    let delay: UInt64 = viewModel.tokensCharged != nil ? 1_600_000_000 : 800_000_000
+                    try? await Task.sleep(nanoseconds: delay)
                     dismiss()
                 }
             }
@@ -96,6 +168,19 @@ struct VoiceCallView: View {
         .onDisappear {
             Task { await viewModel.endCall() }
         }
+    }
+
+    private func sendTypedText() {
+        let text = typedText
+        guard !text.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+        typedText = ""
+        textFieldFocused = false
+        Task { await viewModel.sendTypedText(text) }
+    }
+
+    private var elapsedLabel: String {
+        let total = Int(viewModel.elapsedSeconds)
+        return String(format: "%02d:%02d", total / 60, total % 60)
     }
 
     private var statusLabel: String {

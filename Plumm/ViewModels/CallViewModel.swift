@@ -31,6 +31,11 @@ final class CallViewModel {
     var state: CallState = .idle
     var isMuted: Bool = false
     var errorMessage: String?
+    /// Tokens charged for this call, set right before `state` becomes
+    /// `.ended` — VoiceCallView shows a brief "-N" animation from this
+    /// (unlike TokenBadge's app-wide silent-spend convention, a call's
+    /// cost is variable/unpredictable so it's worth confirming on-screen).
+    var tokensCharged: Int?
 
     // TEMP DEBUG — remove once voice call pipeline is verified on device.
     var debugLog: [String] = []
@@ -158,6 +163,7 @@ final class CallViewModel {
             do {
                 let result = try await service.end(callSessionId: callSessionId, actualElapsedSeconds: finalElapsed)
                 debug("voice-call-end: charged \(result.tokensCharged) tokens, newBalance=\(result.newBalance)")
+                tokensCharged = result.tokensCharged
                 tokenStore?.setBalance(result.newBalance)
             } catch {
                 debug("voice-call-end FAILED: \(error)")
