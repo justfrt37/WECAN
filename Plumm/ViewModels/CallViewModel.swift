@@ -96,11 +96,11 @@ final class CallViewModel {
             onError: { [weak self] error in
                 Task { @MainActor in self?.debug("SDK error: \(error)") }
             },
-            onUserTranscript: { [weak self] text, _ in
-                Task { @MainActor in self?.debug("User said: \"\(text)\"") }
-            },
             onAgentResponse: { [weak self] text, _ in
                 Task { @MainActor in self?.debug("Agent said: \"\(text)\"") }
+            },
+            onUserTranscript: { [weak self] text, _ in
+                Task { @MainActor in self?.debug("User said: \"\(text)\"") }
             },
             onAgentStateChange: { [weak self] agentState in
                 Task { @MainActor in self?.applyAgentState(agentState) }
