@@ -69,9 +69,6 @@ enum Config {
     static var voiceCallStartFunctionURL: URL {
         URL(string: "\(supabaseURL)/functions/v1/voice-call-start")!
     }
-    static var voiceCallTurnFunctionURL: URL {
-        URL(string: "\(supabaseURL)/functions/v1/voice-call-turn")!
-    }
     static var voiceCallCheckpointFunctionURL: URL {
         URL(string: "\(supabaseURL)/functions/v1/voice-call-checkpoint")!
     }
