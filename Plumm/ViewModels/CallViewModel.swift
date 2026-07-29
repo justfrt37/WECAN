@@ -1,10 +1,14 @@
 //
 //  CallViewModel.swift
-//  Real-time voice call durumu: listening -> thinking -> speaking, barge-in destekli.
+//  Real-time voice call durumu, backed by an ElevenLabs Agents session
+//  (Flash v2.5). The SDK (built on LiveKit WebRTC) owns mic capture, ASR,
+//  TTS playback, and barge-in natively — this class just wires our token
+//  billing and DEBUG logging around it. See
+//  docs/superpowers/specs/2026-07-29-voice-call-agents-migration-design.md.
 //
 
 import Foundation
-import AVFoundation
+import ElevenLabs
 import Observation
 
 enum CallState: Equatable {
@@ -19,7 +23,7 @@ enum CallState: Equatable {
 
 @MainActor
 @Observable
-final class CallViewModel: NSObject, AVAudioPlayerDelegate {
+final class CallViewModel {
     let character: Character
     let conversationId: String?
     var tokenStore: TokenStore?
@@ -28,176 +32,150 @@ final class CallViewModel: NSObject, AVAudioPlayerDelegate {
     var isMuted: Bool = false
     var errorMessage: String?
 
+    // TEMP DEBUG — remove once voice call pipeline is verified on device.
+    var debugLog: [String] = []
+    private func debug(_ s: String) { debugLog.append(s) }
+
     private let service = CallService()
-    private let recognizer = SpeechRecognizer()
-    private var player: AVAudioPlayer?
+    private var conversation: Conversation?
 
     private var callSessionId: String?
     private var callStartedAt: Date?
     private var checkpointTask: Task<Void, Never>?
-    private var turnLoopTask: Task<Void, Never>?
-    private var bargeInWatchTask: Task<Void, Never>?
 
     init(character: Character, conversationId: String?) {
         self.character = character
         self.conversationId = conversationId
     }
 
-    private var elapsedSeconds: Double {
+    var elapsedSeconds: Double {
         guard let callStartedAt else { return 0 }
         return Date().timeIntervalSince(callStartedAt)
     }
 
-    func startCall() async {
-        await recognizer.requestAuthorization()
-        guard recognizer.authorized else {
-            errorMessage = String(localized: "Microphone/Speech access is required for calls.")
-            state = .ended(reason: .error)
-            return
-        }
-        do {
-            let session = AVAudioSession.sharedInstance()
-            try session.setCategory(.playAndRecord, mode: .voiceChat, options: [.duckOthers, .allowBluetooth, .defaultToSpeaker])
-            try session.setActive(true, options: .notifyOthersOnDeactivation)
-        } catch {
-            errorMessage = String(localized: "Couldn't start the call's audio session.")
-            state = .ended(reason: .error)
-            return
-        }
+    private var isEnded: Bool {
+        if case .ended = state { return true }
+        return false
+    }
 
+    func startCall() async {
+        debug("Calling voice-call-start…")
+        let result: CallService.StartResult
         do {
-            callSessionId = try await service.start(characterId: character.id.uuidString.lowercased(), conversationId: conversationId)
+            result = try await service.start(
+                characterId: character.id.uuidString.lowercased(),
+                conversationId: conversationId,
+                reviewMode: ReviewModeService.isEnabledSnapshot
+            )
+            debug("Call started, session \(result.callSessionId)")
         } catch CallServiceError.insufficientTokens {
+            debug("voice-call-start: insufficient tokens")
             state = .ended(reason: .insufficientTokens)
             return
         } catch {
+            debug("voice-call-start failed: \(error)")
             errorMessage = String(localized: "Couldn't start the call.")
+            state = .ended(reason: .error)
+            return
+        }
+        callSessionId = result.callSessionId
+
+        let config = ConversationConfig(
+            agentOverrides: AgentOverrides(prompt: result.systemPrompt),
+            ttsOverrides: TTSOverrides(voiceId: result.voiceId, stability: result.stability),
+            customLlmExtraBody: ["callSessionId": result.callSessionId],
+            onDisconnect: { [weak self] reason in
+                Task { @MainActor in self?.handleDisconnect(reason) }
+            },
+            onError: { [weak self] error in
+                Task { @MainActor in self?.debug("SDK error: \(error)") }
+            },
+            onUserTranscript: { [weak self] text, _ in
+                Task { @MainActor in self?.debug("User said: \"\(text)\"") }
+            },
+            onAgentResponse: { [weak self] text, _ in
+                Task { @MainActor in self?.debug("Agent said: \"\(text)\"") }
+            },
+            onAgentStateChange: { [weak self] agentState in
+                Task { @MainActor in self?.applyAgentState(agentState) }
+            }
+        )
+
+        do {
+            debug("Connecting to ElevenLabs Agent…")
+            conversation = try await ElevenLabs.startConversation(
+                conversationToken: result.conversationToken, config: config
+            )
+            debug("Agent connected")
+        } catch {
+            debug("ElevenLabs connect failed: \(error)")
+            errorMessage = String(localized: "Couldn't connect the call.")
             state = .ended(reason: .error)
             return
         }
 
         callStartedAt = Date()
+        state = .listening
         startCheckpointLoop()
-        turnLoopTask = Task { await runListenTurn() }
+    }
+
+    private func applyAgentState(_ agentState: ElevenLabs.AgentState) {
+        guard !isEnded else { return }
+        switch agentState {
+        case .listening: state = .listening
+        case .thinking: state = .thinking
+        case .speaking: state = .speaking
+        }
+    }
+
+    private func handleDisconnect(_ reason: DisconnectionReason) {
+        guard !isEnded else { return }
+        debug("Disconnected: \(reason)")
+        if reason == .error {
+            errorMessage = String(localized: "The call was disconnected.")
+            state = .ended(reason: .error)
+        } else {
+            state = .ended(reason: .userEnded)
+        }
     }
 
     func endCall() async {
         checkpointTask?.cancel()
-        turnLoopTask?.cancel()
-        bargeInWatchTask?.cancel()
-        recognizer.cancel()
-        player?.stop()
-        player = nil
+        await conversation?.endConversation()
+        conversation = nil
 
         let finalElapsed = elapsedSeconds
+        debug("Ending call, elapsedSeconds=\(finalElapsed)")
         if let callSessionId {
-            if let result = try? await service.end(callSessionId: callSessionId, actualElapsedSeconds: finalElapsed) {
+            do {
+                let result = try await service.end(callSessionId: callSessionId, actualElapsedSeconds: finalElapsed)
+                debug("voice-call-end: charged \(result.tokensCharged) tokens, newBalance=\(result.newBalance)")
                 tokenStore?.setBalance(result.newBalance)
+            } catch {
+                debug("voice-call-end FAILED: \(error)")
             }
+        } else {
+            debug("Ending call: no callSessionId — never started, nothing to charge")
         }
-        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
-        if case .ended = state {} else { state = .ended(reason: .userEnded) }
+        if !isEnded { state = .ended(reason: .userEnded) }
     }
 
     func toggleMute() {
         isMuted.toggle()
-        if isMuted { recognizer.cancel() }
+        Task { try? await conversation?.setMuted(isMuted) }
     }
 
-    // MARK: - Turn loop
-
-    private func runListenTurn() async {
-        guard !isMuted else {
-            try? await Task.sleep(nanoseconds: 300_000_000)
-            if !Task.isCancelled { turnLoopTask = Task { await self.runListenTurn() } }
-            return
-        }
-        state = .listening
-        recognizer.start(configuresSession: false)
-
-        while recognizer.isRecording, !Task.isCancelled {
-            try? await Task.sleep(nanoseconds: 150_000_000)
-        }
-        guard !Task.isCancelled else { return }
-
-        let transcript = recognizer.transcript.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !transcript.isEmpty, let callSessionId else {
-            turnLoopTask = Task { await self.runListenTurn() }
-            return
-        }
-
-        state = .thinking
+    /// Text fallback for a turn — same pipeline as a spoken turn (the Agent
+    /// treats it identically to a transcribed utterance).
+    func sendTypedText(_ text: String) async {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, let conversation else { return }
+        debug("Typed: \"\(trimmed)\"")
         do {
-            let result = try await service.sendTurn(
-                callSessionId: callSessionId, transcript: transcript, reviewMode: ReviewModeService.isEnabledSnapshot
-            )
-            guard !Task.isCancelled else { return }
-            await speak(result.audioData)
+            try await conversation.sendMessage(trimmed)
         } catch {
-            guard !Task.isCancelled else { return }
-            errorMessage = String(localized: "That turn failed — try speaking again.")
-            turnLoopTask = Task { await self.runListenTurn() }
-        }
-    }
-
-    private func speak(_ audioData: Data) async {
-        state = .speaking
-        do {
-            let p = try AVAudioPlayer(data: audioData)
-            p.delegate = self
-            player = p
-            p.play()
-        } catch {
-            turnLoopTask = Task { await self.runListenTurn() }
-            return
-        }
-
-        // Barge-in watcher: reuse the SAME recognizer instance concurrently
-        // with playback (duplex session from startCall handles echo
-        // cancellation) — any non-trivial partial transcript while `speaking`
-        // means the user started talking over the AI.
-        recognizer.start(configuresSession: false)
-        bargeInWatchTask = Task {
-            while state == .speaking, !Task.isCancelled {
-                if recognizer.transcript.trimmingCharacters(in: .whitespacesAndNewlines).count > 2 {
-                    player?.stop()
-                    player = nil
-                    state = .listening
-                    // Recognizer keeps running — its current session becomes
-                    // this next turn's capture, picked up by the poll loop below.
-                    while recognizer.isRecording, !Task.isCancelled {
-                        try? await Task.sleep(nanoseconds: 150_000_000)
-                    }
-                    guard !Task.isCancelled else { return }
-                    let transcript = recognizer.transcript.trimmingCharacters(in: .whitespacesAndNewlines)
-                    guard !transcript.isEmpty, let callSessionId else {
-                        turnLoopTask = Task { await self.runListenTurn() }
-                        return
-                    }
-                    state = .thinking
-                    do {
-                        let result = try await service.sendTurn(
-                            callSessionId: callSessionId, transcript: transcript, reviewMode: ReviewModeService.isEnabledSnapshot
-                        )
-                        await speak(result.audioData)
-                    } catch {
-                        errorMessage = String(localized: "That turn failed — try speaking again.")
-                        turnLoopTask = Task { await self.runListenTurn() }
-                    }
-                    return
-                }
-                try? await Task.sleep(nanoseconds: 150_000_000)
-            }
-        }
-    }
-
-    nonisolated func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
-        Task { @MainActor in
-            guard self.state == .speaking else { return }
-            self.bargeInWatchTask?.cancel()
-            self.recognizer.cancel() // discard the barge-in listener session, start fresh next turn
-            self.player = nil
-            self.turnLoopTask = Task { await self.runListenTurn() }
+            debug("sendMessage failed: \(error)")
+            errorMessage = String(localized: "That message failed — try again.")
         }
     }
 
