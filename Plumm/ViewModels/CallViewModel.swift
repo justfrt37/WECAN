@@ -120,6 +120,25 @@ final class CallViewModel {
                 conversationToken: result.conversationToken, config: config
             )
             debug("Agent connected")
+        } catch ConversationError.microphoneToggleFailed(let reason) {
+            // Mic unavailable (permission denied, hardware issue, or — on
+            // Simulator — the known-flaky audio HAL) shouldn't kill the call;
+            // fall back to text-only so the app's typed-message path still works.
+            debug("Mic unavailable (\(reason)) — retrying text-only")
+            errorMessage = String(localized: "Microphone unavailable — continuing with text only.")
+            var textOnlyConfig = config
+            textOnlyConfig.conversationOverrides = ConversationOverrides(textOnly: true)
+            do {
+                conversation = try await ElevenLabs.startConversation(
+                    conversationToken: result.conversationToken, config: textOnlyConfig
+                )
+                debug("Agent connected (text-only)")
+            } catch {
+                debug("Text-only retry failed: \(error)")
+                errorMessage = String(localized: "Couldn't connect the call.")
+                state = .ended(reason: .error)
+                return
+            }
         } catch {
             debug("ElevenLabs connect failed: \(error)")
             errorMessage = String(localized: "Couldn't connect the call.")
