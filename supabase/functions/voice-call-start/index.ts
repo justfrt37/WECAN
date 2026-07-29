@@ -28,7 +28,10 @@ const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const db = createClient(SUPABASE_URL, SERVICE_ROLE, { auth: { persistSession: false } });
 
 const ELEVENLABS_API_KEY = Deno.env.get("ELEVEN_LABS") ?? "";
-const ELEVENLABS_AGENT_ID = Deno.env.get("ELEVENLABS_AGENT_ID") ?? "";
+// TEMP: hardcoded instead of the ELEVENLABS_AGENT_ID secret — CLI account
+// isn't an org Owner so `supabase secrets set` is blocked. Move back to
+// Deno.env.get("ELEVENLABS_AGENT_ID") once secret write access is sorted.
+const ELEVENLABS_AGENT_ID = Deno.env.get("ELEVENLABS_AGENT_ID") ?? "agent_5701kyp1mydkfqnsfn9zw0c2jbqn";
 
 const TOKENS_PER_SECOND = 3;
 const MIN_START_BALANCE = 30; // ~10s of call time
