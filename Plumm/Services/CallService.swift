@@ -37,8 +37,8 @@ struct CallService {
         let stability: Double
     }
 
-    func start(characterId: String, conversationId: String?, reviewMode: Bool) async throws -> StartResult {
-        var body: [String: Any] = ["characterId": characterId, "reviewMode": reviewMode]
+    func start(characterId: String, conversationId: String?, reviewMode: Bool, language: String) async throws -> StartResult {
+        var body: [String: Any] = ["characterId": characterId, "reviewMode": reviewMode, "language": language]
         if let conversationId { body["conversationId"] = conversationId }
         let (data, http) = try await request(url: Config.voiceCallStartFunctionURL, body: body)
         if http.statusCode == 402 { throw CallServiceError.insufficientTokens }
