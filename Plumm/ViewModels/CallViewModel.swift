@@ -59,13 +59,19 @@ final class CallViewModel {
     }
 
     func startCall() async {
-        debug("Calling voice-call-start…")
+        // Chat's own detected language for this character (falls back to
+        // device locale if there's no chat history yet) — same 7-language
+        // set + ISO codes as ElevenLabs' `Language` enum, so no translation
+        // table needed between the two.
+        let languageCode = ConversationLanguage.current(for: character.id)
+        debug("Calling voice-call-start… (language: \(languageCode))")
         let result: CallService.StartResult
         do {
             result = try await service.start(
                 characterId: character.id.uuidString.lowercased(),
                 conversationId: conversationId,
-                reviewMode: ReviewModeService.isEnabledSnapshot
+                reviewMode: ReviewModeService.isEnabledSnapshot,
+                language: languageCode
             )
             debug("Call started, session \(result.callSessionId)")
         } catch CallServiceError.insufficientTokens {
@@ -81,7 +87,7 @@ final class CallViewModel {
         callSessionId = result.callSessionId
 
         let config = ConversationConfig(
-            agentOverrides: AgentOverrides(prompt: result.systemPrompt),
+            agentOverrides: AgentOverrides(prompt: result.systemPrompt, language: Language(rawValue: languageCode)),
             ttsOverrides: TTSOverrides(voiceId: result.voiceId, stability: result.stability),
             customLlmExtraBody: ["callSessionId": result.callSessionId],
             onDisconnect: { [weak self] reason in

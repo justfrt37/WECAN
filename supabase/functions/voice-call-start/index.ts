@@ -35,6 +35,24 @@ const MIN_START_BALANCE = 30; // ~10s of call time
 
 // Replaces the old VOICE_TAGS_RULE — Flash v2.5 doesn't support [bracket]
 // audio tags, so emotion has to come through word choice/punctuation instead.
+// ISO 639-1 code -> display name, matching Plumm/Services/ConversationLanguage.swift's
+// `supported` set exactly (tr/en/de/es/fr/it/pt) — client detects the code
+// from chat history (or device locale if the chat is empty) and sends it here.
+const LANGUAGE_NAMES: Record<string, string> = {
+  tr: "Turkish", en: "English", de: "German", es: "Spanish", fr: "French", it: "Italian", pt: "Portuguese",
+};
+
+function languageRule(code: string): string {
+  const name = LANGUAGE_NAMES[code];
+  if (!name) return "";
+  return (
+    `\n\nLANGUAGE RULE: This call is in ${name} — this was determined from the user's ` +
+    "own chat history, not a guess. Speak ONLY in it, never mix in another language, " +
+    "never comment on the language itself. Sound like a real person on a phone call " +
+    "in that language — warm, colloquial, never robotic."
+  );
+}
+
 const VOICE_CALL_STYLE_RULE =
   "\n\nSES TARZI KURALI: Bu cevap gerçek zamanlı bir telefon görüşmesinde SESLENDİRİLECEK " +
   "(ElevenLabs Flash modeli, köşeli parantez etiketleri DESTEKLENMİYOR). Duyguyu etiketlerle " +
@@ -98,6 +116,7 @@ Deno.serve(async (req: Request) => {
     const characterId: string = body.characterId;
     const conversationId: string | undefined = body.conversationId;
     const reviewMode: boolean = body.reviewMode === true;
+    const language: string = body.language ?? "en";
     if (!characterId) return json({ error: "characterId required" }, 400);
     if (!ELEVENLABS_AGENT_ID) return json({ error: "ELEVENLABS_AGENT_ID not configured" }, 500);
 
@@ -120,6 +139,7 @@ Deno.serve(async (req: Request) => {
     systemPrompt += memoriesBlock(memories);
     systemPrompt += behaviorsBlock(behaviors);
     systemPrompt += VOICE_CALL_STYLE_RULE;
+    systemPrompt += languageRule(language);
 
     const voiceId = character?.voice_id || elevenVoiceIdFor(personalityRole, vibe);
     const stability = stabilityFor(personalityRole);
