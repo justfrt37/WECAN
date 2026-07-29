@@ -1,6 +1,9 @@
 //
 //  CallService.swift
-//  Real-time voice call Edge Functions ile konuşur (voice-call-start/turn/checkpoint/end).
+//  Real-time voice call Edge Functions ile konuşur (voice-call-start/checkpoint/end).
+//  Per-turn LLM/TTS is no longer client-driven — voice-call-start now returns
+//  everything needed (system prompt, voice, ElevenLabs conversation token) to
+//  open an ElevenLabs Agents session directly (bkz. CallViewModel).
 //
 
 import Foundation
@@ -26,32 +29,37 @@ struct CallService {
         return (data, http)
     }
 
-    func start(characterId: String, conversationId: String?) async throws -> String {
-        var body: [String: Any] = ["characterId": characterId]
+    struct StartResult {
+        let callSessionId: String
+        let conversationToken: String
+        let systemPrompt: String
+        let voiceId: String
+        let stability: Double
+    }
+
+    func start(characterId: String, conversationId: String?, reviewMode: Bool) async throws -> StartResult {
+        var body: [String: Any] = ["characterId": characterId, "reviewMode": reviewMode]
         if let conversationId { body["conversationId"] = conversationId }
         let (data, http) = try await request(url: Config.voiceCallStartFunctionURL, body: body)
         if http.statusCode == 402 { throw CallServiceError.insufficientTokens }
         guard http.statusCode == 200 else {
             throw CallServiceError.badStatus(http.statusCode, String(data: data, encoding: .utf8) ?? "")
         }
-        struct Response: Decodable { let callSessionId: String }
-        guard let decoded = try? JSONDecoder().decode(Response.self, from: data) else { throw CallServiceError.decoding }
-        return decoded.callSessionId
-    }
-
-    func sendTurn(callSessionId: String, transcript: String, reviewMode: Bool) async throws -> (replyText: String, audioData: Data) {
-        let body: [String: Any] = [
-            "callSessionId": callSessionId, "userTranscript": transcript, "reviewMode": reviewMode,
-        ]
-        let (data, http) = try await request(url: Config.voiceCallTurnFunctionURL, body: body)
-        guard http.statusCode == 200 else {
-            throw CallServiceError.badStatus(http.statusCode, String(data: data, encoding: .utf8) ?? "")
+        struct Response: Decodable {
+            let callSessionId: String
+            let conversationToken: String
+            let systemPrompt: String
+            let voiceId: String
+            let stability: Double
         }
-        struct Response: Decodable { let replyText: String; let audioBase64: String }
-        guard let decoded = try? JSONDecoder().decode(Response.self, from: data),
-              let audioData = Data(base64Encoded: decoded.audioBase64)
-        else { throw CallServiceError.decoding }
-        return (decoded.replyText, audioData)
+        guard let decoded = try? JSONDecoder().decode(Response.self, from: data) else { throw CallServiceError.decoding }
+        return StartResult(
+            callSessionId: decoded.callSessionId,
+            conversationToken: decoded.conversationToken,
+            systemPrompt: decoded.systemPrompt,
+            voiceId: decoded.voiceId,
+            stability: decoded.stability
+        )
     }
 
     func checkpoint(callSessionId: String, elapsedSeconds: Double) async throws -> Bool {
