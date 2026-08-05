@@ -886,7 +886,15 @@ Deno.serve(async (req: Request) => {
           await db.from("messages").insert({ conversation_id: convo.id, role: "assistant", content: url, kind: "image" });
         }
       } else {
-        await db.from("messages").insert({ conversation_id: convo.id, role: "assistant", content: prompt, kind: "image_pending" });
+        // Kullanıcının asıl isteği daha önce HİÇ kaydedilmiyordu (yalnızca
+        // kilitli asistan balonu, role="assistant" — kullanıcının kendi turu
+        // messages tablosunda hiç yoktu). `kind: "image_request"` ile burada
+        // gerçek bir user satırı da ekleniyor (bkz. kullanıcı talebi: "eksik
+        // mesajlar" + "isteğin türünü etiketle").
+        await db.from("messages").insert([
+          { conversation_id: convo.id, role: "user", content: prompt, kind: "image_request" },
+          { conversation_id: convo.id, role: "assistant", content: prompt, kind: "image_pending" },
+        ]);
       }
       await db.from("conversations").update({ updated_at: new Date().toISOString() }).eq("id", convo.id);
       return json({ ok: true, conversationId: convo.id });
@@ -911,7 +919,13 @@ Deno.serve(async (req: Request) => {
           await db.from("messages").insert({ conversation_id: convo.id, role: "assistant", content: url, kind: "voice" });
         }
       } else {
-        await db.from("messages").insert({ conversation_id: convo.id, role: "assistant", content: reqText, kind: "voice_pending" });
+        // Foto ile aynı sorun: kullanıcının isteği hiç kaydedilmiyordu (yalnızca
+        // kilitli asistan balonu). `kind: "voice_request"` ile gerçek user satırı
+        // eklenir (bkz. kullanıcı talebi: "eksik mesajlar" + "isteğin türünü etiketle").
+        await db.from("messages").insert([
+          { conversation_id: convo.id, role: "user", content: reqText, kind: "voice_request" },
+          { conversation_id: convo.id, role: "assistant", content: reqText, kind: "voice_pending" },
+        ]);
       }
       await db.from("conversations").update({ updated_at: new Date().toISOString() }).eq("id", convo.id);
       return json({ ok: true, conversationId: convo.id });
