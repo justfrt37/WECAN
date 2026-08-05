@@ -10,8 +10,7 @@
 -- (auth.uid() = user_id). Yalnızca RLS'i açmak onu etkinleştirir.
 alter table conversations enable row level security;
 
--- conversation_behaviors + shot_templates: client HİÇ erişmiyor (yalnızca
--- sunucu/service-role). RLS açık + policy yok → client erişimi kapalı,
--- sunucu baypas eder. (Global referans verisi; kullanıcıya özel değil.)
+-- conversation_behaviors: client HİÇ erişmiyor (yalnızca sunucu/service-role).
+-- RLS açık + policy yok → client erişimi kapalı, sunucu baypas eder.
+-- (Global referans verisi; kullanıcıya özel değil.)
 alter table conversation_behaviors enable row level security;
-alter table shot_templates enable row level security;

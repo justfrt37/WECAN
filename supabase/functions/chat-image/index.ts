@@ -692,14 +692,17 @@ Deno.serve(async (req: Request) => {
       convo = ins.data!;
     }
 
-    const { error: insErr } = await db.from("generated_photos").insert({
+    // `generated_photos` was dropped (014_drop_generated_photos.sql) — per-user
+    // delivery record now lives as its own `character_photos` row (user_id set,
+    // not the shared catalog row), so GalleryView's "Your Photos" tab can read it.
+    const { error: insErr } = await db.from("character_photos").insert({
       conversation_id: convo.id,
       character_id: characterId,
       user_id: uid,
       url: photoUrl,
       is_private: isPrivate,
     });
-    if (insErr) console.error("generated_photos insert failed:", insErr.message);
+    if (insErr) console.error("character_photos insert failed:", insErr.message);
 
     const charge = await chargeOrReject(uid, 25, "photo");
     return json({ url: photoUrl, redirected, tokenBalance: charge.ok ? charge.balance : undefined });
