@@ -157,7 +157,7 @@ struct ChatView: View {
             VoiceCallView(character: viewModel.character, conversationId: nil, tokenStore: tokenStore)
         }
         // PRO gerektiren her yerde onboarding paywall'ı (alttan fullscreen) açılır.
-        .fullScreenCover(isPresented: $viewModel.showPaywall) { OnboardingPaywallView() }
+        .fullScreenCover(isPresented: $viewModel.showPaywall) { OnboardingPaywallView(preselectedTier: viewModel.paywallTier) }
         .fullScreenCover(isPresented: Binding(
             get: { fullscreenImageURL != nil },
             set: { if !$0 { fullscreenImageURL = nil } }
@@ -318,23 +318,20 @@ struct ChatView: View {
                 // alta sarmak yerine font küçülterek tek satırda sığar.
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-                // PRO değilse coin (kalp) rozeti yerine PRO butonu; PRO ise coin
-                // rozeti. Ayarlar hep yanında (bkz. kullanıcı talebi). Sohbette
-                // global overlay rozeti gizli (bkz. MainTabView).
+                // PRO rozeti/butonu artık SADECE Profile sekmesinde (bkz.
+                // MainTabView, kullanıcı talebi) — sohbet header'ı PRO olsun
+                // olmasın hep coin rozetini gösterir.
                 // Sesli arama Pro+ / Pro Max hakkı (Pro'da YOK, bkz.
                 // _shared/entitlements.ts) — hakkı olmayana paywall açılır.
                 headerButton("phone.fill", action: {
                     if PurchaseService.shared.canUseVoice {
                         showVoiceCall = true
                     } else {
+                        viewModel.paywallTier = .proPlus
                         viewModel.showPaywall = true
                     }
                 })
-                if PurchaseService.shared.isPro {
-                    TokenBadge(tokenStore: tokenStore) { showTokenStore = true }
-                } else {
-                    chatProButton
-                }
+                TokenBadge(tokenStore: tokenStore) { showTokenStore = true }
                 headerButton("gearshape.fill", menu: true)
             }
         }
@@ -344,25 +341,6 @@ struct ChatView: View {
         // yer açar, bkz. MainTabView coin overlay trailing padding).
         .padding(.trailing, 14)
         .padding(.vertical, 8)
-    }
-
-    /// PRO değilken chat header'ında coin rozeti yerine görünen PRO butonu —
-    /// onboarding paywall'ını açar (MainTabView'daki tab-kökü PRO butonuyla aynı).
-    private var chatProButton: some View {
-        Button { viewModel.showPaywall = true } label: {
-            HStack(spacing: 5) {
-                Image(systemName: "crown.fill").font(.system(size: 12, weight: .bold))
-                Text("PRO").font(.system(size: 13, weight: .heavy))
-            }
-            .foregroundStyle(.white)
-            .padding(.horizontal, 13).padding(.vertical, 7)
-            .background(
-                LinearGradient(colors: [Color(hex: 0xFFAF5C), Color(hex: 0xFF6F61)],
-                               startPoint: .leading, endPoint: .trailing),
-                in: Capsule()
-            )
-        }
-        .buttonStyle(.plain)
     }
 
     private var avatarWithLevel: some View {
@@ -828,7 +806,19 @@ private struct ChatBubble: View {
                     .onTapGesture { onRetry?() }
             }
 
-            if message.isPendingImage {
+            if message.isExpiredUserPhoto == true {
+                HStack(spacing: 8) {
+                    Image(systemName: "photo.badge.exclamationmark")
+                        .foregroundStyle(.white.opacity(0.6))
+                    Text("Photo expired")
+                        .font(.system(size: 14))
+                        .foregroundStyle(.white.opacity(0.6))
+                }
+                .padding(.horizontal, 14).padding(.vertical, 10)
+                .background(AppColor.card)
+                .clipShape(.rect(topLeadingRadius: 16, bottomLeadingRadius: 4,
+                                 bottomTrailingRadius: 16, topTrailingRadius: 16))
+            } else if message.isPendingImage {
                 PendingImageBubble(backdropURL: characterPhotoURL,
                                     isGenerating: isGeneratingImage,
                                     onTap: { onGenerateImage?() })

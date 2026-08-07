@@ -47,13 +47,17 @@ struct Message: Identifiable, Codable, Hashable {
     /// bkz. ChatViewModel.isInsufficientTokensError) — balon üzerinde bir hata
     /// göstergesi gösterilir, dokununca yeniden denenir (bkz. ChatViewModel.retrySend).
     var failed: Bool?
+    /// Kullanıcının bota gönderdiği fotoğraf 7 gün sonra süpürülüp (bkz.
+    /// sweepExpiredUserPhotos, migration 020_user_sent_photos.sql) yerine
+    /// bu bayrak geldiyse true — balonda "Photo expired" yer tutucusu gösterilir.
+    var isExpiredUserPhoto: Bool?
 
     init(
         id: UUID = UUID(), role: ChatRole, content: String, createdAt: Date = Date(),
         imageURL: URL? = nil, voiceLocalPath: String? = nil, voiceDuration: Double? = nil,
         voiceRemoteURL: URL? = nil,
         localImagePath: String? = nil, pendingImagePrompt: String? = nil, pendingVoiceRequest: Bool? = nil,
-        failed: Bool? = nil
+        failed: Bool? = nil, isExpiredUserPhoto: Bool? = nil
     ) {
         self.id = id
         self.role = role
@@ -67,6 +71,7 @@ struct Message: Identifiable, Codable, Hashable {
         self.pendingImagePrompt = pendingImagePrompt
         self.pendingVoiceRequest = pendingVoiceRequest
         self.failed = failed
+        self.isExpiredUserPhoto = isExpiredUserPhoto
     }
 
     /// Sunucudan gelen bir satırdan (role/content/kind) görüntülenebilir Message
@@ -94,12 +99,24 @@ struct Message: Identifiable, Codable, Hashable {
         if kind == "voice_pending" {
             return Message(role: r, content: "", createdAt: createdAt, pendingVoiceRequest: true)
         }
+        // Kullanıcının bota gönderdiği, sunucuda KALICI hale getirilmiş fotoğraf
+        // (bkz. chat/index.ts persistUserPhoto) — content = imzalı Storage URL,
+        // her history isteğinde taze üretilir. `role` zaten "user" olduğundan
+        // botun kendi ürettiği `kind == "image"` (role "assistant") ile
+        // karışmaz, aynı `imageURL` alanı + bubble'ı güvenle paylaşılır.
+        if kind == "user_photo", let url = URL(string: content) {
+            return Message(role: r, content: "", createdAt: createdAt, imageURL: url)
+        }
+        // 7 gün dolup süpürülmüş — yer tutucu balon (bkz. sweepExpiredUserPhotos).
+        if kind == "user_photo_expired" {
+            return Message(role: r, content: "", createdAt: createdAt, isExpiredUserPhoto: true)
+        }
         return Message(role: r, content: content, createdAt: createdAt)
     }
 
     var isUser: Bool { role == .user }
     var isVoice: Bool { voiceLocalPath != nil || voiceRemoteURL != nil }
-    var isUserPhoto: Bool { localImagePath != nil }
+    var isUserPhoto: Bool { localImagePath != nil || (imageURL != nil && role == .user) }
     var isPendingImage: Bool { pendingImagePrompt != nil && imageURL == nil }
     var isPendingVoice: Bool { pendingVoiceRequest == true && voiceLocalPath == nil && voiceRemoteURL == nil }
     /// Henüz içeriği/sonucu olmayan bir istek balonu — Grok'a giden wire

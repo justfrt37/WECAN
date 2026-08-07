@@ -150,12 +150,15 @@ struct MainTabView: View {
         // böylece ChatView push edilince (kök yerini alınca) rozet KAYBOLMAZ,
         // her zaman en üstte kalır (bkz. tasarım: "chat içinde de görünmeli").
         .overlay(alignment: .topTrailing) {
-            // Yalnızca sekme KÖKLERİNDE (path boş): PRO değilse PRO butonu, değilse
-            // token rozeti. Sohbette (path boş değil) bu overlay GİZLİ — coin +
-            // Ayarlar ChatView header'ında birlikte durur (aynı hizada, bkz. ChatView).
+            // Yalnızca sekme KÖKLERİNDE (path boş). PRO rozeti/butonu artık
+            // SADECE Profile sekmesinde görünür — eskiden HER sekmede (Discover/
+            // Chat/Explore/Likes de dahil) nagging gibi görünüyordu (bkz.
+            // kullanıcı talebi: "pro logosu sadece profilde görünmeli"). Token
+            // rozeti (coin sayısı) PRO olsun olmasın her sekmede kalır — bakiye
+            // her yerde faydalı bilgi, PRO'nun aksine bir "satış" değil.
             if path.isEmpty {
                 Group {
-                    if !PurchaseService.shared.isPro {
+                    if !PurchaseService.shared.isPro && selection == .profile {
                         proButton
                     } else {
                         TokenBadge(tokenStore: tokenStore) { showTokenStore = true }

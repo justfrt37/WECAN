@@ -23,6 +23,8 @@ struct ProfileView: View {
     @State private var didCopyUID = false
     /// Açık olan yasal metin (gizlilik / koşullar) — nil ise kapalı.
     @State private var legalDocument: LegalDocument?
+    @State private var showPaywall = false
+    private var purchases: PurchaseService { PurchaseService.shared }
 
     // TODO: gerçek URL'lerle değiştir (App Store / gizlilik / koşullar).
     private let shareURL = URL(string: "https://apps.apple.com/app/id0000000000")!
@@ -35,6 +37,7 @@ struct ProfileView: View {
             ScrollView {
                 VStack(spacing: 14) {
                     avatarCard
+                    membershipCard
                     settingsSection
                 }
                 .padding(.horizontal, 20)
@@ -50,6 +53,62 @@ struct ProfileView: View {
         )
         .task { notificationsOn = await currentNotificationStatus() }
         .sheet(item: $legalDocument) { LegalDocumentView(document: $0) }
+        .fullScreenCover(isPresented: $showPaywall) { OnboardingPaywallView() }
+    }
+
+    // MARK: Üyelik
+
+    /// PRO rozeti/CTA'sı artık SADECE burada görünür — eskiden her sekmede
+    /// (Discover/Chat/Explore/Likes) global bir buton olarak nag ediyordu
+    /// (bkz. MainTabView, ChatView, kullanıcı talebi). PRO değilse dokununca
+    /// paywall açılır; PRO ise sadece durum gösterir, tıklanamaz.
+    private var membershipCard: some View {
+        Group {
+            if purchases.isPro {
+                HStack(spacing: 12) {
+                    Image(systemName: "crown.fill")
+                        .font(.system(size: 18, weight: .bold))
+                        .foregroundStyle(Color(hex: 0xFFB938))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("\(purchases.tier.displayName) Member")
+                            .font(.system(size: 15, weight: .bold))
+                            .foregroundStyle(.white)
+                        Text("Thanks for supporting Plumm")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.white.opacity(0.6))
+                    }
+                    Spacer()
+                }
+                .padding(16)
+                .background(AppColor.card, in: RoundedRectangle(cornerRadius: cardRadius, style: .continuous))
+            } else {
+                Button { showPaywall = true } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: "crown.fill")
+                            .font(.system(size: 18, weight: .bold))
+                            .foregroundStyle(.white)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Get PRO")
+                                .font(.system(size: 15, weight: .bold))
+                                .foregroundStyle(.white)
+                            Text("Unlock more characters, voice & more")
+                                .font(.system(size: 12))
+                                .foregroundStyle(.white.opacity(0.85))
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .foregroundStyle(.white.opacity(0.7))
+                    }
+                    .padding(16)
+                    .background(
+                        LinearGradient(colors: [Color(hex: 0xFFAF5C), Color(hex: 0xFF6F61)],
+                                       startPoint: .leading, endPoint: .trailing),
+                        in: RoundedRectangle(cornerRadius: cardRadius, style: .continuous)
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+        }
     }
 
     // MARK: Başlık

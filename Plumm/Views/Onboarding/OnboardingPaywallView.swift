@@ -36,9 +36,17 @@ struct OnboardingPaywallView: View {
     /// Varsayılan seçim en pahalı (en avantajlı) paket — `packages.last`.
     @Environment(TokenStore.self) private var tokenStore
     @State private var purchases = PurchaseService.shared
-    @State private var selectedTier: SubscriptionTier = .pro
+    @State private var selectedTier: SubscriptionTier
     @State private var selectedPackageID: String?
     @State private var isPurchasing = false
+
+    /// Hangi gate bu paywall'ı açtırdıysa o tier ön-seçili gelsin (ör. voice
+    /// gate → Pro+) — yoksa zaten Pro sahibi biri voice engellenince kendi
+    /// SAHİP OLDUĞU Pro paketini tekrar tekrar görüyordu (bkz. kullanıcı
+    /// talebi — "paywall şurada tekrar tekrar çıkıyor").
+    init(preselectedTier: SubscriptionTier = .pro) {
+        _selectedTier = State(initialValue: preselectedTier)
+    }
 
     private let tiers: [(tier: SubscriptionTier, label: String)] = [
         (.pro, "Pro"), (.proPlus, "Pro+"), (.max, "Pro Max"),

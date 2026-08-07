@@ -249,7 +249,7 @@ final class PurchaseService {
             } else {
                 // Abonelik: sunucu token ekonomisine köprü.
                 await refreshEntitlement()
-                await syncWithServer()
+                await syncWithServerRetrying()
                 #if DEBUG
                 // Simülatör: RC yerel StoreKit Testing satın almalarını sunucuya
                 // KAYDETMEZ → syncWithServer boş döner. Aktif aboneliği StoreKit'ten
@@ -278,7 +278,7 @@ final class PurchaseService {
         }
         _ = try? await Purchases.shared.restorePurchases()
         await refreshEntitlement()
-        await syncWithServer()
+        await syncWithServerRetrying()
         #if DEBUG
         // Simülatörde restore: RC sunucusu yerel satın almayı görmediğinden
         // syncWithServer boş döner. StoreKit'teki aktif aboneliği bulup grant et
@@ -289,18 +289,37 @@ final class PurchaseService {
         return isPro
     }
 
+    /// `syncWithServer()`'ın TEK seferlik çağrısı, RC'nin sunucu tarafı
+    /// (secret key ile GET /subscribers) satın almayı henüz işlememiş olduğu
+    /// dar pencereye denk gelirse token grant'ı SESSİZCE hiç olmuyordu — ne
+    /// retry ne de webhook (o da eninde sonunda gelir ama satın alma anında
+    /// kullanıcı bekliyor) bunu telafi ediyordu (bkz. kullanıcı talebi —
+    /// "satın alımda token eklenmiyor"). Kısa aralıklarla birkaç kez dener,
+    /// sunucu bir tier doğrular doğrulamaz durur.
+    private func syncWithServerRetrying(maxAttempts: Int = 4, delaySeconds: UInt64 = 2) async {
+        for attempt in 1...maxAttempts {
+            if await syncWithServer() { return }
+            if attempt < maxAttempts {
+                try? await Task.sleep(nanoseconds: delaySeconds * 1_000_000_000)
+            }
+        }
+    }
+
     /// Sunucu tarafı token ekonomisine köprü. `sync-subscription` edge
     /// function'ını çağırır: RC entitlement'ı secret key ile SUNUCUDA doğrulanır,
     /// `subscriptions` satırı upsert edilir ve tier'ın haftalık token'ları verilir
     /// (aynı dönemde tekrar çağrılınca yeniden vermez). `tier`'ı sunucu yanıtına
     /// göre günceller, yeni token bakiyesini döndürür (TokenStore.refresh için).
+    /// Dönüş değeri: sunucu BU çağrıda aktif bir tier doğruladı mı (token
+    /// grant'ı gerçekten oldu mu) — `purchase()`/`restore()`'daki retry
+    /// döngüsü bunu "artık durabiliriz" sinyali olarak kullanır.
     @discardableResult
-    func syncWithServer() async -> Int? {
+    func syncWithServer() async -> Bool {
         #if canImport(RevenueCat)
         guard isConfigured,
               let accessToken = UserDefaultsManager.shared.accessToken,
               let url = URL(string: "\(Config.supabaseURL)/functions/v1/sync-subscription")
-        else { return nil }
+        else { return false }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -310,13 +329,13 @@ final class PurchaseService {
         struct SyncResponse: Decodable { let tier: String?; let balance: Int? }
         guard let (data, resp) = try? await URLSession.shared.data(for: req) else {
             print("[PW-DIAG] sync ağ hatası")
-            return nil
+            return false
         }
         let status = (resp as? HTTPURLResponse)?.statusCode ?? -1
         print("[PW-DIAG] sync appUserId=\(appUserId) status=\(status) body=\(String(data: data, encoding: .utf8) ?? "")")
         guard (200..<300).contains(status),
               let decoded = try? JSONDecoder().decode(SyncResponse.self, from: data)
-        else { return nil }
+        else { return false }
         // "Tier yok" yanıtı tier'ı DÜŞÜRMEZ — sync-subscription sadece token
         // ekonomisi köprüsü, gerçek doğruluk kaynağı değil. Az önce aynı
         // fonksiyonda çağrılan refreshEntitlement() zaten RC'den (Apple'ın
@@ -327,14 +346,13 @@ final class PurchaseService {
         // paywall'ın farklı yerlerde tekrar çıkması). `refreshServerTier()`
         // zaten aynı ilkeyi uyguluyor ("satır yoksa dokunma").
         switch decoded.tier {
-        case "max":      tier = .max
-        case "pro_plus": tier = .proPlus
-        case "pro":      tier = .pro
-        default:         break
+        case "max":      tier = .max; return true
+        case "pro_plus": tier = .proPlus; return true
+        case "pro":      tier = .pro; return true
+        default:         return false
         }
-        return decoded.balance
         #else
-        return nil
+        return false
         #endif
     }
 

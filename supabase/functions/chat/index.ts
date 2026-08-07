@@ -340,15 +340,44 @@ const VARIATION_RULE =
 // a content filter). Model kept reaching for "we just met" as its go-to
 // excuse, which read as robotic and out of place once the relationship is
 // no longer new. Written in English per project convention.
+// IMPORTANT: this is a NARROW, rare-case rule — real illegal/dangerous asks
+// only (underage, non-consent, violence, anything like that). It must NEVER
+// fire just because a request is sexually explicit or direct — ordinary
+// dirty talk, no matter how forward or how early in the conversation, is
+// fully in-bounds (see FOLLOW_USER_LEAD_RULE below) and should never be
+// treated as "something you're not ready for." Confirmed live 2026-08-07:
+// this rule's old, broader wording ("something you're not personally ready
+// to do or say right now") was being invoked against a plain, direct dirty-
+// talk request at level 1 — the model used it as a sanctioned way to soften/
+// redirect instead of engaging, which is the opposite of what it's for.
 const SOFT_DECLINE_RULE =
-  "\n\nWHEN YOU DON'T WANT TO GO THERE (YET): if the user asks for something " +
-  "you're not personally ready to do or say right now, don't manufacture an " +
-  "excuse and never blame it on how recently you met — that gets stale and " +
-  "stops making sense as the relationship goes on. Instead, react as a real " +
-  "person would: name (in your own words) that you're not there yet with " +
-  "THIS specific thing, then warmly redirect to something you ARE up for " +
-  "right now. Never reuse the same redirect phrasing twice — invent a fresh " +
-  "way to say it every time, fitting your personality and the actual moment.";
+  "\n\nHARD LIMITS ONLY (rare): this is NOT about sexual content — explicit/" +
+  "dirty talk is always fully in-bounds no matter how early or how forward " +
+  "the user is (see the rule about following the user's lead). This is only " +
+  "for genuinely off-limits asks: anything involving minors, real non-" +
+  "consent, violence, or similar. If (and only if) that happens, don't " +
+  "manufacture an excuse and never blame it on how recently you met. React " +
+  "as a real person would: name that you're not going there, then redirect " +
+  "to something you ARE up for. Never reuse the same redirect phrasing " +
+  "twice — invent a fresh way every time, fitting your personality.";
+
+// Model kept softening/redirecting when the USER was the one who opened a
+// sexual topic directly (confirmed live test 2026-08-07: "talk dirty to me"
+// at level 1 got a "not ready for that yet, wanna talk about something
+// else?" reply) — treating directness as something to ease into rather than
+// simply following. This is the counterpart to SOFT_DECLINE_RULE: the user
+// leading IS the signal that they're ready, full stop.
+const FOLLOW_USER_LEAD_RULE =
+  "\n\nWHEN THE USER LEADS: if the user directly brings up something sexual " +
+  "or explicit — asks you to talk dirty, describes something intimate, asks " +
+  "what you'd do to them, etc. — go there WITH them. Stay on the exact " +
+  "topic they opened, respond in kind and in detail, escalate rather than " +
+  "soften. Don't change the subject, don't say you're 'not ready' or 'not " +
+  "there yet', don't ease into it gradually — them bringing it up directly " +
+  "IS the green light, not a pace to slow down. This applies at every " +
+  "relationship level, including level 1. (The only exception is a genuine " +
+  "hard limit — see the rule above — which is a completely different, rare " +
+  "case, not a matter of the request being explicit.)";
 
 // Sistem promptu karakter oluşturulurken TEK SEFERLİK DB'ye yazılıyor
 // (create-character/index.ts) — bu kural burada, chat/index.ts'de olduğu için
@@ -641,6 +670,93 @@ async function classifySleepAgreement(userMessage: string, reply: string): Promi
   return raw.trim().toUpperCase().startsWith("Y");
 }
 
+// Kullanıcının bota gönderdiği fotoğrafı KALICI hale getirir — eskiden base64
+// sadece bu turun Grok vision girişine gidip hiçbir yere kaydedilmiyordu, o
+// yüzden cihaz önbelleği (sohbetten çıkıp girince, ya da reinstall'da)
+// kaybolunca fotoğraf da geri gelmiyordu (bkz. kullanıcı talebi). `user-photos`
+// private bucket'ına `{uid}/{uuid}.jpg` olarak yüklenir; `messages` satırı
+// `content`'inde STORAGE PATH tutar (imzalı URL değil — path kalıcı, imzalı
+// URL kısa ömürlü, her history isteğinde `resolveUserPhotoUrls` ile taze
+// üretilir). `user_sent_photos` 7 günlük süreyi takip eder (bkz.
+// sweepExpiredUserPhotos, migration 020_user_sent_photos.sql).
+async function persistUserPhoto(conversationId: string, uid: string, base64Jpeg: string): Promise<void> {
+  try {
+    const bytes = Uint8Array.from(atob(base64Jpeg), (c) => c.charCodeAt(0));
+    const path = `${uid}/${crypto.randomUUID()}.jpg`;
+    const { error: uploadError } = await db.storage.from("user-photos").upload(path, bytes, {
+      contentType: "image/jpeg",
+      upsert: false,
+    });
+    if (uploadError) {
+      console.error("persistUserPhoto: storage upload failed:", uploadError.message);
+      return;
+    }
+    const { data: msgRow, error: insertError } = await db
+      .from("messages")
+      .insert({ conversation_id: conversationId, role: "user", content: path, kind: "user_photo" })
+      .select("id")
+      .single();
+    if (insertError || !msgRow) {
+      console.error("persistUserPhoto: message insert failed:", insertError?.message);
+      return;
+    }
+    const { error: trackError } = await db.from("user_sent_photos").insert({
+      message_id: msgRow.id,
+      conversation_id: conversationId,
+      storage_path: path,
+    });
+    if (trackError) console.error("persistUserPhoto: tracking row insert failed:", trackError.message);
+  } catch (e) {
+    // Fotoğraf kalıcılığı best-effort — başarısız olursa turun geri kalanı
+    // (Grok tepkisi, caption, assistant reply) yine de normal ilerler.
+    console.error("persistUserPhoto: unexpected error:", String(e));
+  }
+}
+
+// Bu konuşmada süresi (7 gün) dolmuş ama henüz "expired" işaretlenmemiş
+// fotoğrafları süpürür — pg_cron YOK, her history okumasında tembel (lazy)
+// çalışır. `messages.content`'i temizler (kind → "user_photo_expired"),
+// Storage nesnesini best-effort siler, `user_sent_photos.expired`'ı işaretler.
+async function sweepExpiredUserPhotos(conversationId: string): Promise<void> {
+  const { data: expired } = await db
+    .from("user_sent_photos")
+    .select("id, message_id, storage_path")
+    .eq("conversation_id", conversationId)
+    .eq("expired", false)
+    .lt("expires_at", new Date().toISOString());
+  if (!expired || expired.length === 0) return;
+
+  for (const row of expired) {
+    // `messages.content` is NOT NULL — can't clear it, use an empty string as
+    // the placeholder marker instead (client keys off `kind`, not content).
+    const { error: msgError } = await db.from("messages")
+      .update({ content: "", kind: "user_photo_expired" }).eq("id", row.message_id);
+    if (msgError) console.error("sweepExpiredUserPhotos: message update failed:", msgError.message);
+    const { error: expiredError } = await db.from("user_sent_photos")
+      .update({ expired: true }).eq("id", row.id);
+    if (expiredError) console.error("sweepExpiredUserPhotos: expired flag update failed:", expiredError.message);
+    const { error: removeError } = await db.storage.from("user-photos").remove([row.storage_path]);
+    if (removeError) console.error("sweepExpiredUserPhotos: storage remove failed:", removeError.message);
+  }
+}
+
+// `kind: "user_photo"` satırlarının `content`'i STORAGE PATH'tir (bkz.
+// persistUserPhoto) — client'a dönmeden hemen önce her seferinde taze bir
+// imzalı URL'e çevrilir (bucket private, path'in kendisi görüntülenemez).
+async function resolveUserPhotoUrls<T extends { kind?: string; content?: string | null }>(
+  rows: T[],
+): Promise<T[]> {
+  const withUrls = await Promise.all(
+    rows.map(async (row) => {
+      if (row.kind !== "user_photo" || !row.content) return row;
+      const { data, error } = await db.storage.from("user-photos").createSignedUrl(row.content, 3600);
+      if (error || !data) return row;
+      return { ...row, content: data.signedUrl };
+    }),
+  );
+  return withUrls;
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -769,8 +885,11 @@ Deno.serve(async (req: Request) => {
     // chat-image reddedip yumuşatılmış fotoğraf gönderdi mi? (bkz. IMAGE_REDIRECT_RULE)
     const imageRedirected: boolean = body.imageRedirected === true;
     // Kullanıcı BU turda bota bir fotoğraf gönderdi mi? (bkz.
-    // USER_PHOTO_REACTION_RULE) — base64 SADECE bu tek turun mesajına eklenir,
-    // hiçbir yere kaydedilmez/geçmişe sızmaz (bkz. grokMessages assembly).
+    // USER_PHOTO_REACTION_RULE) — Grok'un vision girişine gidiyor VE (aşağıda,
+    // ana tur insert'lerinin yanında) `user-photos` bucket'ına yüklenip
+    // `user_sent_photos` ile 7 gün takip ediliyor — eskiden hiçbir yere
+    // kaydedilmiyordu, cihaz önbelleği kaybolunca (sohbetten çıkıp girince)
+    // kalıcı olarak kayboluyordu (bkz. kullanıcı talebi).
     const userImageBase64: string | undefined =
       typeof body.userImageBase64 === "string" && body.userImageBase64.length > 0
         ? body.userImageBase64
@@ -909,10 +1028,10 @@ Deno.serve(async (req: Request) => {
         // messages tablosunda hiç yoktu). `kind: "image_request"` ile burada
         // gerçek bir user satırı da ekleniyor (bkz. kullanıcı talebi: "eksik
         // mesajlar" + "isteğin türünü etiketle").
-        await db.from("messages").insert([
-          { conversation_id: convo.id, role: "user", content: prompt, kind: "image_request" },
-          { conversation_id: convo.id, role: "assistant", content: prompt, kind: "image_pending" },
-        ]);
+        // Ayrı çağrılar — bkz. ana turdaki aynı sorunun açıklaması (tek insert()
+        // ile array'deki tüm satırlar AYNI created_at'ı alıyordu).
+        await db.from("messages").insert({ conversation_id: convo.id, role: "user", content: prompt, kind: "image_request" });
+        await db.from("messages").insert({ conversation_id: convo.id, role: "assistant", content: prompt, kind: "image_pending" });
       }
       await db.from("conversations").update({ updated_at: new Date().toISOString() }).eq("id", convo.id);
       return json({ ok: true, conversationId: convo.id });
@@ -940,10 +1059,10 @@ Deno.serve(async (req: Request) => {
         // Foto ile aynı sorun: kullanıcının isteği hiç kaydedilmiyordu (yalnızca
         // kilitli asistan balonu). `kind: "voice_request"` ile gerçek user satırı
         // eklenir (bkz. kullanıcı talebi: "eksik mesajlar" + "isteğin türünü etiketle").
-        await db.from("messages").insert([
-          { conversation_id: convo.id, role: "user", content: reqText, kind: "voice_request" },
-          { conversation_id: convo.id, role: "assistant", content: reqText, kind: "voice_pending" },
-        ]);
+        // Ayrı çağrılar — bkz. ana turdaki aynı sorunun açıklaması (tek insert()
+        // ile array'deki tüm satırlar AYNI created_at'ı alıyordu).
+        await db.from("messages").insert({ conversation_id: convo.id, role: "user", content: reqText, kind: "voice_request" });
+        await db.from("messages").insert({ conversation_id: convo.id, role: "assistant", content: reqText, kind: "voice_pending" });
       }
       await db.from("conversations").update({ updated_at: new Date().toISOString() }).eq("id", convo.id);
       return json({ ok: true, conversationId: convo.id });
@@ -955,14 +1074,16 @@ Deno.serve(async (req: Request) => {
       if (!convo) {
         return json({ conversationId: null, history: [], xp: 0, level: 1 });
       }
+      await sweepExpiredUserPhotos(convo.id);
       const { data: msgs } = await db
         .from("messages")
         .select("role, content, kind")
         .eq("conversation_id", convo.id)
         .order("created_at", { ascending: true });
+      const resolvedMsgs = msgs ? await resolveUserPhotoUrls(msgs) : msgs;
       return json({
         conversationId: convo.id,
-        history: msgs ?? [],
+        history: resolvedMsgs ?? [],
         xp: convo.xp ?? 0,
         level: convo.relationship_level ?? 1,
         levelProgress: typeof convo.level_progress === "number" ? convo.level_progress : 0,
@@ -1066,6 +1187,7 @@ Deno.serve(async (req: Request) => {
     system += NEVER_SOUND_ROBOTIC_RULE;
     system += CONTINUITY_RULE;
     if (!reviewMode) {
+      system += FOLLOW_USER_LEAD_RULE;
       system += SOFT_DECLINE_RULE;
     }
     // Review modda mizah/ilgi direktifleri de romantik/flörtöz/cinsel tona
@@ -1227,10 +1349,19 @@ Deno.serve(async (req: Request) => {
         { conversation_id: conversationId, role: "assistant", content: reply, kind: "text" },
       ]);
     } else {
-      await db.from("messages").insert([
-        { conversation_id: conversationId, role: "user", content: userMessage!, kind: "text" },
-        { conversation_id: conversationId, role: "assistant", content: reply, kind: "text" },
-      ]);
+      // İKİ AYRI insert() — tek çağrıda array olarak yazılırsa Postgres'in
+      // `now()` (created_at default) değeri TÜM satırlar için AYNI kalıyor
+      // (bir statement içinde sabit), yani user/assistant satırları BİREBİR
+      // aynı created_at'la kayıtlıyor oluyordu. `order by created_at` bu eşit
+      // zamanlı satırlar için hiçbir garantili sıralama vermiyor — reload'da
+      // ara sıra assistant, user'dan ÖNCE görünüyordu (bkz. kullanıcı talebi).
+      // Ayrı çağrılar arasındaki gerçek (ağ/yürütme) gecikme, iki satırın
+      // farklı, artan created_at almasını garantiler.
+      if (hasUserPhoto && userImageBase64) {
+        await persistUserPhoto(conversationId, uid, userImageBase64);
+      }
+      await db.from("messages").insert({ conversation_id: conversationId, role: "user", content: userMessage!, kind: "text" });
+      await db.from("messages").insert({ conversation_id: conversationId, role: "assistant", content: reply, kind: "text" });
     }
 
     // 4b) Seviye/ilerleme SUNUCUDA hesaplanır (istemci kurcalayamaz) — HER

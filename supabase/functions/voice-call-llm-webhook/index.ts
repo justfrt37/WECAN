@@ -90,10 +90,11 @@ Deno.serve(async (req: Request) => {
     const logPromise = (async () => {
       const replyText = await accumulateReply(captureStream);
       if (replyText) {
-        await db.from("call_turns").insert([
-          { call_session_id: callSessionId, role: "user", content: lastUserMessage },
-          { call_session_id: callSessionId, role: "assistant", content: replyText },
-        ]);
+        // Ayrı çağrılar — tek insert() ile array'deki satırlar Postgres'in
+        // `now()` (created_at default) değerini AYNI alır, sıralama garantisiz
+        // kalır (bkz. chat/index.ts'deki aynı sorunun düzeltmesi).
+        await db.from("call_turns").insert({ call_session_id: callSessionId, role: "user", content: lastUserMessage });
+        await db.from("call_turns").insert({ call_session_id: callSessionId, role: "assistant", content: replyText });
       }
     })();
     // deno-lint-ignore no-explicit-any

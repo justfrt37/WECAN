@@ -80,6 +80,12 @@ final class ChatViewModel {
     /// düğmelere basmak SERBEST (isVoiceArmed/isImageArmed, kamera/mikrofon açma),
     /// sadece gerçek GÖNDERIM anında kontrol edilir.
     var showPaywall = false
+    /// `showPaywall` hangi tier'ı satmalı — voice gate'leri Pro+ ister, foto/
+    /// mesaj gate'leri Pro yeterli. Bunsuz paywall hep Pro'ya açılıyordu; zaten
+    /// Pro sahibi biri voice engellenince AYNI (zaten sahip olduğu) paketi
+    /// tekrar tekrar görüyordu — "paywall hiç kapanmıyor" gibi görünen şey
+    /// aslında yanlış tier'ın gösterilmesiydi (bkz. kullanıcı talebi).
+    var paywallTier: SubscriptionTier = .pro
     /// Token yetmediğinde açılan COIN mağazası (PRO kullanıcılar için). PRO
     /// değilse showPaywall (PRO paywall) açılır (bkz. presentInsufficientTokensPaywall).
     var showTokenStore = false
@@ -88,7 +94,7 @@ final class ChatViewModel {
     /// paywall açılır (bkz. kullanıcı talebi).
     private func presentInsufficientTokensPaywall() {
         if PurchaseService.shared.isPro { showTokenStore = true }
-        else { showPaywall = true }
+        else { paywallTier = .pro; showPaywall = true }
         // Rozet gerçek (düşük) bakiyeyi göstersin diye tazele.
         Task { await tokenStore?.refresh() }
     }
@@ -655,7 +661,7 @@ final class ChatViewModel {
         guard !isSending, !isLoadingHistory else { return }
         // Ses, Pro+ ve Pro Max hakkı (Pro'da YOK, bkz. entitlements.ts) — hakkı
         // olmayana (kredi yetse bile) paywall aç, üretme.
-        guard PurchaseService.shared.canUseVoice else { showPaywall = true; return }
+        guard PurchaseService.shared.canUseVoice else { paywallTier = .proPlus; showPaywall = true; return }
         let typed = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         // Kullanıcı bir şey yazmadıysa varsayılan metin: "Sesli mesaj gönder"
         // (buton etiketiyle aynı) — mesaj balonunda bu görünür.
@@ -695,7 +701,7 @@ final class ChatViewModel {
     /// cihaza kaydedilene KADAR balon "üretiliyor" durumunda kalır.
     func generatePendingVoice(for messageID: UUID) {
         // Ses, Pro+ ve Pro Max hakkı (Pro'da YOK) — hakkı yoksa üretme, paywall aç.
-        guard PurchaseService.shared.canUseVoice else { showPaywall = true; return }
+        guard PurchaseService.shared.canUseVoice else { paywallTier = .proPlus; showPaywall = true; return }
         guard let idx = messages.firstIndex(where: { $0.id == messageID }),
               messages[idx].isPendingVoice,
               !generatingVoiceMessageIDs.contains(messageID),
@@ -838,7 +844,7 @@ final class ChatViewModel {
     func sendImageRequest() {
         guard !isSending, !isLoadingHistory else { return }
         // Foto PRO özelliği — PRO değilse (kredi yetse bile) PRO paywall aç.
-        guard PurchaseService.shared.isPro else { showPaywall = true; return }
+        guard PurchaseService.shared.isPro else { paywallTier = .pro; showPaywall = true; return }
         let typed = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         // Seçim istemi: kullanıcı yazdıysa onu, yazmadıysa içsel bir varsayılan
         // (kullanıcıya GÖSTERİLMEZ) — "Fotoğraf gönder" placeholder'ı balonda çıkmasın.
@@ -879,7 +885,7 @@ final class ChatViewModel {
     /// boş görünürdü (bkz. kullanıcı talebi).
     func generatePendingImage(for messageID: UUID) {
         // Foto PRO özelliği — PRO değilse üretme, PRO paywall aç.
-        guard PurchaseService.shared.isPro else { showPaywall = true; return }
+        guard PurchaseService.shared.isPro else { paywallTier = .pro; showPaywall = true; return }
         guard let idx = messages.firstIndex(where: { $0.id == messageID }),
               let prompt = messages[idx].pendingImagePrompt,
               messages[idx].imageURL == nil,
