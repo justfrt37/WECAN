@@ -85,12 +85,24 @@ enum SubscriptionTier: String {
         }
     }
 
-    var weeklyCharacterSlots: Int {
+    /// Haftalık karakter yaratma hakkı. `nil` = SINIRSIZ (Pro Max).
+    /// KAYNAK-DOĞRU değer sunucuda (supabase/functions/_shared/entitlements.ts);
+    /// burası paywall metni + boşuna istek atmamak için ayna.
+    var weeklyCharacterSlots: Int? {
         switch self {
         case .none: return 0
         case .pro: return 1
-        case .proPlus: return 3
-        case .max: return 10
+        case .proPlus: return 5
+        case .max: return nil      // sınırsız
+        }
+    }
+
+    /// Ses özellikleri (sesli mesaj + sesli arama) — Pro'da YOK, Pro+ ve Max'te var.
+    /// Sunucu da aynı kuralı uygular (voice-message-tts / voice-call-start 403 döner).
+    var canUseVoice: Bool {
+        switch self {
+        case .none, .pro: return false
+        case .proPlus, .max: return true
         }
     }
 
@@ -120,6 +132,9 @@ final class PurchaseService {
     /// Eski `isPro` çağrı yerleri (CreateCharacterView, LikesView, GalleryView,
     /// PaywallHostView) hiç değişmeden derlenmeye devam etsin diye korunuyor.
     var isPro: Bool { tier != .none }
+    /// Ses (sesli mesaj + sesli arama) hakkı — Pro'da YOK, Pro+/Max'te var.
+    /// Sunucu da aynı kuralı uygular; bu yalnızca boşuna istek atmamak için.
+    var canUseVoice: Bool { tier.canUseVoice }
 
     // Tier başına abonelik paketleri (weekly→monthly→yearly sıralı) ve token
     // paketleri. Ana paywall tier seçicisi bunları gösterir.

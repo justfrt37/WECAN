@@ -13,6 +13,7 @@
 import { voiceNameFor } from "./voiceMap.ts";
 import { elevenVoiceIdFor } from "../_shared/elevenVoiceMap.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { requireVoiceEntitlement } from "../_shared/entitlements.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -94,6 +95,15 @@ Deno.serve(async (req) => {
         status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
+    // Ses, Pro+ ve Pro Max hakkı (bkz. _shared/entitlements.ts) — Pro'da yok.
+    // Token'dan ÖNCE kontrol edilir: yetkisi olmayandan jeton düşülmesin.
+    const voiceGate = await requireVoiceEntitlement(db, uid);
+    if (voiceGate) {
+      return new Response(JSON.stringify(voiceGate.body), {
+        status: voiceGate.status, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     // Ucuz ön-kontrol — gerçek TTS çağrısını boşuna yapmamak için. Asıl
     // atomik düşüm sentez BAŞARIYLA tamamlandıktan sonra (aşağıdaki iki
     // başarı dönüşünden hemen önce).

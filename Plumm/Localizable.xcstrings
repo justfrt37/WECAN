@@ -956,6 +956,7 @@
 
     },
     "Adoring" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -2380,6 +2381,12 @@
         }
       }
     },
+    "Call ended" : {
+
+    },
+    "Call failed" : {
+
+    },
     "Can't believe I'm still thinking about you this late, honestly." : {
 
     },
@@ -3341,6 +3348,9 @@
         }
       }
     },
+    "Connecting…" : {
+
+    },
     "Consider this a very late, very sincere admission that I miss you." : {
 
     },
@@ -3561,6 +3571,12 @@
           }
         }
       }
+    },
+    "Couldn't start the call." : {
+
+    },
+    "Couldn't start the call's audio session." : {
+
     },
     "Cracking" : {
       "localizations" : {
@@ -5056,6 +5072,7 @@
       }
     },
     "Enthusiastic, always excited for you" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -5098,13 +5115,25 @@
     "Ethnicity" : {
 
     },
+    "every month" : {
+
+    },
     "Every night ends with me thinking of you. Tonight especially." : {
+
+    },
+    "every period" : {
 
     },
     "Every thought I possess belongs, tonight, to you." : {
 
     },
     "Every thought tonight circles back to you. Every one." : {
+
+    },
+    "every week" : {
+
+    },
+    "every year" : {
 
     },
     "Everyone's asleep but me — I keep thinking about you instead." : {
@@ -8768,6 +8797,15 @@
     "Karakterine bir isim seç" : {
 
     },
+    "Keep behavior preferences" : {
+
+    },
+    "Keep memories" : {
+
+    },
+    "Keep relationship level & progress" : {
+
+    },
     "Keep talking to get your intimacy to the next level." : {
       "localizations" : {
         "de" : {
@@ -9093,7 +9131,11 @@
         }
       }
     },
+    "Listening…" : {
+
+    },
     "Livewire" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -9224,6 +9266,7 @@
       }
     },
     "Loud, witty, chaotic energy" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -9608,6 +9651,9 @@
           }
         }
       }
+    },
+    "Microphone/Speech access is required for calls." : {
+
     },
     "Missed you all day. Just wanted you to know that." : {
 
@@ -11500,6 +11546,9 @@
           }
         }
       }
+    },
+    "Out of tokens — call ended" : {
+
     },
     "Paranoid" : {
       "localizations" : {
@@ -13887,6 +13936,9 @@
         }
       }
     },
+    "Speaking…" : {
+
+    },
     "Start Chatting" : {
       "localizations" : {
         "de" : {
@@ -14307,6 +14359,7 @@
       }
     },
     "Swipe left: pass" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -14347,6 +14400,7 @@
       }
     },
     "Swipe right: like" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -14475,6 +14529,7 @@
       }
     },
     "Tap anywhere to continue" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -14725,6 +14780,9 @@
     "Terms of Use" : {
 
     },
+    "That turn failed — try speaking again." : {
+
+    },
     "The day started. So did a thought of you." : {
 
     },
@@ -14883,7 +14941,13 @@
     "Thinking about you nonstop tonight, hi!" : {
 
     },
+    "Thinking…" : {
+
+    },
     "This absence of yours is loud, in its own way." : {
+
+    },
+    "This clears your message history with %@. Choose what to keep:" : {
 
     },
     "This defines their core personality" : {
@@ -15902,6 +15966,9 @@
           }
         }
       }
+    },
+    "Voice calls require Pro+" : {
+
     },
     "Voice message" : {
       "comment" : "Shown in the chat list preview when the last message was a voice recording.",

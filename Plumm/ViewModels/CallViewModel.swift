@@ -14,7 +14,9 @@ enum CallState: Equatable {
     case speaking
     case ended(reason: EndReason)
 
-    enum EndReason: Equatable { case userEnded, insufficientTokens, error }
+    /// `notEntitled`: ses Pro+ / Pro Max hakkı (bkz. _shared/entitlements.ts) —
+    /// aramayı kapatıp yükseltme paywall'ı gösterilir.
+    enum EndReason: Equatable { case userEnded, insufficientTokens, notEntitled, error }
 }
 
 @MainActor
@@ -69,6 +71,9 @@ final class CallViewModel: NSObject, AVAudioPlayerDelegate {
             callSessionId = try await service.start(characterId: character.id.uuidString.lowercased(), conversationId: conversationId)
         } catch CallServiceError.insufficientTokens {
             state = .ended(reason: .insufficientTokens)
+            return
+        } catch CallServiceError.notEntitled {
+            state = .ended(reason: .notEntitled)
             return
         } catch {
             errorMessage = String(localized: "Couldn't start the call.")

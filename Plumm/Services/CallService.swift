@@ -9,6 +9,9 @@ enum CallServiceError: Error {
     case decoding
     case badStatus(Int, String)
     case insufficientTokens
+    /// Sunucu 403: sesli arama Pro+ / Pro Max hakkı, bu abonelikte yok
+    /// (bkz. _shared/entitlements.ts).
+    case notEntitled
 }
 
 struct CallService {
@@ -31,6 +34,7 @@ struct CallService {
         if let conversationId { body["conversationId"] = conversationId }
         let (data, http) = try await request(url: Config.voiceCallStartFunctionURL, body: body)
         if http.statusCode == 402 { throw CallServiceError.insufficientTokens }
+        if http.statusCode == 403 { throw CallServiceError.notEntitled }
         guard http.statusCode == 200 else {
             throw CallServiceError.badStatus(http.statusCode, String(data: data, encoding: .utf8) ?? "")
         }

@@ -106,7 +106,25 @@ final class ChatViewModel {
 
     init(character: Character) {
         self.character = character
-        self.relationshipLevel = max(1, character.relationshipLevel)
+        // Seviye/ilerleme İLK KARE'de doğru olsun diye burada okunur: `loadHistory`
+        // (ve oradaki sunucu senkronu) sohbet çizildikten SONRA çalıştığı için
+        // header önce `character.relationshipLevel` (eski/global sütun, genelde 1)
+        // gösterip sonra doğru seviyeye ZIPLIYORDU (bkz. kullanıcı talebi:
+        // "seviye geç geliyor"). Kaynak `LocalConversationStore` bellek-içi bir
+        // sözlük (disk/ağ YOK) — senkron okumak bedava.
+        // Sıra: bellek-içi kayıt → KALICI seviye önbelleği → karakterin global
+        // sütunu. Ortadaki adım şart: bellek-içi tablo uygulama her açılışta boş
+        // başlıyor, o yüzden ilk açılışta seviye 1 görünüp sonra düzeliyordu
+        // (bkz. RelationshipLevelStore).
+        if let stored = LocalConversationStore.shared.load(for: character.id) {
+            self.relationshipLevel = max(1, stored.level)
+            self.levelProgress = stored.levelProgress
+        } else if let cached = RelationshipLevelStore.level(for: character.id) {
+            self.relationshipLevel = cached.level
+            self.levelProgress = cached.progress
+        } else {
+            self.relationshipLevel = max(1, character.relationshipLevel)
+        }
     }
 
     private var realAssistantCount: Int {
@@ -622,8 +640,9 @@ final class ChatViewModel {
     /// bu sayede kullanıcı önce token maliyetini görüp sonra karar verir.
     func sendVoiceRequest() {
         guard !isSending, !isLoadingHistory else { return }
-        // Ses PRO özelliği — PRO değilse (kredi yetse bile) PRO paywall aç, üretme.
-        guard PurchaseService.shared.isPro else { showPaywall = true; return }
+        // Ses, Pro+ ve Pro Max hakkı (Pro'da YOK, bkz. entitlements.ts) — hakkı
+        // olmayana (kredi yetse bile) paywall aç, üretme.
+        guard PurchaseService.shared.canUseVoice else { showPaywall = true; return }
         let typed = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         // Kullanıcı bir şey yazmadıysa varsayılan metin: "Sesli mesaj gönder"
         // (buton etiketiyle aynı) — mesaj balonunda bu görünür.
@@ -662,8 +681,8 @@ final class ChatViewModel {
     /// ile seslendirir (12 token, bkz. voice-message-tts). Ses tam olarak
     /// cihaza kaydedilene KADAR balon "üretiliyor" durumunda kalır.
     func generatePendingVoice(for messageID: UUID) {
-        // Ses PRO özelliği — PRO değilse üretme, PRO paywall aç.
-        guard PurchaseService.shared.isPro else { showPaywall = true; return }
+        // Ses, Pro+ ve Pro Max hakkı (Pro'da YOK) — hakkı yoksa üretme, paywall aç.
+        guard PurchaseService.shared.canUseVoice else { showPaywall = true; return }
         guard let idx = messages.firstIndex(where: { $0.id == messageID }),
               messages[idx].isPendingVoice,
               !generatingVoiceMessageIDs.contains(messageID),
@@ -732,6 +751,13 @@ final class ChatViewModel {
                 case .insufficientTokens:
                     generatingVoiceMessageIDs.remove(messageID)
                     presentInsufficientTokensPaywall()   // uyarı yok, paywall aç
+                    isSending = false
+                    return
+                case .notEntitled:
+                    // Sunucu "ses Pro+ gerektirir" dedi (istemci kapısı aşılmış ya da
+                    // tier bayat) — hata değil, yükseltme paywall'ı.
+                    generatingVoiceMessageIDs.remove(messageID)
+                    showPaywall = true
                     isSending = false
                     return
                 case .failure:

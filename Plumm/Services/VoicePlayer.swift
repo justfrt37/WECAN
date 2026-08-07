@@ -193,6 +193,9 @@ enum TTSResult {
     /// buradan gelir). Upload başarısızsa nil — anlık çalma yerel `Data` ile yine olur.
     case success(Data, tokenBalance: Int?, voiceURL: URL?)
     case insufficientTokens
+    /// Sunucu 403: ses Pro+ / Pro Max hakkı, bu abonelikte yok (bkz.
+    /// _shared/entitlements.ts). Hata mesajı değil, paywall gösterilir.
+    case notEntitled
     case failure
 }
 
@@ -227,6 +230,7 @@ extension TTSService {
         else { return .failure }
 
         if http.statusCode == 402 { return .insufficientTokens }
+        if http.statusCode == 403 { return .notEntitled }
         guard http.statusCode == 200,
               http.value(forHTTPHeaderField: "Content-Type")?.contains("audio") == true,
               !data.isEmpty

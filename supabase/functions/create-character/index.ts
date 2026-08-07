@@ -20,6 +20,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { translateTagline } from "../_shared/tagline-i18n.ts";
+import { WEEKLY_CHARACTER_LIMIT, type Tier } from "../_shared/entitlements.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -44,11 +45,8 @@ const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
 const db = createClient(SUPABASE_URL, SERVICE_ROLE, { auth: { persistSession: false } });
 
-const WEEKLY_CHARACTER_LIMIT: Record<string, number> = {
-  pro: 1,
-  pro_plus: 3,
-  max: 10,
-};
+// Haftalık karakter yaratma hakkı artık _shared/entitlements.ts'te (tek kaynak,
+// voice kuralıyla birlikte): pro 1, pro_plus 5, max sınırsız.
 
 // Karakter yaratma maliyeti (coin/jeton) — KAYNAK-DOĞRU burada tutulur (bkz.
 // kullanıcı talebi: "bu bilgi backend'de tutulmalı"). charge_tokens ile atomik
@@ -65,7 +63,9 @@ async function checkCreationAllowance(uid: string): Promise<{ ok: true } | { ok:
 
   if (!sub) return { ok: false, error: "subscription_required" };
 
-  const limit = WEEKLY_CHARACTER_LIMIT[sub.tier] ?? 0;
+  const limit = WEEKLY_CHARACTER_LIMIT[sub.tier as Tier] ?? 0;
+  // max = sınırsız → dönem içi sayımı hiç yapmaya gerek yok.
+  if (limit === Infinity) return { ok: true };
   const { count } = await db
     .from("characters")
     .select("id", { count: "exact", head: true })
