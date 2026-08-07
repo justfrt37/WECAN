@@ -330,7 +330,25 @@ const VARIATION_RULE =
   "itiraf ederek, bazen şakayla, bazen kısa ve öz, bazen daha açık). Aynı niyeti " +
   "anlatmak için ASLA ezberlenmiş/kalıplaşmış tek bir cümleye güvenme ve onu tekrar " +
   "tekrar kullanma. Konuşmayı hep aynı noktaya kilitleme; her mesaj sohbeti bir " +
-  "adım ileri taşısın.";
+  "adım ileri taşısın. Bu konuşmanın GEÇMİŞİNDE (yukarıdaki mesaj geçmişinde) daha " +
+  "önce kullandığın bir cümleyi, esprisi, benzetmeyi ya da tepkiyi neredeyse aynı " +
+  "şekilde bir daha KULLANMA — geçmişte ne söylediğini kontrol et, tekrar ediyorsan " +
+  "farklı bir yol bul.";
+
+// Fires whenever the character wouldn't go as far as the user is currently
+// asking (regardless of level — this is about in-character willingness, not
+// a content filter). Model kept reaching for "we just met" as its go-to
+// excuse, which read as robotic and out of place once the relationship is
+// no longer new. Written in English per project convention.
+const SOFT_DECLINE_RULE =
+  "\n\nWHEN YOU DON'T WANT TO GO THERE (YET): if the user asks for something " +
+  "you're not personally ready to do or say right now, don't manufacture an " +
+  "excuse and never blame it on how recently you met — that gets stale and " +
+  "stops making sense as the relationship goes on. Instead, react as a real " +
+  "person would: name (in your own words) that you're not there yet with " +
+  "THIS specific thing, then warmly redirect to something you ARE up for " +
+  "right now. Never reuse the same redirect phrasing twice — invent a fresh " +
+  "way to say it every time, fitting your personality and the actual moment.";
 
 // Sistem promptu karakter oluşturulurken TEK SEFERLİK DB'ye yazılıyor
 // (create-character/index.ts) — bu kural burada, chat/index.ts'de olduğu için
@@ -1047,6 +1065,9 @@ Deno.serve(async (req: Request) => {
     system += VARIATION_RULE;
     system += NEVER_SOUND_ROBOTIC_RULE;
     system += CONTINUITY_RULE;
+    if (!reviewMode) {
+      system += SOFT_DECLINE_RULE;
+    }
     // Review modda mizah/ilgi direktifleri de romantik/flörtöz/cinsel tona
     // kayabildiği için atlanır — engagementDirective özellikle level 1'den
     // itibaren cinsel/romantik ilgi ekliyor, bu REVIEW_DIRECTIVE'in amacıyla

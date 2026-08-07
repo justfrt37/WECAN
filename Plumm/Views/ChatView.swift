@@ -7,6 +7,7 @@ import SwiftUI
 import Photos
 import PhotosUI
 import UIKit
+import Combine
 
 /// Mesaj listesinin alt kenarının, kaydırma görünür alanındaki Y konumu —
 /// "kullanıcı dibe yakın mı" tespitinde kullanılır (bkz. ChatView.messagesList).
@@ -1438,7 +1439,7 @@ private struct VoiceRecordingOverlay: View {
     @State private var elapsed = 0
     @State private var animating = false
 
-    private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+    private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect().eraseToAnyPublisher()
 
     var body: some View {
         HStack(spacing: 14) {

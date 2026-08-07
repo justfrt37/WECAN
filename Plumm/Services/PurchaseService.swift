@@ -148,6 +148,14 @@ final class PurchaseService {
         Purchases.configure(withAPIKey: apiKey)
         isConfigured = true
         Task {
+            // RC'nin appUserID'sini Supabase uid'ine EŞİTLE — böylece
+            // revenuecat-webhook'un aldığı `app_user_id` doğrudan bizim
+            // `subscriptions.user_id`'imiz olur, ayrı bir eşleme tablosu
+            // gerekmez. logIn olmadan RC kendi anonim ID'sini kullanırdı
+            // (bkz. kullanıcı talebi — webhook ile sunucu taraflı doğrulama).
+            if let uid = UserDefaultsManager.shared.userId {
+                _ = try? await Purchases.shared.logIn(uid)
+            }
             await refreshEntitlement()
             await loadOfferings()
         }
@@ -205,6 +213,13 @@ final class PurchaseService {
     func purchase(_ package: PaywallPackage) async -> Bool {
         #if canImport(RevenueCat)
         guard isConfigured else { return false }
+        // configure()'daki logIn, uid henüz yazılmamışken (uygulama açılış
+        // yarışı) sessizce atlanmış olabilir — burada, kullanıcı gerçekten bir
+        // satın alma yaptığı an, uid KESİN mevcut, o yüzden tekrar deneriz.
+        // logIn idempotent, aynı id'yle tekrar çağırmak zararsız.
+        if let uid = UserDefaultsManager.shared.userId, Purchases.shared.appUserID != uid {
+            _ = try? await Purchases.shared.logIn(uid)
+        }
         do {
             let result = try await Purchases.shared.purchase(package: package.rcPackage)
             guard !result.userCancelled else { return false }
@@ -243,6 +258,9 @@ final class PurchaseService {
     func restore() async -> Bool {
         #if canImport(RevenueCat)
         guard isConfigured else { return false }
+        if let uid = UserDefaultsManager.shared.userId, Purchases.shared.appUserID != uid {
+            _ = try? await Purchases.shared.logIn(uid)
+        }
         _ = try? await Purchases.shared.restorePurchases()
         await refreshEntitlement()
         await syncWithServer()
@@ -284,11 +302,20 @@ final class PurchaseService {
         guard (200..<300).contains(status),
               let decoded = try? JSONDecoder().decode(SyncResponse.self, from: data)
         else { return nil }
+        // "Tier yok" yanıtı tier'ı DÜŞÜRMEZ — sync-subscription sadece token
+        // ekonomisi köprüsü, gerçek doğruluk kaynağı değil. Az önce aynı
+        // fonksiyonda çağrılan refreshEntitlement() zaten RC'den (Apple'ın
+        // kendisinden) doğrudan doğruladı; sandbox'ta RC→sunucu doğrulaması
+        // gecikebilir/webhook henüz işlenmemiş olabilir ve bu satır olmadan
+        // az önce doğrulanmış PRO durumunu yanlışlıkla .none'a çekip paywall'ı
+        // tekrar açtırıyordu (bkz. kullanıcı talebi — satın aldıktan sonra
+        // paywall'ın farklı yerlerde tekrar çıkması). `refreshServerTier()`
+        // zaten aynı ilkeyi uyguluyor ("satır yoksa dokunma").
         switch decoded.tier {
         case "max":      tier = .max
         case "pro_plus": tier = .proPlus
         case "pro":      tier = .pro
-        default:         tier = .none
+        default:         break
         }
         return decoded.balance
         #else

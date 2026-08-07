@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		244B4E503019BD5700D0E6BB /* ElevenLabs in Frameworks */ = {isa = PBXBuildFile; productRef = 244B4E4F3019BD5700D0E6BB /* ElevenLabs */; };
 		71CD6CC030164B07001566D5 /* ReceiptParser in Frameworks */ = {isa = PBXBuildFile; productRef = 71CD6CBF30164B07001566D5 /* ReceiptParser */; };
 		71CD6CC230164B07001566D5 /* RevenueCat in Frameworks */ = {isa = PBXBuildFile; productRef = 71CD6CC130164B07001566D5 /* RevenueCat */; };
 		71CD6CC430164B07001566D5 /* RevenueCatUI in Frameworks */ = {isa = PBXBuildFile; productRef = 71CD6CC330164B07001566D5 /* RevenueCatUI */; };
@@ -28,6 +29,7 @@
 				71CD6CC230164B07001566D5 /* RevenueCat in Frameworks */,
 				71CD6CC030164B07001566D5 /* ReceiptParser in Frameworks */,
 				71CD6CC430164B07001566D5 /* RevenueCatUI in Frameworks */,
+				244B4E503019BD5700D0E6BB /* ElevenLabs in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -73,6 +75,7 @@
 				71CD6CC130164B07001566D5 /* RevenueCat */,
 				71CD6CC330164B07001566D5 /* RevenueCatUI */,
 				71CD6CBF30164B07001566D5 /* ReceiptParser */,
+				244B4E4F3019BD5700D0E6BB /* ElevenLabs */,
 			);
 			productName = Plumm;
 			productReference = AA0000000000000000000001 /* Plumm.app */;
@@ -106,6 +109,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				71CD6CBE30164B07001566D5 /* XCRemoteSwiftPackageReference "purchases-ios" */,
+				244B4E4E3019BD5700D0E6BB /* XCRemoteSwiftPackageReference "elevenlabs-swift-sdk" */,
 			);
 			productRefGroup = AA0000000000000000000005 /* Products */;
 			projectDirPath = "";
@@ -161,6 +165,10 @@
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.firat.Plumm;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -200,6 +208,10 @@
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.firat.Plumm;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -273,6 +285,14 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
+		244B4E4E3019BD5700D0E6BB /* XCRemoteSwiftPackageReference "elevenlabs-swift-sdk" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/elevenlabs/elevenlabs-swift-sdk.git";
+			requirement = {
+				kind = exactVersion;
+				version = 3.2.2;
+			};
+		};
 		71CD6CBE30164B07001566D5 /* XCRemoteSwiftPackageReference "purchases-ios" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/RevenueCat/purchases-ios.git";
@@ -284,6 +304,11 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		244B4E4F3019BD5700D0E6BB /* ElevenLabs */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 244B4E4E3019BD5700D0E6BB /* XCRemoteSwiftPackageReference "elevenlabs-swift-sdk" */;
+			productName = ElevenLabs;
+		};
 		71CD6CBF30164B07001566D5 /* ReceiptParser */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 71CD6CBE30164B07001566D5 /* XCRemoteSwiftPackageReference "purchases-ios" */;

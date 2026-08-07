@@ -652,7 +652,7 @@ final class ChatViewModel {
         Task {
             try? await Task.sleep(nanoseconds: 3_000_000_000)
             withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
-                preparingVoiceMessageIDs.remove(pendingID)
+                _ = preparingVoiceMessageIDs.remove(pendingID)
             }
         }
     }
@@ -1063,6 +1063,7 @@ final class ChatViewModel {
                 existingSummary: existingSummary,
                 previousSchedule: previousSchedule
             ) else { return }
+            guard let self else { return }
             await MainActor.run {
                 LocalConversationStore.shared.updateSummary(
                     for: characterId,
@@ -1070,7 +1071,7 @@ final class ChatViewModel {
                     summarizedCount: windowStart,
                     schedule: result.schedule
                 )
-                self?.refreshCurrentActivity()
+                self.refreshCurrentActivity()
             }
         }
     }
@@ -1136,7 +1137,8 @@ final class ChatViewModel {
     private func ensureScheduleGenerated() {
         Task.detached(priority: .background) { [service = self.service, character = self.character, weak self] in
             await ScheduleGenerator.ensureGenerated(for: character, service: service)
-            await MainActor.run { self?.refreshCurrentActivity() }
+            guard let self else { return }
+            await MainActor.run { self.refreshCurrentActivity() }
         }
     }
 

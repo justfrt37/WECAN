@@ -20,12 +20,11 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
     /// Replayed once the store finishes loading — see `replayPendingTapIfNeeded()`.
     private static var pendingTap: (kind: NotificationKind, characterID: UUID, level: Int?)?
 
-    func userNotificationCenter(
+    nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         didReceive response: UNNotificationResponse,
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
-        defer { completionHandler() }
         let request = response.notification.request
         let userInfo = request.content.userInfo
         guard
@@ -33,11 +32,14 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
             let kind = NotificationKind(rawValue: typeRaw),
             let idString = userInfo["characterId"] as? String,
             let characterID = UUID(uuidString: idString)
-        else { return }
+        else { completionHandler(); return }
 
-        // Zaten teslim edilmiş sayılır — sonraki catch-up taramasında tekrar işlenmesin.
-        center.removeDeliveredNotifications(withIdentifiers: [request.identifier])
-        handleTap(kind: kind, characterID: characterID, level: userInfo["level"] as? Int, navigate: true)
+        Task { @MainActor in
+            // Zaten teslim edilmiş sayılır — sonraki catch-up taramasında tekrar işlenmesin.
+            center.removeDeliveredNotifications(withIdentifiers: [request.identifier])
+            handleTap(kind: kind, characterID: characterID, level: userInfo["level"] as? Int, navigate: true)
+            completionHandler()
+        }
     }
 
     /// Call once `store.isLoaded` becomes true — replays a tap that arrived
@@ -150,7 +152,7 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
     }
 
     /// Show the banner even while the app is active.
-    func userNotificationCenter(
+    nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void

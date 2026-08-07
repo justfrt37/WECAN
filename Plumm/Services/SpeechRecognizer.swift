@@ -17,6 +17,9 @@ final class SpeechRecognizer {
     var isRecording = false
     var authorized = false
 
+    // TEMP DEBUG — remove once voice call pipeline is verified on device.
+    var onDebug: ((String) -> Void)?
+
     /// Kayıt bitince (`stop()`) buradan ses dosyası okunur — kullanıcının
     /// KENDİ sesli mesajı olarak balon halinde oynatılabilir (bkz.
     /// ChatViewModel.sendUserVoice, VoicePlayer). Sadece transkript Grok'a
@@ -56,10 +59,11 @@ final class SpeechRecognizer {
     /// barge-in). The normal tap-to-record voice-note flow (ChatView) always
     /// passes the default `true`, unchanged.
     @discardableResult
-    func start(configuresSession: Bool = true) -> Bool {
-        guard !isRecording else { return true }
+    func start(configuresSession: Bool = true, playStartCue: Bool = true) -> Bool {
+        guard !isRecording else { onDebug?("recognizer.start: already recording"); return true }
         transcript = ""
         recordedFileURL = nil
+        onDebug?("recognizer.start called (configuresSession: \(configuresSession))")
 
         if configuresSession {
             do {
@@ -67,14 +71,17 @@ final class SpeechRecognizer {
                 try session.setCategory(.record, mode: .measurement, options: .duckOthers)
                 try session.setActive(true, options: .notifyOthersOnDeactivation)
             } catch {
+                onDebug?("recognizer.start: session config failed: \(error)")
                 return false
             }
         }
         lastStartConfiguredSession = configuresSession
 
         // "Dinliyorum" sinyali — kullanıcıya kaydın gerçekten başladığını
-        // hissettirir (bkz. plan: "listening cue").
-        AudioServicesPlaySystemSound(1113)
+        // hissettirir (bkz. plan: "listening cue"). Barge-in's silent background
+        // listener (started the instant AI audio begins playing) passes
+        // playStartCue: false — otherwise it'd tick on every single AI reply.
+        if playStartCue { AudioServicesPlaySystemSound(1113) }
 
         let req = SFSpeechAudioBufferRecognitionRequest()
         req.shouldReportPartialResults = true
@@ -103,7 +110,9 @@ final class SpeechRecognizer {
         audioEngine.prepare()
         do {
             try audioEngine.start()
+            onDebug?("audioEngine started OK, input format: \(format)")
         } catch {
+            onDebug?("audioEngine.start FAILED: \(error)")
             // start() başarısız olursa tap + recorder ZATEN kurulmuş durumda kalır;
             // temizlemezsek bir sonraki start() aynı bus'a İKİNCİ bir tap kurup
             // AVAudioEngine'i çökertir (fatal). O yüzden burada tam geri sar:
@@ -120,10 +129,20 @@ final class SpeechRecognizer {
         }
         isRecording = true
 
+        if recognizer == nil { onDebug?("SFSpeechRecognizer is nil (locale unsupported?)") }
+        else if recognizer?.isAvailable == false { onDebug?("SFSpeechRecognizer.isAvailable == false") }
+
         task = recognizer?.recognitionTask(with: req) { [weak self] result, error in
             guard let self else { return }
+            if let error {
+                Task { @MainActor in self.onDebug?("recognitionTask error: \(error)") }
+            }
             if let result {
-                Task { @MainActor in self.transcript = result.bestTranscription.formattedString }
+                let partial = result.bestTranscription.formattedString
+                Task { @MainActor in
+                    self.transcript = partial
+                    self.onDebug?("partial transcript: \"\(partial)\" (isFinal: \(result.isFinal))")
+                }
             }
             // SADECE `isFinal`de durdur. `error != nil` burada dahil edilmiyordu
             // ÖNCE hemen sonra kaldırıldı — SFSpeechRecognizer sık sık zararsız,
