@@ -58,9 +58,17 @@ struct CachedImage<Content: View, Placeholder: View>: View {
         }
 
         // 3) Ağdan indir (timeout ~20s) + çöz/insert yine ana thread dışında.
+        //    Bir kez başarısız olursa (geçici ağ hatası) kısa bir bekleme sonrası
+        //    tek bir daha dener — sonsuz döngü yok, hâlâ olmazsa placeholder kalır.
         var request = URLRequest(url: url)
         request.timeoutInterval = 20
-        guard let (data, _) = try? await URLSession.shared.data(for: request) else { return }
+        var data: Data?
+        data = try? await URLSession.shared.data(for: request).0
+        if data == nil {
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            data = try? await URLSession.shared.data(for: request).0
+        }
+        guard let data else { return }
         let img = await Task.detached(priority: .userInitiated) {
             // ImageCache içinde ekran boyutuna KÜÇÜLTÜLÜR (RAM tasarrufu).
             ImageCache.shared.insert(data: data, for: url)
