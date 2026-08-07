@@ -1,13 +1,12 @@
-# Optimistic UI, Background Prefetch & Durable Action Queue
+# Background Image Prefetch (Scroll-Ahead)
 
 Date: 2026-08-07
-Status: Approved
+Status: Approved (descoped 2026-08-07 — see Revision below)
 
 ## Goal
 
-Make non-chat parts of the app feel instant: no spinners blocking navigation, photos
-appear pre-loaded, and user actions (create character, claim streak, generate photo)
-reflect in the UI immediately instead of waiting on a network round trip.
+Make photo-heavy scrolling feel instant: photos appear pre-loaded instead of
+lazy-popping-in as the user scrolls/swipes.
 
 **Explicitly out of scope:** chat message send/receive UI (`ChatViewModel`, `ChatView`,
 `MessageBubble`, `VoiceMessageBubble`, `VoiceCallView`) — carefully tuned already, not
@@ -15,88 +14,77 @@ to be touched. Also out of scope: `PurchaseService` (RevenueCat-owned state mach
 recent server-authoritative sync work) and the local-only Block/Pass/Like stores (no
 server call exists today, nothing to make optimistic).
 
+## Revision (2026-08-07)
+
+Original design proposed three phases: (1) image prefetch, (2A) cache-first data for
+`CharacterStore`/`TokenStore`, (2B) a durable optimistic-action queue for character
+creation / streak claim / photo generation. Investigation before planning found:
+
+- **2A already exists.** `CharacterStore.load()` already shows the disk-cached
+  character list instantly then refreshes in the background (CharacterStore.swift:
+  110-157), and already prefetches card/avatar images on load (line 144-145).
+  `TokenStore` already persists balance to `UserDefaults` and shows the cached value
+  immediately on init (TokenStore.swift:27-29, 46). Nothing to build.
+- **2B has no valid target.** `CharacterCreateService` has deliberate comments stating
+  the caller must never optimistically create a local character — the server can
+  reject (403, subscription required) or require more tokens (402), and a
+  `decodeFailure` outcome exists specifically so the client re-fetches from the server
+  instead of inventing a "ghost" character. Building optimistic creation here would
+  fight this existing safety design. `StreakService.claim()` is already
+  fire-and-forget/non-blocking (popup only shown after success) — nothing to make more
+  optimistic. `GenerateService` is a synchronous wizard step; the actual photo
+  generation trigger lives inside the chat flow, which is out of scope. No mutation in
+  the app currently benefits from a durable retry queue, so building one would be
+  speculative infra with no consumer (YAGNI) — dropped.
+
+Remaining, real scope: Phase 1 (image prefetch) only, expanded below to scroll-ahead
+prefetch since load-time prefetch already exists.
+
 ## Current State
 
 - `Plumm/Services/ImageCache.swift` + `Plumm/Views/CachedImage.swift`: mature two-tier
   (memory `NSCache` + disk) image cache with downsampling and a bounded-concurrency
-  `prefetch(_:)` method — but nothing calls `prefetch` proactively today; images load
-  lazily on first render.
-- No queueing/retry/background-task infrastructure anywhere in the app
-  (`BGTaskScheduler`, generic retry queue, etc. — none exist). This work is greenfield.
-- `CharacterStore` already has a `loadCachedCharacters()`/`saveCachedCharacters()` pair
-  (CharacterStore.swift:252/257) but it's not used as "show cached instantly, refresh
-  silently" — need to verify/extend usage.
-- `TokenStore.refresh()` is in-memory only, no disk persistence, so token balance is
-  blank/zero on cold launch until the network call returns.
-- Real network mutations outside chat/purchase: `CharacterCreateService` (create
-  character, 2 POSTs), `StreakService` (claim streak, 1 POST), `GenerateService` +
-  `GeneratedPhotoService` (trigger + fetch generated photos).
+  `prefetch(_:)` method (5-concurrent, skips already-cached URLs).
+- `CharacterStore.load()` already prefetches every character's card+avatar photo at
+  launch (CharacterStore.swift:144-145) — deliberately does NOT prefetch gallery
+  (generated) photos at launch, per an existing comment noting that prefetching
+  everything bloated RAM.
+- `FeedView`/`CharacterListView` checked and have no gap: `FeedView`'s deck draws its
+  photos from the already-prefetched `CharacterStore.characters` set (and only ever
+  renders current+next card, both already warm); `CharacterListView` is an unused
+  legacy screen that renders SF Symbols only, no `CachedImage` at all. Neither needs
+  changes.
+- `GalleryView.swift:39-41`: fetches the user's own generated photos for one character
+  (`GeneratedPhotoService.fetch`) then renders them in a `LazyVGrid` — each cell lazily
+  triggers its own network load as it scrolls into view (pop-in). Not prefetched.
+- `CharacterProfileView.swift:57-61,118-176,275-330`: the same `images` array (a
+  character's pre-made gallery) is rendered twice — once in a swipeable hero `TabView`,
+  once in a `photosSection` grid below. Photos locked behind PRO (`idx > 0 &&
+  !isPro`) deliberately skip `CachedImage` entirely (a `frostedLockedFill` placeholder
+  instead) so locked content is never downloaded — this must be preserved; only
+  unlocked URLs should be prefetched.
+- `CachedImage.swift:63` swallows failed network loads silently (`try?`) — no retry.
 
 ## Phase 1 — Image Prefetch
 
-- Call `ImageCache.prefetch(_:)` (existing method, ImageCache.swift:120) right after
-  `CharacterStore.load()` / `refreshCharacters()` returns, for all character avatar and
-  card photo URLs.
-- Call `prefetch` after `GeneratedPhotoService.fetch` returns, for the fetched gallery
-  photo URLs.
-- In `FeedView`, `GalleryView`, `CharacterListView`: prefetch the next N items ahead of
-  current scroll/swipe position (reuse existing bounded 5-concurrent prefetch).
-- `CachedImage.swift:63` currently swallows failed loads silently (`try?`) — add one
-  retry with a short backoff before giving up; still no infinite retry loop.
+- `GalleryView`: after `GeneratedPhotoService.fetch` returns in `.task` (line 40), call
+  `ImageCache.shared.prefetch(yourPhotos)` so the grid's photos are already warm before
+  `LazyVGrid` scrolls them into view. Bounded — one character's own photos only.
+- `CharacterProfileView`: on appear, call `ImageCache.shared.prefetch(_:)` with `images`
+  filtered to unlocked URLs only (`idx == 0 || PurchaseService.shared.isPro`) — mirrors
+  the existing per-index lock check so locked photos are still never downloaded.
+- `CachedImage.swift:63` — add one retry with a short delay before giving up on a
+  failed network load; still no infinite retry loop.
 - Purely additive: no changes to `CachedImage`'s render path or existing call sites'
   behavior, so chat's use of `CachedImage` is unaffected.
-
-## Phase 2 — Optimistic Infra
-
-### 2A. Cache-first data (stale-while-revalidate)
-
-For GET-heavy reads that currently block UI on network:
-
-- `CharacterStore`: on load, show last-persisted snapshot instantly via existing
-  `loadCachedCharacters()`, fire the network refresh in the background, diff and update
-  UI when it lands. No blocking spinner on a warm cache.
-- `TokenStore`: add disk persistence of last known balance (new — currently in-memory
-  only). Show cached balance immediately on launch, refresh silently via `refresh()`.
-
-### 2B. Durable optimistic-action queue
-
-- `OptimisticAction` protocol: `apply()` (synchronous local UI mutation), `perform()
-  async throws` (the actual network call), `rollback()` (revert local state on
-  permanent failure).
-- `ActionQueue` actor: persists pending actions as JSON to disk (Application Support
-  directory), FIFO per action-type key. Processes on enqueue, on app launch, and on
-  foreground.
-- Retry policy: exponential backoff, max 3 attempts. On final failure: call
-  `rollback()` and surface a generic (non-chat-styled) error banner/toast.
-- Concrete actions wired to the queue:
-  - **Create character** (`CharacterCreateService`): show new character in list
-    immediately as an optimistic placeholder; swap in real data/photo when the POST
-    returns; rollback removes the placeholder and shows an error banner.
-  - **Claim streak** (`StreakService`): increment streak count/reward in UI instantly;
-    rollback decrements and shows an error banner on failure.
-  - **Trigger photo generation** (`GenerateService` / `GeneratedPhotoService`): show a
-    "generating" placeholder card in the gallery immediately instead of waiting on the
-    POST response; replace with the real photo once `GeneratedPhotoService.fetch`
-    confirms it's ready; rollback removes the placeholder on failure.
-
-## Phase 3 — Wiring
-
-- Wire Phase 1 prefetch calls into `CharacterStore.load`/`refreshCharacters`,
-  `GeneratedPhotoService.fetch`, and scroll-ahead logic in `FeedView`/`GalleryView`/
-  `CharacterListView`.
-- Wire Phase 2A into `CharacterStore` and `TokenStore`.
-- Wire Phase 2B queue into `CreateCharacterView.swift` (character creation),
-  `StreakPopupView.swift` (streak claim), and the gallery/generation trigger call site
-  (`GalleryView.swift` or equivalent).
-- Add one new generic, reusable toast/banner view for rollback-failure errors (not
-  chat-styled — a plain top-level dismissible banner).
 
 ## Testing
 
 No XCTest target found in the repo. Verification will be manual: build succeeds in
 Xcode, and manual simulator runs covering:
-- Character creation, streak claim, photo generation — confirm instant UI update.
-- Kill app mid-flight after triggering an action — confirm the durable queue resumes
-  and completes (or rolls back) on next launch.
-- Character list / gallery scrolling — confirm images appear without visible
-  lazy-load pop-in on a warm cache.
+- Open a character's gallery (`GalleryView`) and profile (`CharacterProfileView`) —
+  confirm photos appear without visible lazy-load pop-in when scrolling/swiping.
+- As a non-PRO user, confirm locked profile photos still show the frosted placeholder
+  and are never downloaded (check network requests).
+- Simulate a failed image load (e.g. airplane mode mid-scroll) — confirm one retry
+  happens and the view doesn't hang or crash.
