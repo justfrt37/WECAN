@@ -38,6 +38,7 @@ struct GalleryView: View {
         }
         .task {
             yourPhotos = (try? await GeneratedPhotoService().fetch(characterId: character.id)) ?? []
+            await ImageCache.shared.prefetch(yourPhotos)
         }
     }
 
