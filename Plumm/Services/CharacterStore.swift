@@ -39,6 +39,10 @@ final class CharacterStore {
 
     func setLevel(_ id: UUID, level: Int, progress: Double) {
         levelCache[id] = (level, progress)
+        // KALICI olarak da yaz: bu ve levelCache bellek-içi, uygulama yeniden
+        // açılınca boş başlıyor ve seviye sunucu hidrasyonuna kadar yanlış
+        // görünüyordu (bkz. RelationshipLevelStore).
+        RelationshipLevelStore.set(id, level: level, progress: progress)
     }
 
     /// Bumped any time a message is injected into LocalConversationStore

@@ -122,13 +122,19 @@ final class LocalConversationStore {
     }
 
     func save(_ stored: Stored, for id: UUID) {
-        lock.lock(); defer { lock.unlock() }
+        lock.lock()
         mem[userKey(), default: [:]][id] = stored
+        lock.unlock()
+        // Seviyeyi KALICI önbelleğe de yaz — bellek-içi tablo uygulama yeniden
+        // açılınca boş başlıyor (bkz. RelationshipLevelStore).
+        RelationshipLevelStore.set(id, level: stored.level, progress: stored.levelProgress)
     }
 
     func clear(for id: UUID) {
-        lock.lock(); defer { lock.unlock() }
+        lock.lock()
         mem[userKey()]?[id] = nil
+        lock.unlock()
+        RelationshipLevelStore.remove(id)
     }
 
     /// Bu oturumda (sunucudan hidrasyon + onboarding + gönderim) önbelleğe
@@ -140,8 +146,10 @@ final class LocalConversationStore {
 
     /// Tüm bellek-içi önbelleği temizler (mevcut kullanıcı için).
     func clearAll() {
-        lock.lock(); defer { lock.unlock() }
+        lock.lock()
         mem[userKey()] = [:]
+        lock.unlock()
+        RelationshipLevelStore.removeAll()
     }
 
     // MARK: - Özet güncelle (özetleme tamamlandığında çağrılır)
@@ -199,6 +207,7 @@ final class LocalConversationStore {
         mem[key]?[id]?.level = level
         mem[key]?[id]?.levelProgress = levelProgress
         mem[key]?[id]?.msgCounter = msgCounter
+        RelationshipLevelStore.set(id, level: level, progress: levelProgress)
     }
 
     /// `detectedLanguage`'ı en son asistan mesajından yeniden hesaplar
@@ -235,6 +244,7 @@ final class LocalConversationStore {
         if !keepLevel {
             mem[key]?[id]?.level = 1
             mem[key]?[id]?.levelProgress = 0
+            RelationshipLevelStore.set(id, level: 1, progress: 0)
         }
     }
 
