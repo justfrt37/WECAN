@@ -111,6 +111,16 @@ struct CharacterProfileView: View {
         .sheet(isPresented: $showLevels) {
             RelationshipLevelsView(currentLevel: userLevel)
         }
+        .task { await ImageCache.shared.prefetch(unlockedImages) }
+    }
+
+    /// `images` filtered to what's actually downloadable — mirrors the per-index
+    /// lock check in `hero`/`photosSection` (idx 0 always unlocked, rest require PRO)
+    /// so locked photos are never prefetched/downloaded.
+    private var unlockedImages: [URL] {
+        images.enumerated()
+            .filter { idx, _ in idx == 0 || PurchaseService.shared.isPro }
+            .map(\.element)
     }
 
     // MARK: Hero (kaydırılabilir resimler + isim + seviye)
