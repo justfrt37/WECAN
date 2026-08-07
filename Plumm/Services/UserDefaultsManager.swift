@@ -16,7 +16,6 @@ final class UserDefaultsManager {
         static let userId = "auth.userId"
         static let accessToken = "auth.accessToken"
         static let refreshToken = "auth.refreshToken"
-        static let hasSeenSwipeTutorial = "feed.hasSeenSwipeTutorial"
         static let skipMeetConfirm = "feed.skipMeetConfirm"
     }
 
@@ -56,11 +55,6 @@ final class UserDefaultsManager {
         Keychain.write(key, legacy)
         defaults.removeObject(forKey: key)
         return legacy
-    }
-
-    var hasSeenSwipeTutorial: Bool {
-        get { defaults.bool(forKey: Keys.hasSeenSwipeTutorial) }
-        set { defaults.set(newValue, forKey: Keys.hasSeenSwipeTutorial) }
     }
 
     /// Kullanıcı "bir daha gösterme" kutucuğunu işaretlediyse, Keşfet'te beğenince

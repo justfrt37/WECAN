@@ -23,11 +23,13 @@ struct CharacterProfileView: View {
     private var userLevel: Int {
         characterStore?.levelCache[character.id]?.level
             ?? LocalConversationStore.shared.load(for: character.id)?.level
+            ?? RelationshipLevelStore.level(for: character.id)?.level
             ?? max(1, character.relationshipLevel)
     }
     private var userLevelProgress: Double {
         characterStore?.levelCache[character.id]?.progress
             ?? LocalConversationStore.shared.load(for: character.id)?.levelProgress
+            ?? RelationshipLevelStore.level(for: character.id)?.progress
             ?? 0
     }
     /// Chat header'ındakiyle aynı yerel hesap (bkz. ChatViewModel.currentActivity) —
@@ -225,9 +227,12 @@ struct CharacterProfileView: View {
             .buttonStyle(.plain)
     }
 
+    /// Daire, hero fotonun üstünde durduğu için soluk kalıyordu — kaynak
+    /// (bkz. kullanıcı talebi) daha PARLAK: boş iz belirgin (0.12 → 0.35),
+    /// dolu halka tam opak + pembe glow, ortadaki kalp/LV yazısı gölgeli.
     private var levelCircleContent: some View {
         ZStack {
-            Circle().stroke(.white.opacity(0.12), lineWidth: 3)
+            Circle().stroke(.white.opacity(0.35), lineWidth: 3)
             Circle()
                 .trim(from: 0, to: userLevelProgress)
                 .stroke(
@@ -236,14 +241,17 @@ struct CharacterProfileView: View {
                     style: StrokeStyle(lineWidth: 3, lineCap: .round)
                 )
                 .rotationEffect(.degrees(-90))
+                .shadow(color: AppColor.pink.opacity(0.9), radius: 6)
                 .animation(.easeInOut(duration: 0.6), value: userLevelProgress)
             VStack(spacing: 1) {
                 Image(systemName: "heart.fill")
                     .font(.system(size: 13))
                     .foregroundStyle(AppColor.pink)
+                    .shadow(color: .black.opacity(0.6), radius: 3, y: 1)
                 Text("LV \(userLevel)")
                     .font(.system(size: 10, weight: .heavy))
                     .foregroundStyle(.white)
+                    .shadow(color: .black.opacity(0.7), radius: 3, y: 1)
             }
         }
         .frame(width: 64, height: 64)

@@ -18,7 +18,9 @@ enum CallState: Equatable {
     case speaking
     case ended(reason: EndReason)
 
-    enum EndReason: Equatable { case userEnded, insufficientTokens, error }
+    /// `notEntitled`: ses Pro+ / Pro Max hakkı (bkz. _shared/entitlements.ts) —
+    /// aramayı kapatıp yükseltme paywall'ı gösterilir.
+    enum EndReason: Equatable { case userEnded, insufficientTokens, notEntitled, error }
 }
 
 @MainActor
@@ -82,6 +84,9 @@ final class CallViewModel {
         } catch CallServiceError.insufficientTokens {
             debug("voice-call-start: insufficient tokens")
             state = .ended(reason: .insufficientTokens)
+            return
+        } catch CallServiceError.notEntitled {
+            state = .ended(reason: .notEntitled)
             return
         } catch {
             debug("voice-call-start failed: \(error)")

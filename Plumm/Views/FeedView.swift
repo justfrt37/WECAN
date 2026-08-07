@@ -9,7 +9,6 @@ struct FeedView: View {
     @Environment(CharacterStore.self) private var store
     @State private var currentIndex = 0
     @State private var dragOffset = CGSize.zero
-    @State private var showTutorial = !UserDefaultsManager.shared.hasSeenSwipeTutorial
 
     /// Gösterilecek deste — `body` içinde HER frame yeniden filtrelenmek yerine
     /// (drag sırasında ~6×/frame + karakter başına UserDefaults/disk okuması)
@@ -92,13 +91,6 @@ struct FeedView: View {
                     )
                 } else {
                     emptyState
-                }
-
-                if showTutorial {
-                    SwipeTutorialOverlay {
-                        UserDefaultsManager.shared.hasSeenSwipeTutorial = true
-                        showTutorial = false
-                    }
                 }
 
             }
@@ -397,63 +389,6 @@ private struct FeedCard: View {
     }
 }
 
-/// İlk kullanımda gösterilen, sağa/sola kaydırmayı öğreten katman.
-/// Ekranın herhangi bir yerine dokununca kapanır, bir daha gösterilmez.
-private struct SwipeTutorialOverlay: View {
-    let onDismiss: () -> Void
-    @State private var handOffset: CGFloat = -40
-
-    var body: some View {
-        ZStack {
-            Color.black.opacity(0.75).ignoresSafeArea()
-
-            VStack(spacing: 28) {
-                Spacer()
-
-                HStack(spacing: 16) {
-                    tutorialBadge(emoji: "🙅", text: "NOPE", caption: "Swipe left: pass")
-                    tutorialBadge(emoji: "🔥", text: "LIKE", caption: "Swipe right: like")
-                }
-
-                Image(systemName: "hand.draw.fill")
-                    .font(.system(size: 46, weight: .bold))
-                    .foregroundStyle(.white)
-                    .offset(x: handOffset)
-                    .onAppear {
-                        withAnimation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true)) {
-                            handOffset = 40
-                        }
-                    }
-
-                Text("Tap anywhere to continue")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.7))
-
-                Spacer()
-            }
-            .padding(.horizontal, 32)
-        }
-        .contentShape(Rectangle())
-        .onTapGesture { onDismiss() }
-        .transition(.opacity)
-    }
-
-    private func tutorialBadge(emoji: String, text: LocalizedStringKey, caption: LocalizedStringKey) -> some View {
-        VStack(spacing: 6) {
-            Text(emoji).font(.system(size: 30))
-            Text(text)
-                .font(.system(size: 15, weight: .black))
-                .foregroundStyle(.white)
-            Text(caption)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(.white.opacity(0.6))
-                .multilineTextAlignment(.center)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 14)
-        .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 16))
-    }
-}
 
 /// Beğeniden sonra "tanışmak ister misin?" onayı — evet derse sohbete geçer,
 /// hazır bir açılış mesajı ("prefillText") mesaj kutusuna önceden yazılır.

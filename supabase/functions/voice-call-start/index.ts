@@ -17,6 +17,7 @@ import {
 } from "../_shared/directiveHelpers.ts";
 import { elevenVoiceIdFor } from "../_shared/elevenVoiceMap.ts";
 import { stabilityFor } from "../_shared/elevenVoiceSettings.ts";
+import { requireVoiceEntitlement } from "../_shared/entitlements.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -151,6 +152,11 @@ Deno.serve(async (req: Request) => {
   try {
     const uid = userIdFromJWT(req.headers.get("Authorization"));
     if (!uid) return json({ error: "unauthorized" }, 401);
+
+    // Sesli arama Pro+ / Pro Max hakkı (bkz. _shared/entitlements.ts) — Pro'da
+    // yok. Oturum açılmadan ve jeton düşülmeden ÖNCE kontrol edilir.
+    const voiceGate = await requireVoiceEntitlement(db, uid);
+    if (voiceGate) return json(voiceGate.body, voiceGate.status);
 
     const body = await req.json();
     const characterId: string = body.characterId;

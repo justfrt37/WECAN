@@ -63,14 +63,56 @@ struct OnboardingPaywallView: View {
         onboarding.selectedCharacter?.selectedVideo ?? "onb4Video"
     }
 
-    /// Önceki özellik listesi (tik'li). Şimdilik tüm tier'larda aynı; tier'a göre
-    /// farklılaştırmak istenirse switch'e dönüştürülebilir.
+    /// Tik'li özellik listesi — tier'a göre DEĞİŞEN kısımlar üstte (jeton,
+    /// karakter hakkı, ses), her tier'da AYNI olanlar altta. İş kuralları
+    /// sunucuda tanımlı (supabase/functions/_shared/entitlements.ts); buradaki
+    /// metinler `SubscriptionTier` aynasından üretilir ki ikisi ayrışmasın.
     private func features(for tier: SubscriptionTier) -> [String] {
-        ["Voice conversations",
-         "Unlimited photos",
-         "Create your own girl",
-         "Unlimited access (24/7)",
-         "Long-term memory"]
+        var list: [String] = []
+
+        // 1) Jeton — seçili süreye göre değiştiği için seçili paketten okunur
+        //    (yıllıkta 12.000, haftalıkta 250 vb.); paket henüz yüklenmediyse
+        //    atlanır. Jeton her dönem YENİLENİR (tek seferlik değil, bkz.
+        //    sync-subscription dönem grant'ı) — metin bunu açıkça söylüyor.
+        if let pkg = selectedPackage, pkg.tokenAmount > 0 {
+            list.append("\(pkg.tokenAmount.formatted()) renewable coins, \(Self.renewalPhrase(pkg.periodName))")
+        }
+
+        // 2) Karakter yaratma hakkı — Pro 1, Pro+ 5, Pro Max sınırsız.
+        switch tier.weeklyCharacterSlots {
+        case nil:
+            list.append("Unlimited character creation")
+        case 1:
+            list.append("Create 1 character per week")
+        case let slots?:
+            list.append("Create \(slots) characters per week")
+        }
+
+        // 3) Ses — Pro'da YOK, kalanlarda var. Yoksa listeye hiç eklenmez
+        //    (tik'li listede "yok" satırı göstermek kafa karıştırır).
+        if tier.canUseVoice {
+            list.append("Voice messages & voice calls")
+        }
+
+        // 4) Her tier'da aynı olanlar.
+        list.append(contentsOf: [
+            "Unlimited photos",
+            "Unlimited access (24/7)",
+            "Long-term memory",
+        ])
+        return list
+    }
+
+    /// Yenilenme sıklığı — `PaywallPackage.periodName` ("Weekly"/"Monthly"/
+    /// "Yearly") karşılığı. Periyot bilinmiyorsa dönem-nötr ("every period")
+    /// döner, yanlış bir süre uydurmaz.
+    private static func renewalPhrase(_ periodName: String) -> String {
+        switch periodName {
+        case "Weekly":  return String(localized: "every week")
+        case "Monthly": return String(localized: "every month")
+        case "Yearly":  return String(localized: "every year")
+        default:        return String(localized: "every period")
+        }
     }
 
     var body: some View {

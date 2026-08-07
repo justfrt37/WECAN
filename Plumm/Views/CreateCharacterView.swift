@@ -44,9 +44,14 @@ private let roleOptions: [RoleOption] = [
 // one curated set fixes that gap and drops incoherent role/vibe pairings
 // (e.g. Distant+Energetic). `role`/`vibe` still map 1:1 to the existing
 // `personality_role`/`builder_selections.vibe` fields — no backend change.
-// `crazy`/`ex` keep their existing single-role behavior (no vibe pairing,
-// same as before), just borrowing one of the 4 existing vibe photos below
-// so their card isn't blank.
+// `ex` keeps its existing single-role behavior (no vibe pairing, same as
+// before), just borrowing one of the 4 existing vibe photos below so its
+// card isn't blank.
+//
+// KALDIRILAN seçenekler (bkz. kullanıcı talebi): Livewire (playful+Energetic),
+// Adoring (devoted+Energetic) ve Crazy. Yalnızca sihirbazdaki SEÇENEK gitti —
+// `crazy` rolü backend'de ve roleOptions'ta duruyor, çünkü bu rolle YARATILMIŞ
+// mevcut karakterler (ve DEV düzenleme ekranı) çalışmaya devam etmeli.
 private struct PersonalityOption: Identifiable {
     let id: String
     let role: String    // → personality_role
@@ -74,21 +79,12 @@ private let personalityOptions: [PersonalityOption] = [
     .init(id: "shy_mysterious", role: "shy", vibe: "Mysterious",
           label: String(localized: "Quiet Mystery"),
           description: String(localized: "Reserved outside, secretly deep")),
-    .init(id: "playful_energetic", role: "playful", vibe: "Energetic",
-          label: String(localized: "Livewire"),
-          description: String(localized: "Loud, witty, chaotic energy")),
     .init(id: "playful_mysterious", role: "playful", vibe: "Mysterious",
           label: String(localized: "Trickster"),
           description: String(localized: "Teasing jokes, keeps you guessing")),
     .init(id: "devoted_sweet", role: "devoted", vibe: "Sweet",
           label: String(localized: "Devoted Sweetheart"),
           description: String(localized: "Warm and attached from day one")),
-    .init(id: "devoted_energetic", role: "devoted", vibe: "Energetic",
-          label: String(localized: "Adoring"),
-          description: String(localized: "Enthusiastic, always excited for you")),
-    .init(id: "crazy", role: "crazy", vibe: "Energetic",
-          label: String(localized: "Crazy"),
-          description: String(localized: "Intense love, always overthinking")),
     .init(id: "ex", role: "ex", vibe: "Mysterious",
           label: String(localized: "The Ex"),
           description: String(localized: "Acts like she's moved on… hasn't")),

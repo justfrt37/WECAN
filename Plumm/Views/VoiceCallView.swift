@@ -193,6 +193,7 @@ struct VoiceCallView: View {
             switch reason {
             case .userEnded: return String(localized: "Call ended")
             case .insufficientTokens: return String(localized: "Out of tokens — call ended")
+            case .notEntitled: return String(localized: "Voice calls require Pro+")
             case .error: return String(localized: "Call failed")
             }
         }

@@ -321,7 +321,15 @@ struct ChatView: View {
                 // PRO değilse coin (kalp) rozeti yerine PRO butonu; PRO ise coin
                 // rozeti. Ayarlar hep yanında (bkz. kullanıcı talebi). Sohbette
                 // global overlay rozeti gizli (bkz. MainTabView).
-                headerButton("phone.fill", action: { showVoiceCall = true })
+                // Sesli arama Pro+ / Pro Max hakkı (Pro'da YOK, bkz.
+                // _shared/entitlements.ts) — hakkı olmayana paywall açılır.
+                headerButton("phone.fill", action: {
+                    if PurchaseService.shared.canUseVoice {
+                        showVoiceCall = true
+                    } else {
+                        viewModel.showPaywall = true
+                    }
+                })
                 if PurchaseService.shared.isPro {
                     TokenBadge(tokenStore: tokenStore) { showTokenStore = true }
                 } else {
