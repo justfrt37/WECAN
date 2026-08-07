@@ -324,8 +324,9 @@ final class ChatViewModel {
     func send(_ preset: String? = nil) {
         let text = (preset ?? inputText).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !isSending, !isLoadingHistory else { return }
+        let cost = 1
         // Kredi yetmiyorsa istek ATMA — paywall aç (PRO→coin, değilse→PRO).
-        guard hasTokensOrPaywall() else { return }
+        guard hasTokensOrPaywall(cost: cost) else { return }
 
         // Zaman farkındalığı için — yeni mesajı eklemeden ÖNCEki son mesajın zamanı.
         let lastMessageAt = messages.last?.createdAt
@@ -337,6 +338,10 @@ final class ChatViewModel {
         inputText = ""
         isSending = true
         errorMessage = nil
+        // Rozeti sunucu cevabını (tam tur: yazıyor balonu + cevap üretimi) beklemeden
+        // ANINDA düşür — gerçek maliyet sunucudan gelince (handleTokenBalance) veya
+        // hata/red durumunda (refresh()) düzeltilir, bkz. catch bloğu.
+        if let balance = tokenStore?.balance { tokenStore?.setBalance(balance - cost) }
 
         Task {
             await handleWakeUpIfAsleep()
@@ -379,12 +384,15 @@ final class ChatViewModel {
                 }
             } catch {
                 if isInsufficientTokensError(error) {
-                    presentInsufficientTokensPaywall()   // uyarı yok, paywall aç
+                    presentInsufficientTokensPaywall()   // uyarı yok, paywall aç (kendi içinde refresh() var)
                 } else {
                     errorMessage = error.localizedDescription
                     if let idx = messages.firstIndex(where: { $0.id == userMsg.id }) {
                         messages[idx].failed = true
                     }
+                    // İstek sunucuya ulaşmadı/başarısız oldu → sunucu ÜCRETLENDİRMEDİ.
+                    // Yukarıdaki anlık düşüşü gerçek bakiyeyle düzelt (bkz. gönderim başı).
+                    Task { await tokenStore?.refresh() }
                 }
                 showsTypingBubble = false
                 store?.setTyping(character.id, false)
