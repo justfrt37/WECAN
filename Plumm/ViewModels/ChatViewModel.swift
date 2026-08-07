@@ -460,8 +460,9 @@ final class ChatViewModel {
     func sendUserVoice(transcript: String, audioURL: URL) {
         let trimmed = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, !isSending, !isLoadingHistory else { return }
+        let cost = 1
         // Kredi yetmiyorsa istek ATMA — paywall aç.
-        guard hasTokensOrPaywall() else { return }
+        guard hasTokensOrPaywall(cost: cost) else { return }
 
         let lastMessageAt = messages.last?.createdAt
         let messageID = UUID()
@@ -481,6 +482,8 @@ final class ChatViewModel {
         isImageArmed = false
         isSending = true
         errorMessage = nil
+        // Rozeti sunucu cevabını beklemeden ANINDA düşür — bkz. send().
+        if let balance = tokenStore?.balance { tokenStore?.setBalance(balance - cost) }
 
         Task {
             await handleWakeUpIfAsleep()
@@ -516,12 +519,14 @@ final class ChatViewModel {
                 }
             } catch {
                 if isInsufficientTokensError(error) {
-                    presentInsufficientTokensPaywall()   // uyarı yok, paywall aç
+                    presentInsufficientTokensPaywall()   // uyarı yok, paywall aç (kendi içinde refresh() var)
                 } else {
                     errorMessage = error.localizedDescription
                     if let idx = messages.firstIndex(where: { $0.id == userMsg.id }) {
                         messages[idx].failed = true
                     }
+                    // Sunucu ücretlendirmedi → anlık düşüşü gerçek bakiyeyle düzelt.
+                    Task { await tokenStore?.refresh() }
                 }
                 showsTypingBubble = false
                 store?.setTyping(character.id, false)
@@ -701,6 +706,8 @@ final class ChatViewModel {
         guard let userMessageIdx = messages[..<idx].lastIndex(where: { $0.role == .user }) else { return }
         // Token yetmiyorsa HİÇ loading gösterme — doğrudan paywall/coin mağazası.
         guard hasTokensOrPaywall(cost: 12) else { return }
+        // Rozeti sunucu cevabını beklemeden ANINDA düşür — bkz. send().
+        if let balance = tokenStore?.balance { tokenStore?.setBalance(balance - 12) }
         let text = messages[userMessageIdx].content
         let lastMessageAt = userMessageIdx > 0 ? messages[userMessageIdx - 1].createdAt : nil
 
@@ -767,11 +774,13 @@ final class ChatViewModel {
                     generatingVoiceMessageIDs.remove(messageID)
                     showPaywall = true
                     isSending = false
+                    Task { await tokenStore?.refresh() }  // ücretlendirilmedi → düzelt
                     return
                 case .failure:
                     generatingVoiceMessageIDs.remove(messageID)
                     errorMessage = String(localized: "Voice message failed to generate.")
                     isSending = false
+                    Task { await tokenStore?.refresh() }  // ücretlendirilmedi → düzelt
                     return
                 }
                 guard let savedPath = VoicePlayer.saveVoiceMessage(audioData, messageID: messageID) else {
@@ -809,9 +818,10 @@ final class ChatViewModel {
             } catch {
                 generatingVoiceMessageIDs.remove(messageID)
                 if isInsufficientTokensError(error) {
-                    presentInsufficientTokensPaywall()   // uyarı yok, paywall aç
+                    presentInsufficientTokensPaywall()   // uyarı yok, paywall aç (kendi içinde refresh() var)
                 } else {
                     errorMessage = error.localizedDescription
+                    Task { await tokenStore?.refresh() }  // ücretlendirilmedi → düzelt
                 }
             }
             isSending = false
@@ -877,6 +887,8 @@ final class ChatViewModel {
         else { return }
         // Token yetmiyorsa HİÇ loading gösterme — doğrudan paywall/coin mağazası.
         guard hasTokensOrPaywall(cost: 25) else { return }
+        // Rozeti sunucu cevabını beklemeden ANINDA düşür — bkz. send().
+        if let balance = tokenStore?.balance { tokenStore?.setBalance(balance - 25) }
 
         generatingImageMessageIDs.insert(messageID)
         isSending = true
@@ -964,15 +976,21 @@ final class ChatViewModel {
             } catch {
                 generatingImageMessageIDs.remove(messageID)
                 if isInsufficientTokensError(error) {
-                    presentInsufficientTokensPaywall()   // uyarı yok, paywall aç
+                    presentInsufficientTokensPaywall()   // uyarı yok, paywall aç (kendi içinde refresh() var)
                 } else if isNoPhotoError(error) {
                     // Havuzda gönderilebilir foto yok — bekleyen balonu kaldır ve
                     // kullanıcıya net bir hata göster (Grok'tan üretim YOK).
                     messages.removeAll { $0.id == messageID }
                     updateCache()
                     errorMessage = String(localized: "Şu an sana gönderebileceğim bir fotoğraf yok.")
+                    Task { await tokenStore?.refresh() }  // ücretlendirilmedi → düzelt
                 } else {
                     errorMessage = error.localizedDescription
+                    // Hâlâ ANINDA düşürülmüş bakiyeyi taşıyor olabiliriz (görsel
+                    // üretimi bitip caption turu başarısız olmuş olabilir) —
+                    // ya da hiç ücretlendirilmemiş olabilir; ikisinde de gerçek
+                    // bakiyeyle düzeltmek güvenli (refresh salt-okunur senkron).
+                    Task { await tokenStore?.refresh() }
                 }
                 showsTypingBubble = false
                 isSendingImageReply = false
