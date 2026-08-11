@@ -28,7 +28,7 @@ struct ProfileView: View {
 
     // TODO: gerçek URL'lerle değiştir (App Store / gizlilik / koşullar).
     private let shareURL = URL(string: "https://apps.apple.com/app/id0000000000")!
-    private let supportMailURL = URL(string: "mailto:destek@wecan.app")!
+    private let supportMailURL = URL(string: "mailto:plumappx@protonmail.com")!
     private let cardRadius: CGFloat = 18
 
     var body: some View {
