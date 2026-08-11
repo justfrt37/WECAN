@@ -40,6 +40,12 @@ struct OnboardingPaywallView: View {
     @State private var selectedPackageID: String?
     @State private var isPurchasing = false
 
+    /// Zaten Pro/Pro+/Max sahibi biri paywall'ı tekrar açarsa (bkz. kullanıcı
+    /// talebi) kendi planını ya da daha düşüğünü göstermek yerine SADECE daha
+    /// yüksek tier'lar + en sağda "Buy Tokens" seçeneği gösterilir.
+    @State private var buyTokensSelected = false
+    @State private var showTokenStore = false
+
     /// Hangi gate bu paywall'ı açtırdıysa o tier ön-seçili gelsin (ör. voice
     /// gate → Pro+) — yoksa zaten Pro sahibi biri voice engellenince kendi
     /// SAHİP OLDUĞU Pro paketini tekrar tekrar görüyordu (bkz. kullanıcı
@@ -51,6 +57,26 @@ struct OnboardingPaywallView: View {
     private let tiers: [(tier: SubscriptionTier, label: String)] = [
         (.pro, "Pro"), (.proPlus, "Pro+"), (.max, "Pro Max"),
     ]
+
+    private enum PaywallSlot: Hashable {
+        case tier(SubscriptionTier)
+        case buyTokens
+    }
+
+    /// Ücretsiz kullanıcı üç tier'ı da görür (mevcut davranış, değişmedi).
+    /// Zaten abone biri (Pro/Pro+/Max) için: kendi tier'ı ve altındakiler
+    /// listeden düşer, en sağa "Buy Tokens" eklenir — bkz. kullanıcı talebi.
+    private var visibleSlots: [(slot: PaywallSlot, label: String)] {
+        let current = purchases.tier
+        guard current != .none else {
+            return tiers.map { (.tier($0.tier), $0.label) }
+        }
+        var slots = tiers
+            .filter { $0.tier.rank > current.rank }
+            .map { (PaywallSlot.tier($0.tier), $0.label) }
+        slots.append((.buyTokens, String(localized: "Buy Tokens")))
+        return slots
+    }
 
     private var packages: [PaywallPackage] { purchases.packages(for: selectedTier) }
     private var selectedPackage: PaywallPackage? {
@@ -159,6 +185,21 @@ struct OnboardingPaywallView: View {
             if packages.isEmpty { await purchases.loadOfferings() }
         }
         .task {
+            // Preselected tier gate'in isteğine göre gelir (ör. voice gate →
+            // proPlus); ama kullanıcı zaten O tier'ı ya da daha yükseğini
+            // sahipse artık listede yok — o zaman ilk görünen slot'a düş.
+            let current = purchases.tier
+            guard current != .none, selectedTier.rank <= current.rank else { return }
+            if case let .tier(t)? = visibleSlots.first?.slot {
+                selectedTier = t
+            } else {
+                buyTokensSelected = true
+            }
+        }
+        .fullScreenCover(isPresented: $showTokenStore) {
+            TokenStoreView(tokenStore: tokenStore)
+        }
+        .task {
             try? await Task.sleep(nanoseconds: 2_000_000_000)
             withAnimation(.easeIn(duration: 0.4)) { showClose = true }
         }
@@ -190,25 +231,31 @@ struct OnboardingPaywallView: View {
 
     private var content: some View {
         VStack(spacing: 14) {
-            // Özellikler (tik'li) — tier seçicinin ÜSTÜNDE.
-            VStack(alignment: .leading, spacing: 8) {
-                ForEach(features(for: selectedTier), id: \.self) { f in
-                    HStack(spacing: 10) {
-                        Image(systemName: "checkmark.circle.fill")
-                            .font(.system(size: 18))
-                            .foregroundStyle(Color(hex: 0x34D399))
-                        Text(f)
-                            .font(.system(size: 19, weight: .semibold))
-                            .foregroundStyle(.white)
+            if buyTokensSelected {
+                buyTokensPrompt
+            } else {
+                // Özellikler (tik'li) — tier seçicinin ÜSTÜNDE.
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(features(for: selectedTier), id: \.self) { f in
+                        HStack(spacing: 10) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.system(size: 18))
+                                .foregroundStyle(Color(hex: 0x34D399))
+                            Text(f)
+                                .font(.system(size: 19, weight: .semibold))
+                                .foregroundStyle(.white)
+                        }
                     }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, OBTheme.screenPadding)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, OBTheme.screenPadding)
 
             tierSelector
 
-            if packages.isEmpty {
+            if buyTokensSelected {
+                EmptyView()
+            } else if packages.isEmpty {
                 ProgressView().tint(.white).frame(height: 200)
             } else {
                 VStack(spacing: 8) {
@@ -219,12 +266,13 @@ struct OnboardingPaywallView: View {
                 }
             }
 
-            Button { unlock() } label: {
+            Button { buyTokensSelected ? (showTokenStore = true) : unlock() } label: {
                 Group {
                     if isPurchasing {
                         ProgressView().tint(.white)
                     } else {
-                        Text("Continue").font(.system(size: 25, weight: .heavy))
+                        Text(buyTokensSelected ? "Buy Tokens" : "Continue")
+                            .font(.system(size: 25, weight: .heavy))
                     }
                 }
                 .foregroundStyle(.white)
@@ -239,14 +287,44 @@ struct OnboardingPaywallView: View {
         .padding(.bottom, 15)   // buton yere daha yakın olsun (5px daha yukarı)
     }
 
-    /// Üstteki yatay tier seçici — Pro / Pro+ / Pro Max.
+    /// "Buy Tokens" slot'u seçiliyken özellik listesinin yerini alan kısa
+    /// upsell metni — zaten abone birine aynı planı tekrar satmak yerine.
+    private var buyTokensPrompt: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "bolt.heart.fill")
+                .font(.system(size: 34))
+                .foregroundStyle(Color(hex: 0x34D399))
+            Text("Need more coins right now? Top up anytime without changing your plan.")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(.white)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, OBTheme.screenPadding)
+        .padding(.vertical, 30)
+    }
+
+    /// Üstteki yatay tier seçici — normalde Pro / Pro+ / Pro Max; zaten abone
+    /// biri için sadece daha yüksek tier'lar + en sağda "Buy Tokens" (bkz.
+    /// `visibleSlots`).
     private var tierSelector: some View {
         HStack(spacing: 2) {
-            ForEach(tiers, id: \.tier) { item in
-                let selected = item.tier == selectedTier
+            ForEach(visibleSlots, id: \.slot) { item in
+                let selected: Bool = {
+                    switch item.slot {
+                    case .buyTokens: return buyTokensSelected
+                    case .tier(let t): return !buyTokensSelected && t == selectedTier
+                    }
+                }()
                 Button {
-                    selectedTier = item.tier
-                    selectedPackageID = nil   // yeni tier → varsayılan (yıllık)
+                    switch item.slot {
+                    case .buyTokens:
+                        buyTokensSelected = true
+                    case .tier(let t):
+                        buyTokensSelected = false
+                        selectedTier = t
+                        selectedPackageID = nil   // yeni tier → varsayılan (yıllık)
+                    }
                 } label: {
                     Text(item.label)
                         .font(.system(size: 16, weight: .bold))

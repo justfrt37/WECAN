@@ -75,11 +75,19 @@ export async function syncSubscriptionForUser(uid: string): Promise<SyncResult> 
   }
 
   if (!activeTier) {
+    let bestPriority = Infinity;
     for (const [productId, s] of Object.entries(subs)) {
       const sub = s as { purchase_date?: string; expires_date?: string | null };
       const active = sub.expires_date == null || Date.parse(sub.expires_date) > now;
       const mapped = PRODUCT_TIER[productId];
-      if (active && mapped) { activeTier = mapped; ent = sub; activeProductId = productId; break; }
+      if (!active || !mapped) continue;
+      const priority = TIER_PRIORITY.indexOf(mapped);
+      if (priority !== -1 && priority < bestPriority) {
+        bestPriority = priority;
+        activeTier = mapped;
+        ent = sub;
+        activeProductId = productId;
+      }
     }
   }
 
