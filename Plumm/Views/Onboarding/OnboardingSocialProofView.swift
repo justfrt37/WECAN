@@ -82,7 +82,7 @@ struct OnboardingSocialProofView: View {
                 }
                 .staggered(7, shown: shown)
             }
-            .padding(.horizontal, 24)
+            .padding(.horizontal, OBTheme.screenPadding)
             .padding(.top, 8)
             .padding(.bottom, 20)
         }

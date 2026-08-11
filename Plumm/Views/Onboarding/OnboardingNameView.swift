@@ -48,7 +48,7 @@ struct OnboardingNameView: View {
                     .autocorrectionDisabled()
                     .submitLabel(.done)
                     .onSubmit(advance)
-                    .padding(.horizontal, 20)
+                    .padding(.horizontal, OBTheme.screenPadding)
                     .frame(height: 54)
                     .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 16))
                     .overlay(
@@ -81,7 +81,7 @@ struct OnboardingNameView: View {
                 .opacity(trimmedName.isEmpty ? 0.5 : 1)
                 .animation(.easeInOut(duration: 0.2), value: trimmedName.isEmpty)
             }
-            .padding(.horizontal, 28)
+            .padding(.horizontal, OBTheme.screenPadding)
             .padding(.bottom, 20)
         }
         .contentShape(Rectangle())

@@ -182,7 +182,7 @@ struct OnboardingPaywallView: View {
                 Spacer()
             }
         }
-        .padding(.horizontal, 20)
+        .padding(.horizontal, OBTheme.screenPadding)
         .padding(.top, 8)
     }
 
@@ -204,7 +204,7 @@ struct OnboardingPaywallView: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 24)
+            .padding(.horizontal, OBTheme.screenPadding)
 
             tierSelector
 
@@ -235,7 +235,7 @@ struct OnboardingPaywallView: View {
 
             legalRow
         }
-        .padding(.horizontal, 20)
+        .padding(.horizontal, OBTheme.screenPadding)
         .padding(.bottom, 15)   // buton yere daha yakın olsun (5px daha yukarı)
     }
 

@@ -50,7 +50,7 @@ struct OnboardingReadyView: View {
                     .background(OBTheme.buttonGradient, in: RoundedRectangle(cornerRadius: 20))
                     .shadow(color: .black.opacity(0.45), radius: 18, y: 6)
                 }
-                .padding(.horizontal, 24)
+                .padding(.horizontal, OBTheme.screenPadding)
                 .padding(.bottom, 72)
             }
             .frame(maxWidth: .infinity)
