@@ -90,9 +90,12 @@ Deno.serve(async (req: Request) => {
     const logPromise = (async () => {
       const replyText = await accumulateReply(captureStream);
       if (replyText) {
-        // Ayrı çağrılar — tek insert() ile array'deki satırlar Postgres'in
-        // `now()` (created_at default) değerini AYNI alır, sıralama garantisiz
-        // kalır (bkz. chat/index.ts'deki aynı sorunun düzeltmesi).
+        // Sıralama artık call_turns.seq'e (identity kolonu, migration 024)
+        // dayanıyor, created_at'e DEĞİL — bu fonksiyon HER turda ayrı bir
+        // HTTP çağrısı olarak tetikleniyor (ElevenLabs), fire-and-forget
+        // waitUntil ile, çağrılar arası hiçbir sıra garantisi yok; wall-clock
+        // zaman damgası bu yüzden güvenilmezdi, Postgres'in insert-sırası
+        // identity'si güvenilir.
         await db.from("call_turns").insert({ call_session_id: callSessionId, role: "user", content: lastUserMessage });
         await db.from("call_turns").insert({ call_session_id: callSessionId, role: "assistant", content: replyText });
       }

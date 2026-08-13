@@ -58,7 +58,7 @@ async function callGrok(messages: { role: string; content: string }[], maxTokens
 
 async function extractAndStoreMemories(conversationId: string, callSessionId: string) {
   const { data: turns } = await db.from("call_turns")
-    .select("role, content").eq("call_session_id", callSessionId).order("created_at", { ascending: true });
+    .select("role, content").eq("call_session_id", callSessionId).order("seq", { ascending: true });
   if (!turns || turns.length === 0) return;
 
   const activeMemories = await fetchActiveMemories(db, conversationId);
