@@ -26,6 +26,9 @@ import {
   fetchDirectiveMemoriesBehaviors as sharedFetchDirectiveMemoriesBehaviors,
   memoriesBlock,
   behaviorsBlock,
+  fetchActiveMemories,
+  numberedMemoryLines,
+  applyMemoryExtraction,
   REVIEW_DIRECTIVE,
 } from "../_shared/directiveHelpers.ts";
 
@@ -162,9 +165,29 @@ async function fetchDirective(characterId: string, role: string, level: number):
 }
 
 async function fetchDirectiveMemoriesBehaviors(
-  characterId: string, role: string, level: number, conversationId: string,
+  characterId: string, role: string, level: number, conversationId: string, memoryQueryText: string,
 ) {
-  return sharedFetchDirectiveMemoriesBehaviors(db, characterId, role, level, conversationId);
+  return sharedFetchDirectiveMemoriesBehaviors(db, characterId, role, level, conversationId, memoryQueryText);
+}
+
+// Query text for memory similarity retrieval — last 2 prior DB messages
+// plus (if given) the live message this turn, so retrieval reflects what's
+// actually being discussed right now rather than the whole history. A
+// small separate indexed query (messages_conv_idx) rather than reusing the
+// later KEEP_RECENT fetch, which happens further down after the system
+// prompt (and thus the memories block) is already built — see that fetch's
+// own comment on prompt-cache prefix ordering for why it can't move earlier.
+async function recentTurnsQueryText(conversationId: string, liveMessage?: string): Promise<string> {
+  const priorLimit = liveMessage ? 2 : 3;
+  const { data } = await db
+    .from("messages")
+    .select("content")
+    .eq("conversation_id", conversationId)
+    .order("created_at", { ascending: false })
+    .limit(priorLimit);
+  const texts = (data ?? []).map((m) => m.content).reverse();
+  if (liveMessage) texts.push(liveMessage);
+  return texts.join(" ").trim();
 }
 
 // Directive'i çıplak enjekte etmek modelin onu "söylenecek satır" gibi
@@ -1133,8 +1156,9 @@ Deno.serve(async (req: Request) => {
 
       const reactionLevel: number = convo.relationship_level ?? 1;
       const reactionProgress: number = typeof convo.level_progress === "number" ? convo.level_progress : 0;
+      const reactionMemoryQueryText = await recentTurnsQueryText(conversationId);
       const { directive: fetchedReactionDirective, memories: reactionMemoryRows, behaviors: reactionBehaviorRows } =
-        await fetchDirectiveMemoriesBehaviors(characterId, personalityRole, reactionLevel, conversationId);
+        await fetchDirectiveMemoriesBehaviors(characterId, personalityRole, reactionLevel, conversationId, reactionMemoryQueryText);
       const reactionDirective = reviewMode ? REVIEW_DIRECTIVE : fetchedReactionDirective;
       let reactionSystem = systemPrompt;
       reactionSystem += wrapDirective(reactionDirective, Math.round(reactionProgress * 100));
@@ -1179,8 +1203,9 @@ Deno.serve(async (req: Request) => {
     // (her rol için geçerli — ex'e özel değil). memoryRows/behaviorRows used
     // further down, deliberately after all the static rule blocks — see the
     // cache-ordering comment there.
+    const memoryQueryText = await recentTurnsQueryText(conversationId, userMessage);
     const { directive: fetchedDirective, memories: memoryRows, behaviors: behaviorRows } =
-      await fetchDirectiveMemoriesBehaviors(characterId, personalityRole, currentLevel, conversationId);
+      await fetchDirectiveMemoriesBehaviors(characterId, personalityRole, currentLevel, conversationId, memoryQueryText);
     const directive = reviewMode ? REVIEW_DIRECTIVE : fetchedDirective;
     system += `\n\n${directive}`;
 
@@ -1420,7 +1445,8 @@ Deno.serve(async (req: Request) => {
         const convoText = toFold
           .map((m) => `${m.role === "user" ? "User" : "You"}: ${stripVoiceTags(m.content)}`)
           .join("\n");
-        const existingMemoryLines = (memoryRows ?? []).map((m) => `- ${m.content}`).join("\n") || "(none yet)";
+        const activeMemories = await fetchActiveMemories(db, conversationId);
+        const existingMemoryLines = numberedMemoryLines(activeMemories);
         const summaryPrompt: WireMessage[] = [
           {
             role: "system",
@@ -1438,17 +1464,20 @@ Deno.serve(async (req: Request) => {
               "anything superseded or no longer relevant.\n\n" +
               "SEPARATELY, also extract any NEW durable atomic facts worth permanently remembering (name, " +
               "preferences, promises, key relationship moments) that are NOT already covered by the existing " +
-              "memories list you'll be given — do not repeat anything already in that list, even reworded. " +
-              "If there's nothing new, return an empty array.\n\n" +
+              "memories list you'll be given (numbered, one per line) — do not repeat anything already in " +
+              "that list, even reworded. If there's nothing new, return an empty array.\n\n" +
+              "ALSO identify any existing memories (by their number) that this new content now CONTRADICTS " +
+              "— e.g. the user previously said they're a barista and now say they just started a nursing " +
+              "job. Return those numbers in staleIndexes. If nothing is contradicted, return an empty array.\n\n" +
               'Respond with ONLY this JSON shape, nothing else: {"summary":"...","newMemories":["fact one",' +
-              '"fact two"]} — `summary` is the full updated USER/BOT summary text (same format as before), ' +
-              "`newMemories` is the new-facts array described above (can be empty).",
+              '"fact two"],"staleIndexes":[0,2]} — `summary` is the full updated USER/BOT summary text (same ' +
+              "format as before), `newMemories` and `staleIndexes` are the arrays described above (can be empty).",
           },
           {
             role: "user",
             content:
               `Previous summary:\n${convo.summary || "(none)"}\n\n` +
-              `Existing memories (do not repeat these):\n${existingMemoryLines}\n\n` +
+              `Existing memories (numbered — do not repeat these, but flag contradicted ones in staleIndexes):\n${existingMemoryLines}\n\n` +
               `New conversation turns:\n${convoText}\n\nUpdated JSON:`,
           },
         ];
@@ -1462,11 +1491,10 @@ Deno.serve(async (req: Request) => {
           const newMemories: string[] = Array.isArray(parsed?.newMemories)
             ? parsed.newMemories.filter((m: unknown): m is string => typeof m === "string" && m.trim().length > 0)
             : [];
-          if (newMemories.length > 0) {
-            await db.from("memories").insert(
-              newMemories.map((content) => ({ conversation_id: conversationId, content: content.trim() }))
-            );
-          }
+          const staleIndexes: number[] = Array.isArray(parsed?.staleIndexes)
+            ? parsed.staleIndexes.filter((i: unknown): i is number => typeof i === "number" && Number.isInteger(i))
+            : [];
+          await applyMemoryExtraction(db, conversationId, activeMemories, newMemories.map((m) => m.trim()), staleIndexes);
         } catch (e) {
           // Özetleme başarısız olsa bile sohbet bozulmaz; sadece logla.
           console.error("ozetleme hatasi:", String(e));
