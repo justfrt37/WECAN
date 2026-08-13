@@ -1467,10 +1467,16 @@ Deno.serve(async (req: Request) => {
               "character has already been behaving, not just generic persona instructions.\n\n" +
               "Short bullet points under each heading. Keep prior summary content, fold in what's new, drop " +
               "anything superseded or no longer relevant.\n\n" +
-              "SEPARATELY, also extract any NEW durable atomic facts worth permanently remembering (name, " +
-              "preferences, promises, key relationship moments) that are NOT already covered by the existing " +
-              "memories list you'll be given (numbered, one per line) — do not repeat anything already in " +
-              "that list, even reworded. If there's nothing new, return an empty array.\n\n" +
+              "SEPARATELY, also extract any NEW durable atomic facts worth permanently remembering that are " +
+              "NOT already covered by the existing memories list you'll be given (numbered, one per line) — " +
+              "do not repeat anything already in that list, even reworded. If there's nothing new, return an " +
+              "empty array. Include BOTH sides:\n" +
+              "- USER facts: name, preferences, promises, key relationship moments.\n" +
+              "- CHARACTER facts: things the character herself has established/committed to in this " +
+              "conversation — a pet name she's adopted for the user, a boundary she's set, a backstory " +
+              "detail she's improvised (job, hobby, living situation, etc.) that should stay consistent, a " +
+              "promise she made. These matter just as much — a character who forgets her own established " +
+              "details reads as inconsistent, not just one who forgets the user's.\n\n" +
               "ALSO identify any existing memories (by their number) that this new content now CONTRADICTS " +
               "— e.g. the user previously said they're a barista and now say they just started a nursing " +
               "job. Return those numbers in staleIndexes. If nothing is contradicted, return an empty array.\n\n" +

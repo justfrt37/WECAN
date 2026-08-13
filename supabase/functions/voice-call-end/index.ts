@@ -70,10 +70,14 @@ async function extractAndStoreMemories(conversationId: string, callSessionId: st
     {
       role: "system",
       content:
-        "Extract NEW durable atomic facts worth permanently remembering (name, preferences, " +
-        "promises, key relationship moments) from this voice call transcript, that are NOT " +
-        "already covered by the existing memories list you'll be given (numbered, one per line) — do not " +
-        "repeat anything already in that list, even reworded. If there's nothing new, return an empty array. " +
+        "Extract NEW durable atomic facts worth permanently remembering from this voice call transcript, " +
+        "that are NOT already covered by the existing memories list you'll be given (numbered, one per " +
+        "line) — do not repeat anything already in that list, even reworded. If there's nothing new, " +
+        "return an empty array. Include BOTH sides:\n" +
+        "- USER facts: name, preferences, promises, key relationship moments.\n" +
+        "- CHARACTER facts: things the character herself established/committed to on this call — a pet " +
+        "name she used, a boundary she set, a backstory detail she improvised that should stay consistent, " +
+        "a promise she made. These matter just as much as the user's.\n\n" +
         "ALSO identify any existing memories (by their number) that this transcript now CONTRADICTS — e.g. " +
         "the user previously said they're a barista and now say they just started a nursing job. Return " +
         "those numbers in staleIndexes. If nothing is contradicted, return an empty array.\n\n" +
