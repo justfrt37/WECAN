@@ -16,7 +16,7 @@ import {
   fetchDirectiveMemoriesBehaviors, memoriesBlock, behaviorsBlock, REVIEW_DIRECTIVE,
 } from "../_shared/directiveHelpers.ts";
 import { elevenVoiceIdFor } from "../_shared/elevenVoiceMap.ts";
-import { stabilityFor } from "../_shared/elevenVoiceSettings.ts";
+import { callVoiceSettingsFor } from "../_shared/elevenVoiceSettings.ts";
 import { requireVoiceEntitlement } from "../_shared/entitlements.ts";
 
 const corsHeaders = {
@@ -263,7 +263,7 @@ Deno.serve(async (req: Request) => {
     systemPrompt += languageRule(language);
 
     const voiceId = character?.voice_id || elevenVoiceIdFor(personalityRole, vibe);
-    const stability = stabilityFor(personalityRole);
+    const { stability, speed } = callVoiceSettingsFor(personalityRole);
     const firstMessage = await generateFirstMessage(systemPrompt, recentChatGapMinutes);
 
     const { data: session, error } = await db.from("call_sessions").insert({
@@ -293,6 +293,7 @@ Deno.serve(async (req: Request) => {
       systemPrompt,
       voiceId,
       stability,
+      speed,
       firstMessage,
     });
   } catch (e) {

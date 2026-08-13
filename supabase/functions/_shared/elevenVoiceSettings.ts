@@ -22,3 +22,22 @@ const DEFAULT_STABILITY = 0.4;
 export function stabilityFor(role: string): number {
   return STABILITY_MAP[role] ?? DEFAULT_STABILITY;
 }
+
+// TTSOverrides are set ONCE per call (custom-LLM webhook only streams
+// text — no per-reply voice_settings channel exists in that contract, so
+// true per-TURN variance isn't architecturally possible here). This is the
+// honest achievable version: small random jitter applied once at call
+// start, so back-to-back calls with the same character don't sound
+// identically flat — not "changes mid-call," just "not robotically fixed
+// call after call."
+function jitter(base: number, spread: number, min: number, max: number): number {
+  const value = base + (Math.random() * 2 - 1) * spread;
+  return Math.min(max, Math.max(min, Math.round(value * 100) / 100));
+}
+
+export function callVoiceSettingsFor(role: string): { stability: number; speed: number } {
+  return {
+    stability: jitter(stabilityFor(role), 0.05, 0.05, 0.95),
+    speed: jitter(1.0, 0.06, 0.85, 1.15),
+  };
+}

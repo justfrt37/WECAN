@@ -105,7 +105,7 @@ final class CallViewModel {
             agentOverrides: AgentOverrides(
                 prompt: result.systemPrompt, firstMessage: result.firstMessage, language: Language(rawValue: languageCode)
             ),
-            ttsOverrides: TTSOverrides(voiceId: result.voiceId, stability: result.stability),
+            ttsOverrides: TTSOverrides(voiceId: result.voiceId, stability: result.stability, speed: result.speed),
             customLlmExtraBody: ["callSessionId": result.callSessionId],
             onDisconnect: { [weak self] reason in
                 Task { @MainActor in self?.handleDisconnect(reason) }
