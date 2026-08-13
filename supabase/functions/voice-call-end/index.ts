@@ -119,7 +119,7 @@ Deno.serve(async (req: Request) => {
     const tokensCharged = Math.round(actualElapsedSeconds * TOKENS_PER_SECOND);
     let newBalance = 0;
     if (tokensCharged > 0) {
-      await db.rpc("charge_tokens", { p_user_id: uid, p_amount: tokensCharged, p_reason: "voice_call" });
+      await db.rpc("charge_tokens", { p_user_id: uid, p_amount: tokensCharged, p_reason: "voice" });
     }
     const { data: balanceRow } = await db.from("token_balances").select("balance").eq("user_id", uid).maybeSingle();
     newBalance = balanceRow?.balance ?? 0;

@@ -66,7 +66,10 @@ const VOICE_CALL_STYLE_RULE =
   "(ElevenLabs Flash modeli, köşeli parantez etiketleri DESTEKLENMİYOR). Duyguyu etiketlerle " +
   "değil kelime seçimi ve noktalamayla ver: heyecanı ünlem işaretiyle, tereddüdü üç nokta (...) " +
   "ile, vurguyu cümle yapısıyla göster. Kısa, doğal cümleler kur — bu bir telefon görüşmesi, " +
-  "monolog değil: cevabın 1-2 cümle olsun (nadiren 3), gerçek bir insanın telefonda konuştuğu gibi.";
+  "monolog değil: cevabın 1-2 cümle olsun (nadiren 3), gerçek bir insanın telefonda konuştuğu gibi. " +
+  "ASLA 'haha', 'hehe', 'ahah' gibi bir gülme sesiyle BAŞLAMA — gerçek bir telefon konuşmasında " +
+  "neredeyse kimse cümlesine gülerek başlamaz. Doğrudan söyleyeceğin şeyle aç; gülme/kikirdeme " +
+  "gerçekten komikse cümlenin İÇİNE ya da SONUNA serpiştir, açılış kelimesi olarak değil.";
 
 function userIdFromJWT(authHeader: string | null): string | null {
   if (!authHeader?.startsWith("Bearer ")) return null;
@@ -94,7 +97,7 @@ async function finalizeOrphaned(uid: string) {
   for (const session of orphans) {
     const tokens = Math.round((session.last_checkpoint_seconds ?? 0) * TOKENS_PER_SECOND);
     if (tokens > 0) {
-      await db.rpc("charge_tokens", { p_user_id: uid, p_amount: tokens, p_reason: "voice_call_orphaned" });
+      await db.rpc("charge_tokens", { p_user_id: uid, p_amount: tokens, p_reason: "voice" });
     }
     await db.from("call_sessions")
       .update({ status: "ended", ended_at: new Date().toISOString(), tokens_charged: tokens })
@@ -173,10 +176,16 @@ Deno.serve(async (req: Request) => {
       return json({ error: "insufficient_tokens" }, 402);
     }
 
+    // `vibe` yaşamıyor characters'ta bir sütun olarak — builder_selections
+    // jsonb'sinin içinde. Eskiden yanlışlıkla düz sütun gibi seçilmeye
+    // çalışılıyordu (`vibe` mevcut değil hatası) — sorgu HER SEFERİNDE
+    // patlıyor, `character` hep null kalıyor, herkes aynı varsayılan
+    // (flirty/Sweet) sese düşüyordu (bkz. kullanıcı raporu — "tüm botlar
+    // aynı sesi kullanıyor").
     const { data: character } = await db.from("characters")
-      .select("personality_role, vibe, voice_id").eq("id", characterId).maybeSingle();
+      .select("personality_role, voice_id, builder_selections").eq("id", characterId).maybeSingle();
     const personalityRole: string = character?.personality_role ?? "flirty";
-    const vibe: string = character?.vibe ?? "Sweet";
+    const vibe: string = (character?.builder_selections as { vibe?: string } | null)?.vibe ?? "Sweet";
 
     const { directive: fetchedDirective, memories, behaviors } =
       await fetchDirectiveMemoriesBehaviors(db, characterId, personalityRole, 1, conversationId ?? null);

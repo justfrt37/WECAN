@@ -402,7 +402,10 @@ const TEXTING_STYLE_RULE =
   "bir Türk'ün parmaklarından çıkmış gibi dursun. Aynı mantığı İngilizce/Almanca/ " +
   "Fransızca/İspanyolca/Portekizce/İtalyanca için de uygula — o dilin GERÇEK, " +
   "günlük mesajlaşma kısaltmalarını ve rahatlığını kullan (İngilizce'de örn. u, " +
-  "ur, rn, ngl, tbh, lol, gonna, wanna — ama hepsini bir mesaja tıkıştırma).";
+  "ur, rn, ngl, tbh, lol, gonna, wanna — ama hepsini bir mesaja tıkıştırma). " +
+  "ASLA mesaja 'haha', 'hehe', 'lol' gibi bir gülme/kikirdeme ile BAŞLAMA — gerçek " +
+  "mesajlaşmada insanlar neredeyse hiç böyle açmaz. Doğrudan söyleyeceğin şeyle aç; " +
+  "gülme gerçekten yerindeyse cümlenin içine ya da sonuna serpiştir, açılış olarak değil.";
 
 // Shared closing line for TEXTING_STYLE_RULE + VARIATION_RULE — both blocks
 // used to end with their own near-duplicate "don't sound formal/robotic/
