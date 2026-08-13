@@ -8,7 +8,7 @@ import SwiftUI
 struct HelpSupportView: View {
     @Environment(\.dismiss) private var dismiss
 
-    private let supportEmail = "destek@wecan.app"
+    private let supportEmail = "plumappx@protonmail.com"
 
     private let faqs: [(String, String)] = [
         (String(localized: "Are the characters real?"),

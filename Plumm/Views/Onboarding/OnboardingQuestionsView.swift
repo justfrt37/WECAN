@@ -71,7 +71,7 @@ struct OnboardingQuestionsView: View {
                     optionRow(0)
                     optionRow(1)
                 }
-                .padding(.horizontal, 22)
+                .padding(.horizontal, OBTheme.screenPadding)
                 .padding(.bottom, 30)
             }
         }
@@ -145,7 +145,7 @@ struct OnboardingQuestionsView: View {
                     .font(.system(size: 14, weight: .bold))
                     .foregroundStyle(.white.opacity(0.5))
             }
-            .padding(.horizontal, 20)
+            .padding(.horizontal, OBTheme.screenPadding)
             .padding(.vertical, 16)
             .background {
                 if isSelected {

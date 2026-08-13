@@ -93,6 +93,12 @@ enum OBTheme {
     /// Marka adı — Pencil'de "Inter" kullanılıyor ama uygulama Inter'ı bundle
     /// etmiyor; sistem fontu (SF Pro) heavy/bold ile görsel olarak yakın.
     static let brandName = "Plumm"
+
+    /// TÜM onboarding ekranlarının ortak yatay kenar boşluğu. Ekranlar tek tek
+    /// 20/22/24/28 gibi farklı değerler kullanıyordu, içerik kimi ekranda kenara
+    /// yapışık duruyordu (bkz. kullanıcı talebi). Tek kaynak burası — cihaz
+    /// genişliğinden bağımsız olarak her ekranda aynı nefes payı kalır.
+    static let screenPadding: CGFloat = 24
 }
 
 /// Splash ve ONB üstlerinde kullanılan "❤ Plumm" logo satırı.

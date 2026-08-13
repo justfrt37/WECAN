@@ -71,7 +71,7 @@ extension LegalDocument {
                 .p("""
                 Plumm (the “App”) is operated by Miles Warner, Bağdat Caddesi No: 142, Apt. 5, 34710 Kadıköy, İstanbul, Türkiye \
                 (“we”, “us”). For any privacy question or request you can reach us at \
-                destek@wecan.app.
+                plumappx@protonmail.com.
                 """),
             ]),
             LegalSection(heading: "No account, no identity", blocks: [
@@ -201,7 +201,7 @@ extension LegalDocument {
                 .bullets([
                     "Deleting a conversation in the App deletes it on the server, not just on the screen.",
                     "Deleting the App removes everything held locally on the device (your onboarding name, saved photos, cached media) and ends your access to the anonymous session.",
-                    "You can ask us to erase all server-side data attached to your anonymous ID by emailing destek@wecan.app with that ID (Profile tab → tap the ID to copy it). We will action it without undue delay and in any case within 30 days.",
+                    "You can ask us to erase all server-side data attached to your anonymous ID by emailing plumappx@protonmail.com with that ID (Profile tab → tap the ID to copy it). We will action it without undue delay and in any case within 30 days.",
                     "Records we are legally required to keep (for example, purchase records for tax purposes) are retained for the period the law requires.",
                 ]),
             ]),
@@ -211,7 +211,7 @@ extension LegalDocument {
                 or delete your data, to object to or restrict processing, and to complain to \
                 your data protection authority. Because the App is anonymous, we can only act \
                 on such a request if you send us the anonymous ID shown in the Profile tab — it \
-                is the only way we can locate your data. Requests go to destek@wecan.app.
+                is the only way we can locate your data. Requests go to plumappx@protonmail.com.
                 """),
             ]),
             LegalSection(heading: "International transfers", blocks: [
@@ -239,7 +239,7 @@ extension LegalDocument {
                 """),
             ]),
             LegalSection(heading: "Contact", blocks: [
-                .p("Questions, requests or complaints: destek@wecan.app"),
+                .p("Questions, requests or complaints: plumappx@protonmail.com"),
             ]),
         ]
     )
@@ -410,7 +410,7 @@ extension LegalDocument {
                 """),
             ]),
             LegalSection(heading: "16. Contact", blocks: [
-                .p("Miles Warner, Bağdat Caddesi No: 142, Apt. 5, 34710 Kadıköy, İstanbul, Türkiye — destek@wecan.app"),
+                .p("Miles Warner, Bağdat Caddesi No: 142, Apt. 5, 34710 Kadıköy, İstanbul, Türkiye — plumappx@protonmail.com"),
             ]),
         ]
     )

@@ -44,7 +44,7 @@ struct OnboardingCharacterSelectView: View {
                 .frame(maxHeight: .infinity)
                 .padding(.bottom, 8)
             }
-            .padding(.horizontal, 20)
+            .padding(.horizontal, OBTheme.screenPadding)
             .padding(.bottom, 20)
         }
     }

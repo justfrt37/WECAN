@@ -76,6 +76,18 @@ enum PlummCatalog {
 enum SubscriptionTier: String {
     case none, pro, proPlus, max
 
+    /// Sıralama: none < pro < proPlus < max. Paywall'da zaten aboneliği olan
+    /// kullanıcıya sadece DAHA YÜKSEK tier'ları göstermek için (bkz. kullanıcı
+    /// talebi — kendi sahip olduğu ya da daha düşük bir planı tekrar görmesin).
+    var rank: Int {
+        switch self {
+        case .none: return 0
+        case .pro: return 1
+        case .proPlus: return 2
+        case .max: return 3
+        }
+    }
+
     var weeklyTokens: Int {
         switch self {
         case .none: return 0
