@@ -163,7 +163,6 @@ Deno.serve(async (req: Request) => {
 
     const body = await req.json();
     const characterId: string = body.characterId;
-    const conversationId: string | undefined = body.conversationId;
     const reviewMode: boolean = body.reviewMode === true;
     const language: string = body.language ?? "en";
     if (!characterId) return json({ error: "characterId required" }, 400);
@@ -187,26 +186,44 @@ Deno.serve(async (req: Request) => {
     const personalityRole: string = character?.personality_role ?? "flirty";
     const vibe: string = (character?.builder_selections as { vibe?: string } | null)?.vibe ?? "Sweet";
 
+    // Konuşmayı bul ya da oluştur (kullanıcı + karakter) — chat/index.ts'nin
+    // AYNI deseni. Client bir conversationId'yi ASLA takip etmiyor (chat
+    // tarafında da bu id sunucu tarafında (uid, characterId)'den çözülüyor,
+    // istemciye kalıcı bir state olarak hiç dönmüyor) — önceden body'den
+    // client-supplied conversationId bekleniyordu, bu YAPISAL olarak hep
+    // undefined geliyordu ve call_sessions.conversation_id %100 null
+    // kalıyordu (bkz. kullanıcı raporu — sesli arama tabloları conversation
+    // ile eşleşmiyor). En güncel olanı al — dupe'lar varsa maybeSingle patlar.
+    const { data: convoRows } = await db
+      .from("conversations")
+      .select("id")
+      .eq("user_id", uid)
+      .eq("character_id", characterId)
+      .order("updated_at", { ascending: false })
+      .limit(1);
+    let convo = convoRows?.[0];
+    if (!convo) {
+      const ins = await db.from("conversations").insert({ user_id: uid, character_id: characterId }).select("id").single();
+      convo = ins.data!;
+    }
+    const conversationId: string = convo.id;
+
     // Retrieval query text — last 3 prior chat messages for this
     // conversation (a call has no turns of its own yet at start time; the
     // conversation's `messages` table, shared with chat/index.ts, is the
     // only source of "what's currently being discussed"). No prior
-    // messages (brand new conversation, or call started with no
-    // conversationId) → empty string → fetchDirectiveMemoriesBehaviors
-    // skips retrieval and injects no memories block, which is correct.
-    let memoryQueryText = "";
-    if (conversationId) {
-      const { data: recentForQuery } = await db
-        .from("messages")
-        .select("content")
-        .eq("conversation_id", conversationId)
-        .order("created_at", { ascending: false })
-        .limit(3);
-      memoryQueryText = (recentForQuery ?? []).map((m) => m.content).reverse().join(" ").trim();
-    }
+    // messages (brand new conversation) → empty string →
+    // fetchDirectiveMemoriesBehaviors skips retrieval, no memories block.
+    const { data: recentForQuery } = await db
+      .from("messages")
+      .select("content")
+      .eq("conversation_id", conversationId)
+      .order("created_at", { ascending: false })
+      .limit(3);
+    const memoryQueryText = (recentForQuery ?? []).map((m) => m.content).reverse().join(" ").trim();
 
     const { directive: fetchedDirective, memories, behaviors } =
-      await fetchDirectiveMemoriesBehaviors(db, characterId, personalityRole, 1, conversationId ?? "", memoryQueryText);
+      await fetchDirectiveMemoriesBehaviors(db, characterId, personalityRole, 1, conversationId, memoryQueryText);
     const directive = reviewMode ? REVIEW_DIRECTIVE : fetchedDirective;
     let systemPrompt = directive;
     systemPrompt += memoriesBlock(memories);
@@ -221,7 +238,7 @@ Deno.serve(async (req: Request) => {
     const { data: session, error } = await db.from("call_sessions").insert({
       user_id: uid,
       character_id: characterId,
-      conversation_id: conversationId ?? null,
+      conversation_id: conversationId,
       status: "active",
     }).select("id").single();
     if (error || !session) return json({ error: String(error) }, 500);
