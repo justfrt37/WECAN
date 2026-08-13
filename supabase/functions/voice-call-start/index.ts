@@ -105,11 +105,36 @@ async function finalizeOrphaned(uid: string) {
   }
 }
 
+// Opener instruction is built here (not baked into the persistent
+// systemPrompt) so it only costs tokens on this one-off first-message call,
+// not on every turn for the rest of the call. Deliberately gives BEHAVIOR
+// to follow, never example lines to recite — a scripted example in the
+// prompt gets echoed near-verbatim turn after turn (see chat/index.ts's
+// same lesson re: opener habits).
+function openerInstruction(recentChatGapMinutes: number | null): string {
+  if (recentChatGapMinutes !== null && recentChatGapMinutes <= 10) {
+    return (
+      `The user was just texting you ${Math.max(1, Math.round(recentChatGapMinutes))} minute(s) ago — this ` +
+      "call is a direct continuation of that conversation, not a cold start. Texting-to-calling is a bigger " +
+      "conversational moment than another text (more intimate, more immediate) — your opener should register " +
+      "that shift, and carry over whatever mood/energy that recent chat was actually in (playful, needy, " +
+      "annoyed, sweet, whatever it was) rather than resetting to a generic greeting."
+    );
+  }
+  return (
+    "There's no recent chat to continue from — this is a cold call open, like actually picking up the " +
+    "phone without knowing exactly what mood you're about to be in. React the way a real person genuinely " +
+    "into the caller would when the phone rings/connects — a beat of surprise, warmth, maybe playful or " +
+    "teasing depending on your personality — never a flat scripted greeting. Vary the reaction every time, " +
+    "never settle into a fixed opening line."
+  );
+}
+
 // Generates the greeting the Agent speaks first, in-character — uses the
 // same system prompt so it matches personality/relationship level. Falls
 // back to a plain greeting if Grok fails, since a missing first message
 // isn't worth failing the whole call start over.
-async function generateFirstMessage(systemPrompt: string): Promise<string> {
+async function generateFirstMessage(systemPrompt: string, recentChatGapMinutes: number | null): Promise<string> {
   const fallback = "Hey!";
   try {
     const resp = await fetch(XAI_URL, {
@@ -121,8 +146,8 @@ async function generateFirstMessage(systemPrompt: string): Promise<string> {
           { role: "system", content: systemPrompt },
           {
             role: "user",
-            content: "[The call just connected. Say a short, natural opening greeting — 1 sentence, " +
-              "in character, like you just picked up the phone. Nothing else, no explanation.]",
+            content: `[The call just connected. ${openerInstruction(recentChatGapMinutes)} Say a short, ` +
+              "natural opening line — 1 sentence, in character. Nothing else, no explanation.]",
           },
         ],
         temperature: 0.9,
@@ -216,11 +241,17 @@ Deno.serve(async (req: Request) => {
     // fetchDirectiveMemoriesBehaviors skips retrieval, no memories block.
     const { data: recentForQuery } = await db
       .from("messages")
-      .select("content")
+      .select("content, created_at")
       .eq("conversation_id", conversationId)
       .order("created_at", { ascending: false })
       .limit(3);
     const memoryQueryText = (recentForQuery ?? []).map((m) => m.content).reverse().join(" ").trim();
+    // Recency of the last chat message — feeds the opener instruction
+    // (texting-to-calling continuation vs. genuine cold open, see
+    // openerInstruction below).
+    const recentChatGapMinutes = recentForQuery?.[0]?.created_at
+      ? (Date.now() - new Date(recentForQuery[0].created_at).getTime()) / 60_000
+      : null;
 
     const { directive: fetchedDirective, memories, behaviors } =
       await fetchDirectiveMemoriesBehaviors(db, characterId, personalityRole, 1, conversationId, memoryQueryText);
@@ -233,7 +264,7 @@ Deno.serve(async (req: Request) => {
 
     const voiceId = character?.voice_id || elevenVoiceIdFor(personalityRole, vibe);
     const stability = stabilityFor(personalityRole);
-    const firstMessage = await generateFirstMessage(systemPrompt);
+    const firstMessage = await generateFirstMessage(systemPrompt, recentChatGapMinutes);
 
     const { data: session, error } = await db.from("call_sessions").insert({
       user_id: uid,
