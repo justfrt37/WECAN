@@ -5,35 +5,21 @@
 //  Kullanıcı PRO değilse üstte bir PRO yükseltme butonu gösterilir; o buton
 //  abonelik paywall'unu (SubscriptionPaywallView) açar.
 //
-//  NOT: Gerçek satın alma (StoreKit/RevenueCat) henüz bağlı değil — paket
-//  butonları TODO (bkz. PurchaseService iskeleti).
+//  Gerçek satın alma: PurchaseService.tokenPackages (RevenueCat "tokens"
+//  offering'inden yüklenir) + purchase(_:) — OnboardingPaywallView'ın
+//  kullandığı AYNI akış (bkz. o dosyanın unlock()).
 //
 
 import SwiftUI
 
 private enum CoinBadgeStyle { case popular, discount }
 
-private struct CoinPack: Identifiable {
-    let id: String
-    let coins: String
-    let price: String
-    var badge: String? = nil
-    var badgeStyle: CoinBadgeStyle? = nil
-}
-
-private let coinPacks: [CoinPack] = [
-    .init(id: "100",   coins: "100",   price: "₺399,99"),
-    .init(id: "250",   coins: "250",   price: "₺899,99"),
-    .init(id: "500",   coins: "500",   price: "₺1.599,99"),
-    .init(id: "1000",  coins: "1000",  price: "₺2.499,99", badge: "EN POPÜLER  %40", badgeStyle: .popular),
-    .init(id: "5000",  coins: "5000",  price: "₺8.999,99"),
-    .init(id: "10000", coins: "10000", price: "₺14.999,99", badge: "EN İNDİRİMLİ  %70", badgeStyle: .discount),
-]
-
 struct TokenStoreView: View {
     let tokenStore: TokenStore
 
     @Environment(\.dismiss) private var dismiss
+    @State private var purchases = PurchaseService.shared
+    @State private var purchasingId: String?
 
     private let columns = [
         GridItem(.flexible(), spacing: 14),
@@ -58,16 +44,43 @@ struct TokenStoreView: View {
                     .padding(.top, 8)
                     .padding(.bottom, 12)
 
-                ScrollView {
-                    LazyVGrid(columns: columns, spacing: 14) {
-                        ForEach(coinPacks) { pack in coinCard(pack) }
+                if purchases.tokenPackages.isEmpty {
+                    Spacer()
+                    if purchases.isLoadingOfferings {
+                        ProgressView().tint(.white)
+                    } else {
+                        Text("Coin packages aren't available right now.")
+                            .font(.system(size: 14))
+                            .foregroundStyle(.white.opacity(0.6))
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 32)
                     }
-                    .padding(.horizontal, 20)
-                    .padding(.bottom, 30)
+                    Spacer()
+                } else {
+                    ScrollView {
+                        LazyVGrid(columns: columns, spacing: 14) {
+                            ForEach(purchases.tokenPackages) { pack in coinCard(pack) }
+                        }
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 30)
+                    }
+                    .scrollIndicators(.hidden)
                 }
-                .scrollIndicators(.hidden)
             }
         }
+        .task {
+            if purchases.tokenPackages.isEmpty { await purchases.loadOfferings() }
+        }
+    }
+
+    /// Data-driven "best value" badge — the package with the lowest
+    /// price-per-token, not a hardcoded guess (RevenueCat gives no
+    /// "popular"/"discount" signal of its own).
+    private var bestValuePackageId: String? {
+        let eligible = purchases.tokenPackages.filter { $0.tokenAmount > 0 }
+        let costPerToken: (PaywallPackage) -> Decimal = { $0.priceValue / Decimal($0.tokenAmount) }
+        let best = eligible.min { costPerToken($0) < costPerToken($1) }
+        return best?.id
     }
 
     // MARK: Header
@@ -106,22 +119,25 @@ struct TokenStoreView: View {
 
     // MARK: Coin paketi kartı
 
-    private func coinCard(_ pack: CoinPack) -> some View {
-        Button {
-            // TODO: StoreKit/RevenueCat bağlanınca bu paketin gerçek satın
-            // alma akışını tetikle (bkz. PurchaseService).
+    private func coinCard(_ pack: PaywallPackage) -> some View {
+        let isBestValue = pack.id == bestValuePackageId
+        let badgeStyle: CoinBadgeStyle? = isBestValue ? .discount : nil
+        let isPurchasingThis = purchasingId == pack.id
+
+        return Button {
+            purchase(pack)
         } label: {
             VStack(spacing: 12) {
                 // Rozet satırı — rozet yoksa da coin diskleri hizalansın diye
                 // aynı yükseklikte boş yer tutar.
                 Group {
-                    if let badge = pack.badge {
-                        Text(badge)
+                    if isBestValue {
+                        Text("BEST VALUE")
                             .font(.system(size: 10, weight: .heavy))
                             .foregroundStyle(.white)
                             .padding(.horizontal, 10)
                             .frame(height: 22)
-                            .background(badgeGradient(pack.badgeStyle), in: Capsule())
+                            .background(badgeGradient(badgeStyle), in: Capsule())
                     } else {
                         Color.clear.frame(height: 22)
                     }
@@ -129,31 +145,51 @@ struct TokenStoreView: View {
 
                 StoreCoin(size: 58)
 
-                Text(pack.coins)
+                Text("\(pack.tokenAmount)")
                     .font(.system(size: 22, weight: .heavy))
                     .foregroundStyle(.white)
 
                 Spacer(minLength: 10)
 
-                Text(pack.price)
-                    .font(.system(size: 15, weight: .heavy))
-                    .foregroundStyle(Color(hex: 0xE0561C))
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 44)
-                    .background(.white, in: RoundedRectangle(cornerRadius: 16))
+                if isPurchasingThis {
+                    ProgressView()
+                        .tint(Color(hex: 0xE0561C))
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 44)
+                        .background(.white, in: RoundedRectangle(cornerRadius: 16))
+                } else {
+                    Text(pack.localizedPrice)
+                        .font(.system(size: 15, weight: .heavy))
+                        .foregroundStyle(Color(hex: 0xE0561C))
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 44)
+                        .background(.white, in: RoundedRectangle(cornerRadius: 16))
+                }
             }
             .padding(.top, 14)
             .padding(.horizontal, 12)
             .padding(.bottom, 16)
             .frame(maxWidth: .infinity)
             .frame(minHeight: 196)
-            .background(cardFill(pack.badgeStyle), in: RoundedRectangle(cornerRadius: 22))
+            .background(cardFill(badgeStyle), in: RoundedRectangle(cornerRadius: 22))
             .overlay(
                 RoundedRectangle(cornerRadius: 22)
-                    .strokeBorder(cardBorder(pack.badgeStyle), lineWidth: pack.badgeStyle == nil ? 1 : 2)
+                    .strokeBorder(cardBorder(badgeStyle), lineWidth: badgeStyle == nil ? 1 : 2)
             )
         }
         .buttonStyle(.plain)
+        .disabled(purchasingId != nil)
+    }
+
+    private func purchase(_ pack: PaywallPackage) {
+        guard purchasingId == nil else { return }
+        Task {
+            purchasingId = pack.id
+            let ok = await purchases.purchase(pack)
+            if ok { await tokenStore.refresh() }
+            purchasingId = nil
+            if ok { dismiss() }
+        }
     }
 
     private func badgeGradient(_ style: CoinBadgeStyle?) -> LinearGradient {
