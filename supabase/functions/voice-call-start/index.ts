@@ -187,8 +187,26 @@ Deno.serve(async (req: Request) => {
     const personalityRole: string = character?.personality_role ?? "flirty";
     const vibe: string = (character?.builder_selections as { vibe?: string } | null)?.vibe ?? "Sweet";
 
+    // Retrieval query text — last 3 prior chat messages for this
+    // conversation (a call has no turns of its own yet at start time; the
+    // conversation's `messages` table, shared with chat/index.ts, is the
+    // only source of "what's currently being discussed"). No prior
+    // messages (brand new conversation, or call started with no
+    // conversationId) → empty string → fetchDirectiveMemoriesBehaviors
+    // skips retrieval and injects no memories block, which is correct.
+    let memoryQueryText = "";
+    if (conversationId) {
+      const { data: recentForQuery } = await db
+        .from("messages")
+        .select("content")
+        .eq("conversation_id", conversationId)
+        .order("created_at", { ascending: false })
+        .limit(3);
+      memoryQueryText = (recentForQuery ?? []).map((m) => m.content).reverse().join(" ").trim();
+    }
+
     const { directive: fetchedDirective, memories, behaviors } =
-      await fetchDirectiveMemoriesBehaviors(db, characterId, personalityRole, 1, conversationId ?? null);
+      await fetchDirectiveMemoriesBehaviors(db, characterId, personalityRole, 1, conversationId ?? "", memoryQueryText);
     const directive = reviewMode ? REVIEW_DIRECTIVE : fetchedDirective;
     let systemPrompt = directive;
     systemPrompt += memoriesBlock(memories);
