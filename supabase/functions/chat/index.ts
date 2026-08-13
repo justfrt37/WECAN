@@ -1352,6 +1352,11 @@ Deno.serve(async (req: Request) => {
     // is always empty for them and `replySegments` stays unset in the response.
     const { plainText: reply, segments: replySegments } =
       (!voiceChat && !imageReactionChat) ? parseReplySegments(rawReply) : { plainText: rawReply, segments: [] };
+    // Signal-only log — nothing else records whether Grok is actually using
+    // [PAUSE:n] in practice. Count only, no message content (privacy).
+    if (replySegments.length > 1) {
+      console.log(`[pacing] split into ${replySegments.length} segments`);
+    }
 
     // Gerçek atomik düşüm — cevap başarıyla üretildi, şimdi tahsil et.
     let tokenBalanceAfterCharge: number | undefined;
