@@ -340,7 +340,6 @@ Deno.serve(async (req: Request) => {
       photo_url: photoUrl,
       avatar_url: photoUrl,
       interests,
-      relationship_level: 0,
       gallery_urls: photoUrl ? [photoUrl] : [],
       personality_role: personalityRole,
       created_by: uid,

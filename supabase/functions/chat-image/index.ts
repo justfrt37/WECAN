@@ -613,7 +613,7 @@ Deno.serve(async (req: Request) => {
 
     const { data: character, error: charErr } = await db
       .from("characters")
-      .select("name, profession, tagline, category, builder_selections, photo_url, avatar_url, relationship_level")
+      .select("name, profession, tagline, category, builder_selections, photo_url, avatar_url")
       .eq("id", characterId)
       .maybeSingle();
     if (charErr || !character) return json({ error: "character not found" }, 400);
@@ -639,9 +639,11 @@ Deno.serve(async (req: Request) => {
     // through to actual generation if nothing close enough exists. Every
     // other (virtual/user-created) character has zero rows here and this is
     // a no-op, so existing behavior is unchanged for them.
-    // Kullanıcının bu karakterle GERÇEK ilişki seviyesi (foto seviye-kilidi).
-    // Karakterin global relationship_level'ı DEĞİL — o çoğu satırda 0/null olup
-    // seviye-1 fotoları eleyerek havuzu boşaltıyor ve gereksiz üretime düşürüyordu.
+    // Kullanıcının bu karakterle GERÇEK ilişki seviyesi (foto seviye-kilidi) —
+    // her zaman conversations.relationship_level'dan (karakter+kullanıcıya
+    // özel). Eski sistemde characters tablosunda da global bir
+    // relationship_level kolonu vardı, ama o hep 0/null kalıp seviye-1
+    // fotoları eleyerek havuzu boşaltıyordu — dead column olarak silindi.
     const { data: convLevelRows } = await db
       .from("conversations")
       .select("relationship_level")
