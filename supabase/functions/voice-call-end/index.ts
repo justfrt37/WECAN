@@ -8,6 +8,7 @@
 // "newMemories" summarization block).
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { fetchActiveMemories, numberedMemoryLines, applyMemoryExtraction } from "../_shared/directiveHelpers.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -57,12 +58,11 @@ async function callGrok(messages: { role: string; content: string }[], maxTokens
 
 async function extractAndStoreMemories(conversationId: string, callSessionId: string) {
   const { data: turns } = await db.from("call_turns")
-    .select("role, content").eq("call_session_id", callSessionId).order("created_at", { ascending: true });
+    .select("role, content").eq("call_session_id", callSessionId).order("seq", { ascending: true });
   if (!turns || turns.length === 0) return;
 
-  const { data: existingMemories } = await db.from("memories")
-    .select("content").eq("conversation_id", conversationId).order("created_at", { ascending: true });
-  const existingMemoryLines = (existingMemories ?? []).map((m) => `- ${m.content}`).join("\n") || "(none yet)";
+  const activeMemories = await fetchActiveMemories(db, conversationId);
+  const existingMemoryLines = numberedMemoryLines(activeMemories);
 
   const transcript = turns.map((t) => `${t.role === "user" ? "User" : "You"}: ${t.content}`).join("\n");
 
@@ -70,27 +70,33 @@ async function extractAndStoreMemories(conversationId: string, callSessionId: st
     {
       role: "system",
       content:
-        "Extract NEW durable atomic facts worth permanently remembering (name, preferences, " +
-        "promises, key relationship moments) from this voice call transcript, that are NOT " +
-        "already covered by the existing memories list you'll be given — do not repeat anything " +
-        "already in that list, even reworded. If there's nothing new, return an empty array. " +
-        'Respond with ONLY this JSON shape, nothing else: {"newMemories":["fact one","fact two"]}',
+        "Extract NEW durable atomic facts worth permanently remembering from this voice call transcript, " +
+        "that are NOT already covered by the existing memories list you'll be given (numbered, one per " +
+        "line) — do not repeat anything already in that list, even reworded. If there's nothing new, " +
+        "return an empty array. Include BOTH sides:\n" +
+        "- USER facts: name, preferences, promises, key relationship moments.\n" +
+        "- CHARACTER facts: things the character herself established/committed to on this call — a pet " +
+        "name she used, a boundary she set, a backstory detail she improvised that should stay consistent, " +
+        "a promise she made. These matter just as much as the user's.\n\n" +
+        "ALSO identify any existing memories (by their number) that this transcript now CONTRADICTS — e.g. " +
+        "the user previously said they're a barista and now say they just started a nursing job. Return " +
+        "those numbers in staleIndexes. If nothing is contradicted, return an empty array.\n\n" +
+        'Respond with ONLY this JSON shape, nothing else: {"newMemories":["fact one","fact two"],"staleIndexes":[0,2]}',
     },
     {
       role: "user",
-      content: `Existing memories (do not repeat these):\n${existingMemoryLines}\n\nCall transcript:\n${transcript}\n\nJSON:`,
+      content: `Existing memories (numbered — do not repeat these, but flag contradicted ones in staleIndexes):\n${existingMemoryLines}\n\nCall transcript:\n${transcript}\n\nJSON:`,
     },
   ], 500);
 
   const parsed = extractJson(raw);
   const newMemories: string[] = Array.isArray(parsed?.newMemories)
-    ? parsed.newMemories.filter((m: unknown): m is string => typeof m === "string" && m.trim().length > 0)
+    ? parsed.newMemories.filter((m: unknown): m is string => typeof m === "string" && m.trim().length > 0).map((m: string) => m.trim())
     : [];
-  if (newMemories.length > 0) {
-    await db.from("memories").insert(
-      newMemories.map((content) => ({ conversation_id: conversationId, content: content.trim() })),
-    );
-  }
+  const staleIndexes: number[] = Array.isArray(parsed?.staleIndexes)
+    ? parsed.staleIndexes.filter((i: unknown): i is number => typeof i === "number" && Number.isInteger(i))
+    : [];
+  await applyMemoryExtraction(db, conversationId, activeMemories, newMemories, staleIndexes);
 }
 
 Deno.serve(async (req: Request) => {
@@ -119,7 +125,7 @@ Deno.serve(async (req: Request) => {
     const tokensCharged = Math.round(actualElapsedSeconds * TOKENS_PER_SECOND);
     let newBalance = 0;
     if (tokensCharged > 0) {
-      await db.rpc("charge_tokens", { p_user_id: uid, p_amount: tokensCharged, p_reason: "voice_call" });
+      await db.rpc("charge_tokens", { p_user_id: uid, p_amount: tokensCharged, p_reason: "voice" });
     }
     const { data: balanceRow } = await db.from("token_balances").select("balance").eq("user_id", uid).maybeSingle();
     newBalance = balanceRow?.balance ?? 0;

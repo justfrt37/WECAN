@@ -4,6 +4,19 @@
 //
 
 import SwiftUI
+import UIKit
+
+/// Scale + fade on press, spring-back on release — used by every tappable
+/// control on this screen so it reads as responsive (no built-in SwiftUI
+/// Button gives any press feedback by default).
+private struct PressableButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.88 : 1.0)
+            .opacity(configuration.isPressed ? 0.85 : 1.0)
+            .animation(.spring(response: 0.25, dampingFraction: 0.5), value: configuration.isPressed)
+    }
+}
 
 struct VoiceCallView: View {
     @State private var viewModel: CallViewModel
@@ -31,8 +44,11 @@ struct VoiceCallView: View {
                     Circle()
                         .fill(AppColor.pink.opacity(0.25))
                         .frame(width: 220, height: 220)
-                        .scaleEffect(viewModel.state == .speaking ? 1.08 : 1.0)
-                        .animation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true), value: viewModel.state == .speaking)
+                        .scaleEffect(ringPulseScale)
+                        .animation(
+                            .easeInOut(duration: viewModel.state == .speaking ? 0.6 : 1.1).repeatForever(autoreverses: true),
+                            value: ringPulseScale
+                        )
 
                     CachedImage(url: viewModel.character.avatarURL ?? viewModel.character.photoURL) { image in
                         image.resizable().scaledToFill()
@@ -94,20 +110,26 @@ struct VoiceCallView: View {
                             .font(.system(size: 30))
                             .foregroundStyle(typedText.trimmingCharacters(in: .whitespaces).isEmpty ? .white.opacity(0.3) : AppColor.pink)
                     }
+                    .buttonStyle(PressableButtonStyle())
                     .disabled(typedText.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
                 .padding(.horizontal, 24)
 
                 HStack(spacing: 40) {
-                    Button { viewModel.toggleMute() } label: {
+                    Button {
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        viewModel.toggleMute()
+                    } label: {
                         Image(systemName: viewModel.isMuted ? "mic.slash.fill" : "mic.fill")
                             .font(.system(size: 22))
                             .foregroundStyle(.white)
                             .frame(width: 60, height: 60)
                             .background(.white.opacity(0.15), in: Circle())
                     }
+                    .buttonStyle(PressableButtonStyle())
 
                     Button {
+                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                         Task {
                             await viewModel.endCall()
                             dismiss()
@@ -119,6 +141,7 @@ struct VoiceCallView: View {
                             .frame(width: 72, height: 72)
                             .background(Color.red, in: Circle())
                     }
+                    .buttonStyle(PressableButtonStyle())
                 }
                 .padding(.bottom, 40)
             }
@@ -173,6 +196,7 @@ struct VoiceCallView: View {
     private func sendTypedText() {
         let text = typedText
         guard !text.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
         typedText = ""
         textFieldFocused = false
         Task { await viewModel.sendTypedText(text) }
@@ -181,6 +205,17 @@ struct VoiceCallView: View {
     private var elapsedLabel: String {
         let total = Int(viewModel.elapsedSeconds)
         return String(format: "%02d:%02d", total / 60, total % 60)
+    }
+
+    /// `.idle` (ringing/connecting) gets a slow, gentle pulse — a visual
+    /// companion to the ringback tone. `.speaking` keeps its faster pulse.
+    /// Anything else (listening/thinking/ended) sits still.
+    private var ringPulseScale: CGFloat {
+        switch viewModel.state {
+        case .speaking: return 1.08
+        case .idle: return 1.04
+        default: return 1.0
+        }
     }
 
     private var statusLabel: String {

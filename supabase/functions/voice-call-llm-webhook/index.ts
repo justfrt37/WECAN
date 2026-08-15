@@ -72,10 +72,29 @@ Deno.serve(async (req: Request) => {
 
     const lastUserMessage = [...messages].reverse().find((m) => m.role === "user")?.content ?? "";
 
+    // ElevenLabs also invokes this webhook on `turn_timeout` silence
+    // re-engagement — no new user utterance arrived, the agent is just
+    // being asked to speak again. Detectable here: the LAST message in the
+    // running history isn't from the user (it's the agent's own prior
+    // line). Without a signal, Grok would generate a reply as if
+    // responding to something just said — flag it with a one-off
+    // instruction appended ONLY for this Grok call (never stored/logged —
+    // logging below still uses the real `messages` history, not this).
+    const isSilenceReengage = messages.length > 0 && messages[messages.length - 1].role !== "user";
+    const grokMessages: WireMessage[] = isSilenceReengage
+      ? [...messages, {
+          role: "user",
+          content: "[The user has gone quiet for a few seconds — you're re-engaging, not responding to " +
+            "something they just said. Sound natural about noticing the silence, in character: check in, " +
+            "tease them about going quiet, or just continue naturally, whatever actually fits your " +
+            "personality right now. Keep it short.]",
+        }]
+      : messages;
+
     const upstream = await fetch(XAI_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${XAI_API_KEY}` },
-      body: JSON.stringify({ model: MODEL, messages, temperature: 0.9, max_tokens: 120, stream: true }),
+      body: JSON.stringify({ model: MODEL, messages: grokMessages, temperature: 0.9, max_tokens: 120, stream: true }),
     });
     if (!upstream.ok || !upstream.body) {
       return new Response(JSON.stringify({ error: `xAI ${upstream.status}: ${await upstream.text()}` }), { status: 502 });
@@ -90,10 +109,17 @@ Deno.serve(async (req: Request) => {
     const logPromise = (async () => {
       const replyText = await accumulateReply(captureStream);
       if (replyText) {
-        // Ayrı çağrılar — tek insert() ile array'deki satırlar Postgres'in
-        // `now()` (created_at default) değerini AYNI alır, sıralama garantisiz
-        // kalır (bkz. chat/index.ts'deki aynı sorunun düzeltmesi).
-        await db.from("call_turns").insert({ call_session_id: callSessionId, role: "user", content: lastUserMessage });
+        // Sıralama artık call_turns.seq'e (identity kolonu, migration 024)
+        // dayanıyor, created_at'e DEĞİL — bu fonksiyon HER turda ayrı bir
+        // HTTP çağrısı olarak tetikleniyor (ElevenLabs), fire-and-forget
+        // waitUntil ile, çağrılar arası hiçbir sıra garantisi yok; wall-clock
+        // zaman damgası bu yüzden güvenilmezdi, Postgres'in insert-sırası
+        // identity'si güvenilir.
+        // Re-engage turns have no new user utterance — logging lastUserMessage
+        // again would duplicate the same line as a fake "new" user turn.
+        if (!isSilenceReengage) {
+          await db.from("call_turns").insert({ call_session_id: callSessionId, role: "user", content: lastUserMessage });
+        }
         await db.from("call_turns").insert({ call_session_id: callSessionId, role: "assistant", content: replyText });
       }
     })();

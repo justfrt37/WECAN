@@ -44,6 +44,7 @@ final class CallViewModel {
     private func debug(_ s: String) { debugLog.append(s) }
 
     private let service = CallService()
+    private let soundPlayer = CallSoundPlayer()
     private var conversation: Conversation?
 
     private var callSessionId: String?
@@ -72,6 +73,7 @@ final class CallViewModel {
         // table needed between the two.
         let languageCode = ConversationLanguage.current(for: character.id)
         debug("Calling voice-call-start… (language: \(languageCode))")
+        soundPlayer.startRinging()
         let result: CallService.StartResult
         do {
             result = try await service.start(
@@ -83,14 +85,17 @@ final class CallViewModel {
             debug("Call started, session \(result.callSessionId)")
         } catch CallServiceError.insufficientTokens {
             debug("voice-call-start: insufficient tokens")
+            soundPlayer.stopRinging()
             state = .ended(reason: .insufficientTokens)
             return
         } catch CallServiceError.notEntitled {
+            soundPlayer.stopRinging()
             state = .ended(reason: .notEntitled)
             return
         } catch {
             debug("voice-call-start failed: \(error)")
             errorMessage = String(localized: "Couldn't start the call.")
+            soundPlayer.stopRinging()
             state = .ended(reason: .error)
             return
         }
@@ -100,7 +105,7 @@ final class CallViewModel {
             agentOverrides: AgentOverrides(
                 prompt: result.systemPrompt, firstMessage: result.firstMessage, language: Language(rawValue: languageCode)
             ),
-            ttsOverrides: TTSOverrides(voiceId: result.voiceId, stability: result.stability),
+            ttsOverrides: TTSOverrides(voiceId: result.voiceId, stability: result.stability, speed: result.speed),
             customLlmExtraBody: ["callSessionId": result.callSessionId],
             onDisconnect: { [weak self] reason in
                 Task { @MainActor in self?.handleDisconnect(reason) }
@@ -141,16 +146,19 @@ final class CallViewModel {
             } catch {
                 debug("Text-only retry failed: \(error)")
                 errorMessage = String(localized: "Couldn't connect the call.")
+                soundPlayer.stopRinging()
                 state = .ended(reason: .error)
                 return
             }
         } catch {
             debug("ElevenLabs connect failed: \(error)")
             errorMessage = String(localized: "Couldn't connect the call.")
+            soundPlayer.stopRinging()
             state = .ended(reason: .error)
             return
         }
 
+        soundPlayer.stopRinging()
         callStartedAt = Date()
         state = .listening
         startCheckpointLoop()
@@ -168,6 +176,10 @@ final class CallViewModel {
     private func handleDisconnect(_ reason: DisconnectionReason) {
         guard !isEnded else { return }
         debug("Disconnected: \(reason)")
+        // Only a call that actually connected (reached .listening at least
+        // once) gets the "hung up" chime — a pre-connection failure already
+        // just stops the ringback, no false "call ended" cue.
+        if callStartedAt != nil { soundPlayer.playEndTone() }
         if reason == .error {
             errorMessage = String(localized: "The call was disconnected.")
             state = .ended(reason: .error)
@@ -177,6 +189,7 @@ final class CallViewModel {
     }
 
     func endCall() async {
+        soundPlayer.stopRinging() // no-op if already stopped — covers hangup mid-ring
         checkpointTask?.cancel()
         await conversation?.endConversation()
         conversation = nil
@@ -195,7 +208,14 @@ final class CallViewModel {
         } else {
             debug("Ending call: no callSessionId — never started, nothing to charge")
         }
-        if !isEnded { state = .ended(reason: .userEnded) }
+        // Guarded the same way the state assignment below is — if
+        // `conversation?.endConversation()` already triggered
+        // handleDisconnect (which plays its own end tone) before we get
+        // here, isEnded is already true and this doesn't double-play.
+        if !isEnded {
+            if callStartedAt != nil { soundPlayer.playEndTone() }
+            state = .ended(reason: .userEnded)
+        }
     }
 
     func toggleMute() {

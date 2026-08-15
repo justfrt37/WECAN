@@ -38,6 +38,7 @@ struct CallService {
         let systemPrompt: String
         let voiceId: String
         let stability: Double
+        let speed: Double
         let firstMessage: String
     }
 
@@ -56,6 +57,7 @@ struct CallService {
             let systemPrompt: String
             let voiceId: String
             let stability: Double
+            let speed: Double
             let firstMessage: String
         }
         guard let decoded = try? JSONDecoder().decode(Response.self, from: data) else { throw CallServiceError.decoding }
@@ -65,6 +67,7 @@ struct CallService {
             systemPrompt: decoded.systemPrompt,
             voiceId: decoded.voiceId,
             stability: decoded.stability,
+            speed: decoded.speed,
             firstMessage: decoded.firstMessage
         )
     }

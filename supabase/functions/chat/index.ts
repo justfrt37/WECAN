@@ -21,11 +21,15 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { franc } from "https://esm.sh/franc-min@6";
+import { uploadToR2, deleteFromR2, signedR2Url } from "../_shared/r2.ts";
 import {
   fetchDirective as sharedFetchDirective,
   fetchDirectiveMemoriesBehaviors as sharedFetchDirectiveMemoriesBehaviors,
   memoriesBlock,
   behaviorsBlock,
+  fetchActiveMemories,
+  numberedMemoryLines,
+  applyMemoryExtraction,
   REVIEW_DIRECTIVE,
 } from "../_shared/directiveHelpers.ts";
 
@@ -162,9 +166,29 @@ async function fetchDirective(characterId: string, role: string, level: number):
 }
 
 async function fetchDirectiveMemoriesBehaviors(
-  characterId: string, role: string, level: number, conversationId: string,
+  characterId: string, role: string, level: number, conversationId: string, memoryQueryText: string,
 ) {
-  return sharedFetchDirectiveMemoriesBehaviors(db, characterId, role, level, conversationId);
+  return sharedFetchDirectiveMemoriesBehaviors(db, characterId, role, level, conversationId, memoryQueryText);
+}
+
+// Query text for memory similarity retrieval — last 2 prior DB messages
+// plus (if given) the live message this turn, so retrieval reflects what's
+// actually being discussed right now rather than the whole history. A
+// small separate indexed query (messages_conv_idx) rather than reusing the
+// later KEEP_RECENT fetch, which happens further down after the system
+// prompt (and thus the memories block) is already built — see that fetch's
+// own comment on prompt-cache prefix ordering for why it can't move earlier.
+async function recentTurnsQueryText(conversationId: string, liveMessage?: string): Promise<string> {
+  const priorLimit = liveMessage ? 2 : 3;
+  const { data } = await db
+    .from("messages")
+    .select("content")
+    .eq("conversation_id", conversationId)
+    .order("created_at", { ascending: false })
+    .limit(priorLimit);
+  const texts = (data ?? []).map((m) => m.content).reverse();
+  if (liveMessage) texts.push(liveMessage);
+  return texts.join(" ").trim();
 }
 
 // Directive'i çıplak enjekte etmek modelin onu "söylenecek satır" gibi
@@ -402,7 +426,10 @@ const TEXTING_STYLE_RULE =
   "bir Türk'ün parmaklarından çıkmış gibi dursun. Aynı mantığı İngilizce/Almanca/ " +
   "Fransızca/İspanyolca/Portekizce/İtalyanca için de uygula — o dilin GERÇEK, " +
   "günlük mesajlaşma kısaltmalarını ve rahatlığını kullan (İngilizce'de örn. u, " +
-  "ur, rn, ngl, tbh, lol, gonna, wanna — ama hepsini bir mesaja tıkıştırma).";
+  "ur, rn, ngl, tbh, lol, gonna, wanna — ama hepsini bir mesaja tıkıştırma). " +
+  "ASLA mesaja 'haha', 'hehe', 'lol' gibi bir gülme/kikirdeme ile BAŞLAMA — gerçek " +
+  "mesajlaşmada insanlar neredeyse hiç böyle açmaz. Doğrudan söyleyeceğin şeyle aç; " +
+  "gülme gerçekten yerindeyse cümlenin içine ya da sonuna serpiştir, açılış olarak değil.";
 
 // Shared closing line for TEXTING_STYLE_RULE + VARIATION_RULE — both blocks
 // used to end with their own near-duplicate "don't sound formal/robotic/
@@ -673,8 +700,9 @@ async function classifySleepAgreement(userMessage: string, reply: string): Promi
 // Kullanıcının bota gönderdiği fotoğrafı KALICI hale getirir — eskiden base64
 // sadece bu turun Grok vision girişine gidip hiçbir yere kaydedilmiyordu, o
 // yüzden cihaz önbelleği (sohbetten çıkıp girince, ya da reinstall'da)
-// kaybolunca fotoğraf da geri gelmiyordu (bkz. kullanıcı talebi). `user-photos`
-// private bucket'ına `{uid}/{uuid}.jpg` olarak yüklenir; `messages` satırı
+// kaybolunca fotoğraf da geri gelmiyordu (bkz. kullanıcı talebi). R2'ye
+// `user-photos/{uid}/{uuid}.jpg` key'i olarak (özel, hiç public base URL'e
+// çıkmaz) yüklenir; `messages` satırı
 // `content`'inde STORAGE PATH tutar (imzalı URL değil — path kalıcı, imzalı
 // URL kısa ömürlü, her history isteğinde `resolveUserPhotoUrls` ile taze
 // üretilir). `user_sent_photos` 7 günlük süreyi takip eder (bkz.
@@ -682,13 +710,11 @@ async function classifySleepAgreement(userMessage: string, reply: string): Promi
 async function persistUserPhoto(conversationId: string, uid: string, base64Jpeg: string): Promise<void> {
   try {
     const bytes = Uint8Array.from(atob(base64Jpeg), (c) => c.charCodeAt(0));
-    const path = `${uid}/${crypto.randomUUID()}.jpg`;
-    const { error: uploadError } = await db.storage.from("user-photos").upload(path, bytes, {
-      contentType: "image/jpeg",
-      upsert: false,
-    });
-    if (uploadError) {
-      console.error("persistUserPhoto: storage upload failed:", uploadError.message);
+    const path = `user-photos/${uid}/${crypto.randomUUID()}.jpg`;
+    try {
+      await uploadToR2(path, bytes, "image/jpeg");
+    } catch (e) {
+      console.error("persistUserPhoto: R2 upload failed:", String(e));
       return;
     }
     const { data: msgRow, error: insertError } = await db
@@ -735,8 +761,8 @@ async function sweepExpiredUserPhotos(conversationId: string): Promise<void> {
     const { error: expiredError } = await db.from("user_sent_photos")
       .update({ expired: true }).eq("id", row.id);
     if (expiredError) console.error("sweepExpiredUserPhotos: expired flag update failed:", expiredError.message);
-    const { error: removeError } = await db.storage.from("user-photos").remove([row.storage_path]);
-    if (removeError) console.error("sweepExpiredUserPhotos: storage remove failed:", removeError.message);
+    const { error: removeError } = await deleteFromR2(row.storage_path);
+    if (removeError) console.error("sweepExpiredUserPhotos: R2 remove failed:", removeError);
   }
 }
 
@@ -749,9 +775,12 @@ async function resolveUserPhotoUrls<T extends { kind?: string; content?: string 
   const withUrls = await Promise.all(
     rows.map(async (row) => {
       if (row.kind !== "user_photo" || !row.content) return row;
-      const { data, error } = await db.storage.from("user-photos").createSignedUrl(row.content, 3600);
-      if (error || !data) return row;
-      return { ...row, content: data.signedUrl };
+      try {
+        const url = await signedR2Url(row.content, 3600);
+        return { ...row, content: url };
+      } catch {
+        return row;
+      }
     }),
   );
   return withUrls;
@@ -1130,8 +1159,9 @@ Deno.serve(async (req: Request) => {
 
       const reactionLevel: number = convo.relationship_level ?? 1;
       const reactionProgress: number = typeof convo.level_progress === "number" ? convo.level_progress : 0;
+      const reactionMemoryQueryText = await recentTurnsQueryText(conversationId);
       const { directive: fetchedReactionDirective, memories: reactionMemoryRows, behaviors: reactionBehaviorRows } =
-        await fetchDirectiveMemoriesBehaviors(characterId, personalityRole, reactionLevel, conversationId);
+        await fetchDirectiveMemoriesBehaviors(characterId, personalityRole, reactionLevel, conversationId, reactionMemoryQueryText);
       const reactionDirective = reviewMode ? REVIEW_DIRECTIVE : fetchedReactionDirective;
       let reactionSystem = systemPrompt;
       reactionSystem += wrapDirective(reactionDirective, Math.round(reactionProgress * 100));
@@ -1176,8 +1206,9 @@ Deno.serve(async (req: Request) => {
     // (her rol için geçerli — ex'e özel değil). memoryRows/behaviorRows used
     // further down, deliberately after all the static rule blocks — see the
     // cache-ordering comment there.
+    const memoryQueryText = await recentTurnsQueryText(conversationId, userMessage);
     const { directive: fetchedDirective, memories: memoryRows, behaviors: behaviorRows } =
-      await fetchDirectiveMemoriesBehaviors(characterId, personalityRole, currentLevel, conversationId);
+      await fetchDirectiveMemoriesBehaviors(characterId, personalityRole, currentLevel, conversationId, memoryQueryText);
     const directive = reviewMode ? REVIEW_DIRECTIVE : fetchedDirective;
     system += `\n\n${directive}`;
 
@@ -1324,6 +1355,11 @@ Deno.serve(async (req: Request) => {
     // is always empty for them and `replySegments` stays unset in the response.
     const { plainText: reply, segments: replySegments } =
       (!voiceChat && !imageReactionChat) ? parseReplySegments(rawReply) : { plainText: rawReply, segments: [] };
+    // Signal-only log — nothing else records whether Grok is actually using
+    // [PAUSE:n] in practice. Count only, no message content (privacy).
+    if (replySegments.length > 1) {
+      console.log(`[pacing] split into ${replySegments.length} segments`);
+    }
 
     // Gerçek atomik düşüm — cevap başarıyla üretildi, şimdi tahsil et.
     let tokenBalanceAfterCharge: number | undefined;
@@ -1417,7 +1453,8 @@ Deno.serve(async (req: Request) => {
         const convoText = toFold
           .map((m) => `${m.role === "user" ? "User" : "You"}: ${stripVoiceTags(m.content)}`)
           .join("\n");
-        const existingMemoryLines = (memoryRows ?? []).map((m) => `- ${m.content}`).join("\n") || "(none yet)";
+        const activeMemories = await fetchActiveMemories(db, conversationId);
+        const existingMemoryLines = numberedMemoryLines(activeMemories);
         const summaryPrompt: WireMessage[] = [
           {
             role: "system",
@@ -1433,19 +1470,28 @@ Deno.serve(async (req: Request) => {
               "character has already been behaving, not just generic persona instructions.\n\n" +
               "Short bullet points under each heading. Keep prior summary content, fold in what's new, drop " +
               "anything superseded or no longer relevant.\n\n" +
-              "SEPARATELY, also extract any NEW durable atomic facts worth permanently remembering (name, " +
-              "preferences, promises, key relationship moments) that are NOT already covered by the existing " +
-              "memories list you'll be given — do not repeat anything already in that list, even reworded. " +
-              "If there's nothing new, return an empty array.\n\n" +
+              "SEPARATELY, also extract any NEW durable atomic facts worth permanently remembering that are " +
+              "NOT already covered by the existing memories list you'll be given (numbered, one per line) — " +
+              "do not repeat anything already in that list, even reworded. If there's nothing new, return an " +
+              "empty array. Include BOTH sides:\n" +
+              "- USER facts: name, preferences, promises, key relationship moments.\n" +
+              "- CHARACTER facts: things the character herself has established/committed to in this " +
+              "conversation — a pet name she's adopted for the user, a boundary she's set, a backstory " +
+              "detail she's improvised (job, hobby, living situation, etc.) that should stay consistent, a " +
+              "promise she made. These matter just as much — a character who forgets her own established " +
+              "details reads as inconsistent, not just one who forgets the user's.\n\n" +
+              "ALSO identify any existing memories (by their number) that this new content now CONTRADICTS " +
+              "— e.g. the user previously said they're a barista and now say they just started a nursing " +
+              "job. Return those numbers in staleIndexes. If nothing is contradicted, return an empty array.\n\n" +
               'Respond with ONLY this JSON shape, nothing else: {"summary":"...","newMemories":["fact one",' +
-              '"fact two"]} — `summary` is the full updated USER/BOT summary text (same format as before), ' +
-              "`newMemories` is the new-facts array described above (can be empty).",
+              '"fact two"],"staleIndexes":[0,2]} — `summary` is the full updated USER/BOT summary text (same ' +
+              "format as before), `newMemories` and `staleIndexes` are the arrays described above (can be empty).",
           },
           {
             role: "user",
             content:
               `Previous summary:\n${convo.summary || "(none)"}\n\n` +
-              `Existing memories (do not repeat these):\n${existingMemoryLines}\n\n` +
+              `Existing memories (numbered — do not repeat these, but flag contradicted ones in staleIndexes):\n${existingMemoryLines}\n\n` +
               `New conversation turns:\n${convoText}\n\nUpdated JSON:`,
           },
         ];
@@ -1459,11 +1505,10 @@ Deno.serve(async (req: Request) => {
           const newMemories: string[] = Array.isArray(parsed?.newMemories)
             ? parsed.newMemories.filter((m: unknown): m is string => typeof m === "string" && m.trim().length > 0)
             : [];
-          if (newMemories.length > 0) {
-            await db.from("memories").insert(
-              newMemories.map((content) => ({ conversation_id: conversationId, content: content.trim() }))
-            );
-          }
+          const staleIndexes: number[] = Array.isArray(parsed?.staleIndexes)
+            ? parsed.staleIndexes.filter((i: unknown): i is number => typeof i === "number" && Number.isInteger(i))
+            : [];
+          await applyMemoryExtraction(db, conversationId, activeMemories, newMemories.map((m) => m.trim()), staleIndexes);
         } catch (e) {
           // Özetleme başarısız olsa bile sohbet bozulmaz; sadece logla.
           console.error("ozetleme hatasi:", String(e));

@@ -15,6 +15,7 @@
 //   Cevap:  { url }  veya  { error }
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { uploadToR2 } from "../_shared/r2.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -577,13 +578,7 @@ async function fetchGeneratedImageBytes(prompt: string, baselineImageUrl: string
 
 async function uploadGeneratedImage(bytes: Uint8Array): Promise<string> {
   const path = `generated/${crypto.randomUUID()}.png`;
-  const { error } = await db.storage.from("characters").upload(path, bytes, {
-    contentType: "image/png",
-    upsert: false,
-  });
-  if (error) throw new Error(`Storage upload failed: ${error.message}`);
-  const { data } = db.storage.from("characters").getPublicUrl(path);
-  return data.publicUrl;
+  return uploadToR2(path, bytes, "image/png");
 }
 
 Deno.serve(async (req: Request) => {
@@ -613,7 +608,7 @@ Deno.serve(async (req: Request) => {
 
     const { data: character, error: charErr } = await db
       .from("characters")
-      .select("name, profession, tagline, category, builder_selections, photo_url, avatar_url, relationship_level")
+      .select("name, profession, tagline, category, builder_selections, photo_url, avatar_url")
       .eq("id", characterId)
       .maybeSingle();
     if (charErr || !character) return json({ error: "character not found" }, 400);
@@ -639,9 +634,11 @@ Deno.serve(async (req: Request) => {
     // through to actual generation if nothing close enough exists. Every
     // other (virtual/user-created) character has zero rows here and this is
     // a no-op, so existing behavior is unchanged for them.
-    // Kullanıcının bu karakterle GERÇEK ilişki seviyesi (foto seviye-kilidi).
-    // Karakterin global relationship_level'ı DEĞİL — o çoğu satırda 0/null olup
-    // seviye-1 fotoları eleyerek havuzu boşaltıyor ve gereksiz üretime düşürüyordu.
+    // Kullanıcının bu karakterle GERÇEK ilişki seviyesi (foto seviye-kilidi) —
+    // her zaman conversations.relationship_level'dan (karakter+kullanıcıya
+    // özel). Eski sistemde characters tablosunda da global bir
+    // relationship_level kolonu vardı, ama o hep 0/null kalıp seviye-1
+    // fotoları eleyerek havuzu boşaltıyordu — dead column olarak silindi.
     const { data: convLevelRows } = await db
       .from("conversations")
       .select("relationship_level")

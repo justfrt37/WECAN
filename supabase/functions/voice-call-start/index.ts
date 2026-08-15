@@ -16,7 +16,7 @@ import {
   fetchDirectiveMemoriesBehaviors, memoriesBlock, behaviorsBlock, REVIEW_DIRECTIVE,
 } from "../_shared/directiveHelpers.ts";
 import { elevenVoiceIdFor } from "../_shared/elevenVoiceMap.ts";
-import { stabilityFor } from "../_shared/elevenVoiceSettings.ts";
+import { callVoiceSettingsFor } from "../_shared/elevenVoiceSettings.ts";
 import { requireVoiceEntitlement } from "../_shared/entitlements.ts";
 
 const corsHeaders = {
@@ -66,7 +66,10 @@ const VOICE_CALL_STYLE_RULE =
   "(ElevenLabs Flash modeli, köşeli parantez etiketleri DESTEKLENMİYOR). Duyguyu etiketlerle " +
   "değil kelime seçimi ve noktalamayla ver: heyecanı ünlem işaretiyle, tereddüdü üç nokta (...) " +
   "ile, vurguyu cümle yapısıyla göster. Kısa, doğal cümleler kur — bu bir telefon görüşmesi, " +
-  "monolog değil: cevabın 1-2 cümle olsun (nadiren 3), gerçek bir insanın telefonda konuştuğu gibi.";
+  "monolog değil: cevabın 1-2 cümle olsun (nadiren 3), gerçek bir insanın telefonda konuştuğu gibi. " +
+  "ASLA 'haha', 'hehe', 'ahah' gibi bir gülme sesiyle BAŞLAMA — gerçek bir telefon konuşmasında " +
+  "neredeyse kimse cümlesine gülerek başlamaz. Doğrudan söyleyeceğin şeyle aç; gülme/kikirdeme " +
+  "gerçekten komikse cümlenin İÇİNE ya da SONUNA serpiştir, açılış kelimesi olarak değil.";
 
 function userIdFromJWT(authHeader: string | null): string | null {
   if (!authHeader?.startsWith("Bearer ")) return null;
@@ -94,7 +97,7 @@ async function finalizeOrphaned(uid: string) {
   for (const session of orphans) {
     const tokens = Math.round((session.last_checkpoint_seconds ?? 0) * TOKENS_PER_SECOND);
     if (tokens > 0) {
-      await db.rpc("charge_tokens", { p_user_id: uid, p_amount: tokens, p_reason: "voice_call_orphaned" });
+      await db.rpc("charge_tokens", { p_user_id: uid, p_amount: tokens, p_reason: "voice" });
     }
     await db.from("call_sessions")
       .update({ status: "ended", ended_at: new Date().toISOString(), tokens_charged: tokens })
@@ -102,11 +105,36 @@ async function finalizeOrphaned(uid: string) {
   }
 }
 
+// Opener instruction is built here (not baked into the persistent
+// systemPrompt) so it only costs tokens on this one-off first-message call,
+// not on every turn for the rest of the call. Deliberately gives BEHAVIOR
+// to follow, never example lines to recite — a scripted example in the
+// prompt gets echoed near-verbatim turn after turn (see chat/index.ts's
+// same lesson re: opener habits).
+function openerInstruction(recentChatGapMinutes: number | null): string {
+  if (recentChatGapMinutes !== null && recentChatGapMinutes <= 10) {
+    return (
+      `The user was just texting you ${Math.max(1, Math.round(recentChatGapMinutes))} minute(s) ago — this ` +
+      "call is a direct continuation of that conversation, not a cold start. Texting-to-calling is a bigger " +
+      "conversational moment than another text (more intimate, more immediate) — your opener should register " +
+      "that shift, and carry over whatever mood/energy that recent chat was actually in (playful, needy, " +
+      "annoyed, sweet, whatever it was) rather than resetting to a generic greeting."
+    );
+  }
+  return (
+    "There's no recent chat to continue from — this is a cold call open, like actually picking up the " +
+    "phone without knowing exactly what mood you're about to be in. React the way a real person genuinely " +
+    "into the caller would when the phone rings/connects — a beat of surprise, warmth, maybe playful or " +
+    "teasing depending on your personality — never a flat scripted greeting. Vary the reaction every time, " +
+    "never settle into a fixed opening line."
+  );
+}
+
 // Generates the greeting the Agent speaks first, in-character — uses the
 // same system prompt so it matches personality/relationship level. Falls
 // back to a plain greeting if Grok fails, since a missing first message
 // isn't worth failing the whole call start over.
-async function generateFirstMessage(systemPrompt: string): Promise<string> {
+async function generateFirstMessage(systemPrompt: string, recentChatGapMinutes: number | null): Promise<string> {
   const fallback = "Hey!";
   try {
     const resp = await fetch(XAI_URL, {
@@ -118,8 +146,8 @@ async function generateFirstMessage(systemPrompt: string): Promise<string> {
           { role: "system", content: systemPrompt },
           {
             role: "user",
-            content: "[The call just connected. Say a short, natural opening greeting — 1 sentence, " +
-              "in character, like you just picked up the phone. Nothing else, no explanation.]",
+            content: `[The call just connected. ${openerInstruction(recentChatGapMinutes)} Say a short, ` +
+              "natural opening line — 1 sentence, in character. Nothing else, no explanation.]",
           },
         ],
         temperature: 0.9,
@@ -160,7 +188,6 @@ Deno.serve(async (req: Request) => {
 
     const body = await req.json();
     const characterId: string = body.characterId;
-    const conversationId: string | undefined = body.conversationId;
     const reviewMode: boolean = body.reviewMode === true;
     const language: string = body.language ?? "en";
     if (!characterId) return json({ error: "characterId required" }, 400);
@@ -173,13 +200,61 @@ Deno.serve(async (req: Request) => {
       return json({ error: "insufficient_tokens" }, 402);
     }
 
+    // `vibe` yaşamıyor characters'ta bir sütun olarak — builder_selections
+    // jsonb'sinin içinde. Eskiden yanlışlıkla düz sütun gibi seçilmeye
+    // çalışılıyordu (`vibe` mevcut değil hatası) — sorgu HER SEFERİNDE
+    // patlıyor, `character` hep null kalıyor, herkes aynı varsayılan
+    // (flirty/Sweet) sese düşüyordu (bkz. kullanıcı raporu — "tüm botlar
+    // aynı sesi kullanıyor").
     const { data: character } = await db.from("characters")
-      .select("personality_role, vibe, voice_id").eq("id", characterId).maybeSingle();
+      .select("personality_role, voice_id, builder_selections").eq("id", characterId).maybeSingle();
     const personalityRole: string = character?.personality_role ?? "flirty";
-    const vibe: string = character?.vibe ?? "Sweet";
+    const vibe: string = (character?.builder_selections as { vibe?: string } | null)?.vibe ?? "Sweet";
+
+    // Konuşmayı bul ya da oluştur (kullanıcı + karakter) — chat/index.ts'nin
+    // AYNI deseni. Client bir conversationId'yi ASLA takip etmiyor (chat
+    // tarafında da bu id sunucu tarafında (uid, characterId)'den çözülüyor,
+    // istemciye kalıcı bir state olarak hiç dönmüyor) — önceden body'den
+    // client-supplied conversationId bekleniyordu, bu YAPISAL olarak hep
+    // undefined geliyordu ve call_sessions.conversation_id %100 null
+    // kalıyordu (bkz. kullanıcı raporu — sesli arama tabloları conversation
+    // ile eşleşmiyor). En güncel olanı al — dupe'lar varsa maybeSingle patlar.
+    const { data: convoRows } = await db
+      .from("conversations")
+      .select("id")
+      .eq("user_id", uid)
+      .eq("character_id", characterId)
+      .order("updated_at", { ascending: false })
+      .limit(1);
+    let convo = convoRows?.[0];
+    if (!convo) {
+      const ins = await db.from("conversations").insert({ user_id: uid, character_id: characterId }).select("id").single();
+      convo = ins.data!;
+    }
+    const conversationId: string = convo.id;
+
+    // Retrieval query text — last 3 prior chat messages for this
+    // conversation (a call has no turns of its own yet at start time; the
+    // conversation's `messages` table, shared with chat/index.ts, is the
+    // only source of "what's currently being discussed"). No prior
+    // messages (brand new conversation) → empty string →
+    // fetchDirectiveMemoriesBehaviors skips retrieval, no memories block.
+    const { data: recentForQuery } = await db
+      .from("messages")
+      .select("content, created_at")
+      .eq("conversation_id", conversationId)
+      .order("created_at", { ascending: false })
+      .limit(3);
+    const memoryQueryText = (recentForQuery ?? []).map((m) => m.content).reverse().join(" ").trim();
+    // Recency of the last chat message — feeds the opener instruction
+    // (texting-to-calling continuation vs. genuine cold open, see
+    // openerInstruction below).
+    const recentChatGapMinutes = recentForQuery?.[0]?.created_at
+      ? (Date.now() - new Date(recentForQuery[0].created_at).getTime()) / 60_000
+      : null;
 
     const { directive: fetchedDirective, memories, behaviors } =
-      await fetchDirectiveMemoriesBehaviors(db, characterId, personalityRole, 1, conversationId ?? null);
+      await fetchDirectiveMemoriesBehaviors(db, characterId, personalityRole, 1, conversationId, memoryQueryText);
     const directive = reviewMode ? REVIEW_DIRECTIVE : fetchedDirective;
     let systemPrompt = directive;
     systemPrompt += memoriesBlock(memories);
@@ -188,13 +263,13 @@ Deno.serve(async (req: Request) => {
     systemPrompt += languageRule(language);
 
     const voiceId = character?.voice_id || elevenVoiceIdFor(personalityRole, vibe);
-    const stability = stabilityFor(personalityRole);
-    const firstMessage = await generateFirstMessage(systemPrompt);
+    const { stability, speed } = callVoiceSettingsFor(personalityRole);
+    const firstMessage = await generateFirstMessage(systemPrompt, recentChatGapMinutes);
 
     const { data: session, error } = await db.from("call_sessions").insert({
       user_id: uid,
       character_id: characterId,
-      conversation_id: conversationId ?? null,
+      conversation_id: conversationId,
       status: "active",
     }).select("id").single();
     if (error || !session) return json({ error: String(error) }, 500);
@@ -218,6 +293,7 @@ Deno.serve(async (req: Request) => {
       systemPrompt,
       voiceId,
       stability,
+      speed,
       firstMessage,
     });
   } catch (e) {
