@@ -10,16 +10,12 @@
 // (never trusted from the request body) — same pattern as dev-token-tools.
 // DELETE this whole function once curated-character creation is retired.
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { uploadToR2 } from "../_shared/r2.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
-
-const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
-const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-const db = createClient(SUPABASE_URL, SERVICE_ROLE, { auth: { persistSession: false } });
 
 // Kept in sync with Plumm/Services/DevAccess.swift's devUserIDs — the
 // only two active dev users on this project (see project memory).
@@ -61,14 +57,12 @@ Deno.serve(async (req: Request) => {
 
     const bytes = Uint8Array.from(atob(imageBase64), (c) => c.charCodeAt(0));
     const path = `curated/${kind}/${crypto.randomUUID()}.png`;
-    const { error } = await db.storage.from("characters").upload(path, bytes, {
-      contentType: "image/png",
-      upsert: false,
-    });
-    if (error) return json({ error: `Storage upload failed: ${error.message}` }, 500);
-
-    const { data } = db.storage.from("characters").getPublicUrl(path);
-    return json({ url: data.publicUrl });
+    try {
+      const url = await uploadToR2(path, bytes, "image/png");
+      return json({ url });
+    } catch (e) {
+      return json({ error: `R2 upload failed: ${String(e)}` }, 500);
+    }
   } catch (e) {
     return json({ error: String(e) }, 500);
   }

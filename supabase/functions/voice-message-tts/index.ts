@@ -14,6 +14,7 @@ import { voiceNameFor } from "./voiceMap.ts";
 import { elevenVoiceIdFor } from "../_shared/elevenVoiceMap.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { requireVoiceEntitlement } from "../_shared/entitlements.ts";
+import { uploadToR2 } from "../_shared/r2.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -57,12 +58,11 @@ async function chargeOrReject(uid: string, amount: number, reason: string): Prom
 /// (istemci yine yerel dosyayla anlık çalar; sadece reload kalıcılığı kaybolur).
 async function uploadVoice(bytes: Uint8Array, uid: string): Promise<string | null> {
   const path = `voices/${uid}/${crypto.randomUUID()}.mp3`;
-  const { error } = await db.storage.from("characters").upload(path, bytes, {
-    contentType: "audio/mpeg", upsert: false,
-  });
-  if (error) return null;
-  const { data } = db.storage.from("characters").getPublicUrl(path);
-  return data.publicUrl;
+  try {
+    return await uploadToR2(path, bytes, "audio/mpeg");
+  } catch {
+    return null;
+  }
 }
 
 Deno.serve(async (req) => {

@@ -15,6 +15,7 @@
 //   Cevap:  { url }  veya  { error }
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { uploadToR2 } from "../_shared/r2.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -577,13 +578,7 @@ async function fetchGeneratedImageBytes(prompt: string, baselineImageUrl: string
 
 async function uploadGeneratedImage(bytes: Uint8Array): Promise<string> {
   const path = `generated/${crypto.randomUUID()}.png`;
-  const { error } = await db.storage.from("characters").upload(path, bytes, {
-    contentType: "image/png",
-    upsert: false,
-  });
-  if (error) throw new Error(`Storage upload failed: ${error.message}`);
-  const { data } = db.storage.from("characters").getPublicUrl(path);
-  return data.publicUrl;
+  return uploadToR2(path, bytes, "image/png");
 }
 
 Deno.serve(async (req: Request) => {

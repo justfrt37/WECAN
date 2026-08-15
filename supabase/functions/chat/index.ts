@@ -21,6 +21,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { franc } from "https://esm.sh/franc-min@6";
+import { uploadToR2, deleteFromR2, signedR2Url } from "../_shared/r2.ts";
 import {
   fetchDirective as sharedFetchDirective,
   fetchDirectiveMemoriesBehaviors as sharedFetchDirectiveMemoriesBehaviors,
@@ -699,8 +700,9 @@ async function classifySleepAgreement(userMessage: string, reply: string): Promi
 // Kullanıcının bota gönderdiği fotoğrafı KALICI hale getirir — eskiden base64
 // sadece bu turun Grok vision girişine gidip hiçbir yere kaydedilmiyordu, o
 // yüzden cihaz önbelleği (sohbetten çıkıp girince, ya da reinstall'da)
-// kaybolunca fotoğraf da geri gelmiyordu (bkz. kullanıcı talebi). `user-photos`
-// private bucket'ına `{uid}/{uuid}.jpg` olarak yüklenir; `messages` satırı
+// kaybolunca fotoğraf da geri gelmiyordu (bkz. kullanıcı talebi). R2'ye
+// `user-photos/{uid}/{uuid}.jpg` key'i olarak (özel, hiç public base URL'e
+// çıkmaz) yüklenir; `messages` satırı
 // `content`'inde STORAGE PATH tutar (imzalı URL değil — path kalıcı, imzalı
 // URL kısa ömürlü, her history isteğinde `resolveUserPhotoUrls` ile taze
 // üretilir). `user_sent_photos` 7 günlük süreyi takip eder (bkz.
@@ -708,13 +710,11 @@ async function classifySleepAgreement(userMessage: string, reply: string): Promi
 async function persistUserPhoto(conversationId: string, uid: string, base64Jpeg: string): Promise<void> {
   try {
     const bytes = Uint8Array.from(atob(base64Jpeg), (c) => c.charCodeAt(0));
-    const path = `${uid}/${crypto.randomUUID()}.jpg`;
-    const { error: uploadError } = await db.storage.from("user-photos").upload(path, bytes, {
-      contentType: "image/jpeg",
-      upsert: false,
-    });
-    if (uploadError) {
-      console.error("persistUserPhoto: storage upload failed:", uploadError.message);
+    const path = `user-photos/${uid}/${crypto.randomUUID()}.jpg`;
+    try {
+      await uploadToR2(path, bytes, "image/jpeg");
+    } catch (e) {
+      console.error("persistUserPhoto: R2 upload failed:", String(e));
       return;
     }
     const { data: msgRow, error: insertError } = await db
@@ -761,8 +761,8 @@ async function sweepExpiredUserPhotos(conversationId: string): Promise<void> {
     const { error: expiredError } = await db.from("user_sent_photos")
       .update({ expired: true }).eq("id", row.id);
     if (expiredError) console.error("sweepExpiredUserPhotos: expired flag update failed:", expiredError.message);
-    const { error: removeError } = await db.storage.from("user-photos").remove([row.storage_path]);
-    if (removeError) console.error("sweepExpiredUserPhotos: storage remove failed:", removeError.message);
+    const { error: removeError } = await deleteFromR2(row.storage_path);
+    if (removeError) console.error("sweepExpiredUserPhotos: R2 remove failed:", removeError);
   }
 }
 
@@ -775,9 +775,12 @@ async function resolveUserPhotoUrls<T extends { kind?: string; content?: string 
   const withUrls = await Promise.all(
     rows.map(async (row) => {
       if (row.kind !== "user_photo" || !row.content) return row;
-      const { data, error } = await db.storage.from("user-photos").createSignedUrl(row.content, 3600);
-      if (error || !data) return row;
-      return { ...row, content: data.signedUrl };
+      try {
+        const url = await signedR2Url(row.content, 3600);
+        return { ...row, content: url };
+      } catch {
+        return row;
+      }
     }),
   );
   return withUrls;

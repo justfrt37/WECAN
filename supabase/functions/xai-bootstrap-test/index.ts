@@ -10,19 +10,15 @@
 // actually uses successfully every day instead of the untested Civitai path.
 //
 // Request: { prompt, baselineImageUrl }
-// Response: { url } (uploaded to Supabase Storage characters/lora-bootstrap/)
+// Response: { url } (uploaded to R2, lora-bootstrap/)
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { uploadToR2 } from "../_shared/r2.ts";
 
 const XAI_API_KEY = Deno.env.get("XAI_API_KEY") ?? "";
 const XAI_IMAGE_EDITS_URL = "https://api.x.ai/v1/images/edits";
 const IMAGE_MODEL = "grok-imagine-image";
 const IMAGE_RESOLUTION = "2k";
 const IMAGE_ASPECT_RATIO = "9:16";
-
-const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
-const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-const db = createClient(SUPABASE_URL, SERVICE_ROLE, { auth: { persistSession: false } });
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -67,10 +63,8 @@ Deno.serve(async (req: Request) => {
     const bytes = await bytesFromImageResponse(r);
 
     const path = `lora-bootstrap/${crypto.randomUUID()}.png`;
-    const { error } = await db.storage.from("characters").upload(path, bytes, { contentType: "image/png", upsert: false });
-    if (error) throw new Error(`Storage upload failed: ${error.message}`);
-    const { data } = db.storage.from("characters").getPublicUrl(path);
-    return json({ url: data.publicUrl });
+    const url = await uploadToR2(path, bytes, "image/png");
+    return json({ url });
   } catch (e) {
     return json({ error: String(e) }, 500);
   }
