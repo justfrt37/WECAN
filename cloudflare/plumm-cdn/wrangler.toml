@@ -1,0 +1,11 @@
+name = "plumm-cdn"
+main = "src/index.js"
+compatibility_date = "2026-08-01"
+
+[[r2_buckets]]
+binding = "PLUMM_BUCKET"
+bucket_name = "plumm"
+
+# After first deploy, attach via dashboard: Worker > Settings > Domains & Routes
+# > Add Custom Domain > cdn.plummai.com  (zone must be active on Cloudflare first —
+# blocked for now by Wix's nameserver lock, see README.md)
