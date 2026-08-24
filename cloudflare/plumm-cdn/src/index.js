@@ -8,6 +8,13 @@ export default {
       return new Response("Method not allowed", { status: 405 });
     }
 
+    // user-photos/ is private (served only via presigned S3 GET from
+    // supabase/functions/_shared/r2.ts signedR2Url) — must never be
+    // reachable through this public, unauthenticated proxy.
+    if (key.startsWith("user-photos/")) {
+      return new Response("Not found", { status: 404 });
+    }
+
     const object = await env.PLUMM_BUCKET.get(key);
     if (!object) return new Response("Not found", { status: 404 });
 
