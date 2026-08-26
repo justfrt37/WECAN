@@ -84,6 +84,16 @@ function extractJson(raw: string): any | null {
 // sıkıştırılır, toplam parça sayısı 3 ile sınırlanır (3'ten fazlası son
 // parçaya birleştirilir) — savunma amaçlı, kural zaten modele bu sınırları
 // söylüyor ama sunucu asla modele güvenmez.
+// Modelin arada bıraktığı düz \n/\n\n (yani [PAUSE:n] KULLANMADAN yazdığı
+// paragraf arası boşluk) tek balonun içinde çirkin boş bir boşluk olarak
+// görünüyordu (bkz. canlı bulgu: "iki blok gibi ama tek satır" — DB'de tek
+// satırlık content'in İÇİNDE ham \n\n vardı). Bu bir SMS/mesajlaşma
+// uygulaması, çok satırlı paragraf YOK — her satır sonu tek boşluğa
+// düşürülür. Gerçek çoklu-balon isteği hâlâ [PAUSE:n] işaretiyle olur.
+function collapseNewlines(text: string): string {
+  return text.replace(/\s*\n+\s*/g, " ").replace(/ {2,}/g, " ").trim();
+}
+
 function parseReplySegments(raw: string): {
   plainText: string;
   segments: { text: string; delaySeconds: number }[];
@@ -92,12 +102,12 @@ function parseReplySegments(raw: string): {
   // split with a capturing group interleaves text/delay/text/delay/...text
   const rawSegments: { text: string; delaySeconds: number }[] = [];
   for (let i = 0; i < parts.length; i += 2) {
-    const text = parts[i].trim();
+    const text = collapseNewlines(parts[i]);
     if (!text) continue;
     const delaySeconds = i > 0 ? Math.min(5, Math.max(1, parseInt(parts[i - 1], 10) || 1)) : 0;
     rawSegments.push({ text, delaySeconds });
   }
-  if (rawSegments.length === 0) return { plainText: raw.trim(), segments: [] };
+  if (rawSegments.length === 0) return { plainText: collapseNewlines(raw), segments: [] };
   const capped = rawSegments.length > 3
     ? [
         ...rawSegments.slice(0, 2),
@@ -1423,7 +1433,7 @@ Deno.serve(async (req: Request) => {
     // reaction turns never get DRAMATIC_PACING_RULE injected, so `segments`
     // is always empty for them and `replySegments` stays unset in the response.
     const { plainText: reply, segments: replySegments } =
-      (!voiceChat && !imageReactionChat) ? parseReplySegments(mediaCleanedReply) : { plainText: rawReply, segments: [] };
+      (!voiceChat && !imageReactionChat) ? parseReplySegments(mediaCleanedReply) : { plainText: collapseNewlines(rawReply), segments: [] };
     // Signal-only log — nothing else records whether Grok is actually using
     // [PAUSE:n] in practice. Count only, no message content (privacy).
     if (replySegments.length > 1) {
