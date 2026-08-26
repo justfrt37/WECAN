@@ -46,7 +46,16 @@ const MODEL = "grok-4-1-fast-non-reasoning";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
-const KEEP_RECENT = 12; // prompt'ta tutulan son mesaj sayısı (gerisi özete gider)
+const KEEP_RECENT = 12; // bir fold sonrası pencerenin geri düştüğü hedef boyut
+// Pencere HER turda 1 mesaj kaydırıp özete katlamak yerine (eski davranış),
+// KEEP_RECENT+FOLD_BATCH'e ulaşana kadar sadece BÜYÜR (append-only — xAI
+// prefix-cache turlar arası korunur, bkz. docs.x.ai/prompt-caching: "never
+// remove earlier messages"), sonra TEK seferde FOLD_BATCH kadar özete
+// katlanıp KEEP_RECENT'e geri düşer. Hem geçmiş bloğu çoğu turda cache'den
+// gelir hem de özetleme LLM çağrısı her turda değil, ~her FOLD_BATCH turda
+// bir çalışır (bkz. aşağıdaki fold tetikleyicisi).
+const FOLD_BATCH = 6;
+const WINDOW_SAFETY_CAP = KEEP_RECENT + FOLD_BATCH + 20; // beklenmedik desync'e karşı üst sınır
 
 const db = createClient(SUPABASE_URL, SERVICE_ROLE, {
   auth: { persistSession: false },
@@ -1232,19 +1241,24 @@ Deno.serve(async (req: Request) => {
       const reactionDirective = reviewMode ? REVIEW_DIRECTIVE : fetchedReactionDirective;
       let reactionSystem = systemPrompt;
       reactionSystem += wrapDirective(reactionDirective, Math.round(reactionProgress * 100));
-      if (exHistory) {
-        reactionSystem += `\n\n[SHARED HISTORY — reference these memories naturally in conversation]\n${exHistory}`;
-      }
-      reactionSystem += memoriesBlock(reactionMemoryRows);
-      reactionSystem += behaviorsBlock(reactionBehaviorRows);
-
       reactionSystem += languageDirective(detectedLanguage);
       reactionSystem += PHOTO_DOWNLOAD_REACTION_RULE;
+
+      // exHistory/memories/behaviors: volatile per-turn content, kept OUT of
+      // reactionSystem for the same reason as the main turn below (memoriesBlock
+      // can change every call, would invalidate caching for the whole system
+      // message otherwise) — goes in the user message instead.
+      let reactionContext = "[The user just saved this photo to their device.]";
+      if (exHistory) {
+        reactionContext += `\n\n[SHARED HISTORY — reference these memories naturally in conversation]\n${exHistory}`;
+      }
+      reactionContext += memoriesBlock(reactionMemoryRows);
+      reactionContext += behaviorsBlock(reactionBehaviorRows);
 
       const reactionReply = await callGrok(
         [
           { role: "system", content: reactionSystem },
-          { role: "user", content: "[The user just saved this photo to their device.]" },
+          { role: "user", content: reactionContext },
         ],
         200,
         conversationId
@@ -1316,30 +1330,32 @@ Deno.serve(async (req: Request) => {
       system += DRAMATIC_PACING_RULE;
     }
 
-    // ── Buradan sonrası konuşma bazında DEĞİŞEBİLEN içerik (exHistory hariç
-    // hepsi mesaj geçtikçe büyür/güncellenir) — kasıtlı olarak system'in EN
-    // SONUNA taşındı: xAI prompt-cache prefix eşleşmesi bu noktadan öncesini
-    // (yukarıdaki tüm statik kural bloklarını) korur, bu blok değiştiğinde
-    // SADECE kendisinden sonrası (turnContext zaten user mesajında, bunun
-    // dışında) geçersiz olur — bkz. design doc §3, docs.x.ai prompt-caching.
+    // ÖNEMLİ (prompt caching): bu noktadan sonrası (exHistory hariç hepsi)
+    // mesaj geçtikçe/konudan konuya DEĞİŞEBİLİR içerik — memoriesBlock özellikle
+    // her turda FARKLI top-k benzerlik sonucu dönebilir (bkz. match_memories,
+    // sorgu metni her turda yeni mesajla değişiyor). Bunlar ESKİDEN system'in
+    // sonuna ekleniyordu, ama system TEK bir mesaj/string olduğu için içindeki
+    // HERHANGİ bir kelime değişince xAI'nin prefix-cache eşleşmesi TÜM system'i
+    // (yukarıdaki onlarca statik kural bloğu dahil) geçersiz sayıyordu — yani
+    // "sona ekliyoruz, öncesi korunur" varsayımı YANLIŞTI: cache mesaj bazında
+    // eşleşiyor, sub-mesaj/token bazında değil (bkz. docs.x.ai prompt-caching,
+    // "checks how many messages match exactly"). timeContext/currentActivity
+    // zaten aynı sebeple SON KULLANICI MESAJINA ekleniyordu (aşağıda) — aynı
+    // çözüm buraya da uygulanıyor: system artık GERÇEKTEN sabit (sadece
+    // directive/dil/seviye değişince değişir, ki o zaten nadir), volatile
+    // her şey turnContext'e taşındı.
+    let turnContext = timeContext(lastMessageAt, clientNow, tzOffsetMinutes);
     if (exHistory) {
-      system += `\n\n[SHARED HISTORY — reference these memories naturally in conversation]\n${exHistory}`;
+      turnContext += `\n\n[SHARED HISTORY — reference these memories naturally in conversation]\n${exHistory}`;
     }
-    system += memoriesBlock(memoryRows);
-    system += behaviorsBlock(behaviorRows);
+    turnContext += memoriesBlock(memoryRows);
+    turnContext += behaviorsBlock(behaviorRows);
     if (useClientHistory && localSummary && localSummary.trim() !== "") {
-      system += `\n\n[Önceki konuşmalarınızın özeti]\n${stripVoiceTags(localSummary)}`;
+      turnContext += `\n\n[Önceki konuşmalarınızın özeti]\n${stripVoiceTags(localSummary)}`;
     }
     if (!useClientHistory && convo.summary && convo.summary.trim() !== "") {
-      system += `\n\n[Summary of your previous conversations — reference naturally, reply in the user's language regardless]\n${stripVoiceTags(convo.summary)}`;
+      turnContext += `\n\n[Summary of your previous conversations — reference naturally, reply in the user's language regardless]\n${stripVoiceTags(convo.summary)}`;
     }
-
-    // ÖNEMLİ (prompt caching): timeContext/currentActivity HER turda değişir —
-    // system prompt'un İÇİNDE kalsalardı xAI'nin prefix-cache'i hiç tutmazdı
-    // (system, mesaj dizisinin İLK elemanı — tek bir farklı token bile tüm
-    // prefix eşleşmesini bozar). Bu yüzden system'i SABİT tutup, bunun yerine
-    // SON kullanıcı mesajına ekleniyorlar — o mesaj zaten her turda yeni.
-    let turnContext = timeContext(lastMessageAt, clientNow, tzOffsetMinutes);
     if (currentActivity) {
       // Sert yasak (önceki hali "her mesajda tekrarlama" gibi yumuşak bir
       // rica idi — model yine de neredeyse her turda aktiviteden bahsediyordu,
@@ -1393,13 +1409,16 @@ Deno.serve(async (req: Request) => {
     if (useClientHistory) {
       recent = clientHistory!.slice(-KEEP_RECENT);
     } else {
-      const { data: recentDesc } = await db
+      // Sondan KEEP_RECENT değil, son fold'dan (summarized_count) BU YANA
+      // olan HER mesaj — append-only, bkz. FOLD_BATCH yorumu yukarıda.
+      const windowStart: number = convo.summarized_count ?? 0;
+      const { data: recentAsc } = await db
         .from("messages")
         .select("role, content")
         .eq("conversation_id", conversationId)
-        .order("created_at", { ascending: false })
-        .limit(KEEP_RECENT);
-      recent = (recentDesc ?? []).reverse();
+        .order("created_at", { ascending: true })
+        .range(windowStart, windowStart + WINDOW_SAFETY_CAP - 1);
+      recent = recentAsc ?? [];
     }
     // Geçmişteki HERHANGİ bir mesaj (fix'ten önce kaydedilmiş sesli mesaj
     // cevapları dahil) ses etiketi taşıyabilir — Grok bunu görüp taklit
@@ -1524,8 +1543,12 @@ Deno.serve(async (req: Request) => {
       .eq("conversation_id", conversationId);
 
     const summarizedCount: number = convo.summarized_count ?? 0;
-    const agedOut = (total ?? 0) - KEEP_RECENT; // pencere dışına çıkan toplam
-    if (agedOut > summarizedCount) {
+    const agedOut = (total ?? 0) - KEEP_RECENT; // pencere KEEP_RECENT'e geri düşerse dışarda kalacak toplam
+    // FOLD_BATCH kadar fazlası birikmeden fold ETME (eski koşul: `agedOut >
+    // summarizedCount`, HER turda 1 mesaj kaydırıp özetleme LLM çağrısını HER
+    // turda tetikliyordu). Artık sadece pencere KEEP_RECENT+FOLD_BATCH'i
+    // geçince tek seferde FOLD_BATCH kadar katlanıp geri düşüyor.
+    if (agedOut > summarizedCount + FOLD_BATCH) {
       // Özete eklenecek yeni eski mesajlar: [summarizedCount, agedOut)
       const { data: toFold } = await db
         .from("messages")
