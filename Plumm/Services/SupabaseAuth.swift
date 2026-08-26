@@ -15,9 +15,15 @@ enum SupabaseAuth {
     }
 
     /// Yeni anonim oturum açar, token'ları saklar.
+    /// DOĞRUDAN /auth/v1/signup DEĞİL — captcha korumasını (Attack Protection)
+    /// proje genelinde KAPATMADAN sadece anonim girişi bypass eden
+    /// `anon-signin` edge function'ı çağrılır (bkz. o dosyadaki açıklama:
+    /// GoTrue captcha'yı yalnızca anon-key çağıranlara uygular, service_role
+    /// ile yapılan aynı istek captcha'sız geçiyor — ampirik olarak
+    /// doğrulandı 2026-08-26). Web'in kendi anon-key signup akışı etkilenmez.
     @discardableResult
     static func signInAnonymously() async -> Bool {
-        guard let url = URL(string: "\(Config.supabaseURL)/auth/v1/signup") else { return false }
+        guard let url = URL(string: "\(Config.supabaseURL)/functions/v1/anon-signin") else { return false }
         var r = URLRequest(url: url)
         r.timeoutInterval = 20
         r.httpMethod = "POST"
