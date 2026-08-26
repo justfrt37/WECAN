@@ -412,6 +412,71 @@ final class ChatViewModel {
         }
     }
 
+    /// İstemci taraflı uzunluk sınırı — bkz. maybeSplitForLength. Sunucunun
+    /// [PAUSE:n]/DRAMATIC_PACING_RULE mantığına EK, onu DEĞİŞTİRMEZ.
+    private static let hardWordCap = 30
+    private static let softWordThreshold = 10
+    private static let softSplitChance = 0.5
+
+    private func wordCount(_ s: String) -> Int {
+        s.split(separator: " ", omittingEmptySubsequences: true).count
+    }
+
+    /// Kaba cümle bölücü — "." "!" "?" "…" görülünce cümleyi kapatır. Kısaltma/
+    /// ondalık sayı gibi durumları ayırt etmez ama gündelik mesajlaşma metni
+    /// için yeterli (yanlış bölünme en kötü ihtimalle kısa bir ekstra balon).
+    private func splitSentences(_ text: String) -> [String] {
+        var sentences: [String] = []
+        var current = ""
+        for ch in text {
+            current.append(ch)
+            if ".!?…".contains(ch) {
+                let trimmed = current.trimmingCharacters(in: .whitespaces)
+                if !trimmed.isEmpty { sentences.append(trimmed) }
+                current = ""
+            }
+        }
+        let trimmed = current.trimmingCharacters(in: .whitespaces)
+        if !trimmed.isEmpty { sentences.append(trimmed) }
+        return sentences
+    }
+
+    /// Tek bir balonu, kelime sayısına göre cümle sonunda ikiye böler.
+    /// hardWordCap üzerinde HER ZAMAN, softWordThreshold üzerinde %50
+    /// ihtimalle böler — cümle sınırı yoksa (tek cümle) bölünmez (bkz.
+    /// kullanıcı talebi: "10 kelime üstü %50 ihtimalle, hard cap üstü kesin").
+    private func maybeSplitForLength(_ segment: ReplySegment) -> [ReplySegment] {
+        let words = wordCount(segment.text)
+        let shouldSplit: Bool
+        if words > Self.hardWordCap {
+            shouldSplit = true
+        } else if words > Self.softWordThreshold {
+            shouldSplit = Double.random(in: 0..<1) < Self.softSplitChance
+        } else {
+            shouldSplit = false
+        }
+        guard shouldSplit else { return [segment] }
+
+        let sentences = splitSentences(segment.text)
+        guard sentences.count >= 2 else { return [segment] }
+
+        let half = max(1, words / 2)
+        var firstPart: [String] = []
+        var wordsSoFar = 0
+        for s in sentences {
+            firstPart.append(s)
+            wordsSoFar += wordCount(s)
+            if wordsSoFar >= half { break }
+        }
+        let restSentences = Array(sentences.dropFirst(firstPart.count))
+        guard !restSentences.isEmpty else { return [segment] }
+
+        return [
+            ReplySegment(text: firstPart.joined(separator: " "), delaySeconds: segment.delaySeconds),
+            ReplySegment(text: restSentences.joined(separator: " "), delaySeconds: Double.random(in: 1...2)),
+        ]
+    }
+
     /// `send()`/`sendUserVoice()`/`sendUserPhoto()` ortak balon teslim mantığı —
     /// üçünde de aynı 20 satırlık "kalan süre kadar bekle, balonu kapat, mesajı
     /// ekle" bloğu tekrarlanıyordu, artık tek yerde. `result.replySegments`
@@ -420,9 +485,14 @@ final class ChatViewModel {
     /// boşsa/nil ise eski tek-balon davranışına düşer (voice/image-reaction
     /// turları ve her türlü eski sunucu cevabı için sıfır riskli geri dönüş).
     private func deliverSegments(_ result: ChatReply, bubbleStartedAt: Date) async {
-        let segments: [ReplySegment] = (result.replySegments?.isEmpty == false)
+        let serverSegments: [ReplySegment] = (result.replySegments?.isEmpty == false)
             ? result.replySegments!
             : [ReplySegment(text: result.reply, delaySeconds: 0)]
+        // Sunucunun kendi [PAUSE:n] mantığı AYNEN korunur — bu sadece EK bir
+        // istemci-taraflı geçiş: her balonu, uzunluğuna göre ayrıca bölebilir
+        // (bkz. maybeSplitForLength). Sunucu zaten bölmüşse her parça yine bu
+        // filtreden geçer, tek balon döndüyse de aynı mantık uygulanır.
+        let segments: [ReplySegment] = serverSegments.flatMap { maybeSplitForLength($0) }
 
         for (index, segment) in segments.enumerated() {
             if index == 0 {
