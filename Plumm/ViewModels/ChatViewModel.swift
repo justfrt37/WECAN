@@ -414,13 +414,18 @@ final class ChatViewModel {
 
     /// İstemci taraflı uzunluk sınırı — bkz. maybeSplitForLength. Sunucunun
     /// [PAUSE:n]/DRAMATIC_PACING_RULE mantığına EK, onu DEĞİŞTİRMEZ.
-    private static let hardWordCap = 30
-    private static let softWordThreshold = 10
+    /// KARAKTER sayısına göre (KELİME değil) — 7 dilde (en/tr/de/fr/es/it/pt)
+    /// canlı veri karşılaştırması (2026-08-27): kelime başına karakter oranı
+    /// dillerde 5.5-6.5 arasında sıkı bir bantta (Türkçe 6.5, İngilizce 6.0,
+    /// İtalyanca 5.6) ama ORTALAMA KELİME SAYISI dile göre çok değişiyor
+    /// (İngilizce cevaplar ortalama 26.9 kelime, Türkçe 16.7 — İngilizce'ye
+    /// aynı kelime eşiğini uygulamak dile göre çok farklı davranırdı).
+    /// Karakter eşiği tüm diller için TEK sayı seti ile adil çalışır. Eşikler
+    /// eski kelime sınırlarının (10/30) Türkçe ortalama oranına (~6.5 kar/
+    /// kelime) göre karakter karşılığı.
+    private static let hardCharCap = 195
+    private static let softCharThreshold = 65
     private static let softSplitChance = 0.5
-
-    private func wordCount(_ s: String) -> Int {
-        s.split(separator: " ", omittingEmptySubsequences: true).count
-    }
 
     /// Kaba cümle bölücü — "." "!" "?" "…" görülünce cümleyi kapatır. Kısaltma/
     /// ondalık sayı gibi durumları ayırt etmez ama gündelik mesajlaşma metni
@@ -441,16 +446,16 @@ final class ChatViewModel {
         return sentences
     }
 
-    /// Tek bir balonu, kelime sayısına göre cümle sonunda ikiye böler.
-    /// hardWordCap üzerinde HER ZAMAN, softWordThreshold üzerinde %50
+    /// Tek bir balonu, karakter sayısına göre cümle sonunda ikiye böler.
+    /// hardCharCap üzerinde HER ZAMAN, softCharThreshold üzerinde %50
     /// ihtimalle böler — cümle sınırı yoksa (tek cümle) bölünmez (bkz.
-    /// kullanıcı talebi: "10 kelime üstü %50 ihtimalle, hard cap üstü kesin").
+    /// kullanıcı talebi: dil-bağımsız eşik için kelime yerine karakter).
     private func maybeSplitForLength(_ segment: ReplySegment) -> [ReplySegment] {
-        let words = wordCount(segment.text)
+        let length = segment.text.count
         let shouldSplit: Bool
-        if words > Self.hardWordCap {
+        if length > Self.hardCharCap {
             shouldSplit = true
-        } else if words > Self.softWordThreshold {
+        } else if length > Self.softCharThreshold {
             shouldSplit = Double.random(in: 0..<1) < Self.softSplitChance
         } else {
             shouldSplit = false
@@ -460,13 +465,13 @@ final class ChatViewModel {
         let sentences = splitSentences(segment.text)
         guard sentences.count >= 2 else { return [segment] }
 
-        let half = max(1, words / 2)
+        let half = max(1, length / 2)
         var firstPart: [String] = []
-        var wordsSoFar = 0
+        var charsSoFar = 0
         for s in sentences {
             firstPart.append(s)
-            wordsSoFar += wordCount(s)
-            if wordsSoFar >= half { break }
+            charsSoFar += s.count
+            if charsSoFar >= half { break }
         }
         let restSentences = Array(sentences.dropFirst(firstPart.count))
         guard !restSentences.isEmpty else { return [segment] }
