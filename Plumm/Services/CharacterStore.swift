@@ -144,8 +144,6 @@ final class CharacterStore {
         let urls = characters.flatMap { [$0.photoURL, $0.avatarURL].compactMap { $0 } }
         await ImageCache.shared.prefetch(Array(Set(urls)))
 
-        isLoaded = true
-
         // "Sıfır yerel": sohbet durumunu SUNUCUDAN bellek-içi önbelleğe doldur
         // (bkz. hydrateConversations / LocalConversationStore). Diğer ekranlar
         // (Keşfet "zaten konuşuyor" filtresi, Beğeniler, bildirim gating) bu
@@ -154,7 +152,18 @@ final class CharacterStore {
         // KALDIRILDI — rutin artık yalnızca disk'te değil bellekte tutulduğu
         // için her açılışta yeniden üretmek pahalı olurdu; rutin artık sohbet
         // AÇILDIĞINDA talep üzerine üretilir (bkz. ChatViewModel.ensureScheduleGenerated).
+        //
+        // NOT (kritik sıra): `isLoaded` BURADAN ÖNCE true olursa (eski davranış),
+        // PlummApp Splash'ten MainTabView'e geçer ve MainTabView.openPendingOnboardingChat
+        // `LocalConversationStore.shared.load(for:) == nil` kontrolünü hydrateConversations
+        // bitmeden çalıştırabilir — GERÇEK geçmişi olan bir karakter "yeni" sanılıp
+        // üstüne taze bir "ilk selam" enjekte ediliyor, tüm önceki mesajlar
+        // GİZLENİYORDU (bkz. QA notu 2026-08-26 — Scarlett karakterinde canlı
+        // gözlemlendi: 36 kalp / gerçek geçmiş varken sohbet boş açıldı).
+        // `isLoaded` artık hydrateConversations bitene KADAR true olmuyor.
         await hydrateConversations()
+
+        isLoaded = true
 
         // İlk yükleme boru hattı TAMAMEN bitti → artık öne-geliş refresh'i
         // güvenle çalışabilir (bkz. refreshCharacters guard'ı).
@@ -182,7 +191,7 @@ final class CharacterStore {
     func hydrateConversations() async {
         async let statesT = conversationsService.fetchConversationStates()
         async let msgsT = conversationsService.fetchAllMessages()
-        let (states, msgs) = await (statesT, msgsT)
+        let (rawStates, msgs) = await (statesT, msgsT)
 
         var byConv: [UUID: [LastMessage]] = [:]
         for m in msgs { byConv[m.conversationID, default: []].append(m) }
@@ -194,12 +203,29 @@ final class CharacterStore {
             return Self.iso8601WithFractional.date(from: s) ?? Self.iso8601Plain.date(from: s)
         }
 
+        // Aynı (user, character) için BİRDEN FAZLA conversation satırı olabilir
+        // (bkz. chat/index.ts "dupe'lar" yorumu — sunucu tarafında ARA SIRA hâlâ
+        // oluşuyor, kök nedeni ayrı bir konu). `rawStates` `updated_at.desc`
+        // sıralı geldiği için buradaki dedup İLK GÖRÜLENİ (= en güncel) tutar,
+        // sonrakileri atlar. Bu koruma OLMADAN aşağıdaki döngü her eşleşen
+        // characterID'yi SIRAYLA ÜZERİNE yazıyordu — en son işlenen (= en ESKİ
+        // dupe, çünkü desc sıralı) kazanıyordu. Canlı bulgu (2026-08-26): bir
+        // karakter için 4 dupe conversation vardı, kullanıcı sohbete her
+        // girişte AYLAR öncesinin kısa geçmişini görüyordu — yeni mesajlar
+        // sunucuda duruyordu ama yerel önbellek yanlış satırdan besleniyordu.
+        var seenCharacterIDs = Set<UUID>()
+        let states = rawStates.filter { seenCharacterIDs.insert($0.characterID).inserted }
+
         for state in states {
             // desc → asc (görüntüleme/sayım sırası)
             let convMsgs = Array((byConv[state.id] ?? []).reversed())
-            let messages: [Message] = convMsgs.map {
-                Message.fromServer(role: $0.role, content: $0.content, kind: $0.kind, createdAt: $0.date ?? Date())
-            }
+            // image_request/voice_request: içsel defter tutma satırı, kendi
+            // balonu olarak gösterilmez (bkz. ChatListView.load aynı filtre).
+            let messages: [Message] = convMsgs
+                .filter { $0.kind != "image_request" && $0.kind != "voice_request" }
+                .map {
+                    Message.fromServer(role: $0.role, content: $0.content, kind: $0.kind, createdAt: $0.date ?? Date())
+                }
             let existing = LocalConversationStore.shared.load(for: state.characterID)
             let stored = LocalConversationStore.Stored(
                 messages: messages,

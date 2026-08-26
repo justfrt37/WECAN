@@ -371,12 +371,17 @@ final class ChatViewModel {
                     nearSleepTime: isNearSleepTime()
                 )
 
-                // Eski otomatik-foto sistemi (metinde "foto" geçince statik
-                // havuzdan rastgele fotoğraf ekleme) KALDIRILDI — artık foto/ses
-                // sadece ilgili düğmeyle gönderilir (bkz. MEDIA_REQUEST_RULE,
-                // chat/index.ts). Grok bu turda düğmeyi kullanmasını önerir.
+                // Grok düz metinde foto/ses isteğini anlarsa MEDIA_REQUEST_RULE
+                // gereği [[SEND_PHOTO: ...]]/[[SEND_VOICE]] işaretiyle işaretler,
+                // sunucu bunu ayrıştırıp `autoMedia` olarak döner (metinden
+                // temizlenmiş hâlde, bkz. chat/index.ts parseMediaIntent). Burada
+                // AYNI düğmeye-basılmış-gibi kilitli balon akışı tetiklenir —
+                // üretim/blur/token maliyeti (bkz. generatePendingImage/Voice)
+                // BİREBİR aynı, düğmelerin kendisi de değişmeden çalışmaya devam
+                // eder (bkz. kullanıcı talebi 2026-08-26).
                 await deliverSegments(result, bubbleStartedAt: bubbleStartedAt)
                 handleTokenBalance(result.tokenBalance)
+                triggerAutoMediaIfNeeded(result.autoMedia)
 
                 applyPostReplyEffects(gotPhoto: nil, stored: stored,
                                       serverLevel: result.level, serverProgress: result.levelProgress)
@@ -448,7 +453,14 @@ final class ChatViewModel {
 
     /// Gerçek yatma saatine 1 saatten yakın mı (ya da içinde miyiz) — bkz.
     /// chat/index.ts sleepRule/turnContext. Yerel hesaplanır, ağ çağrısı yok.
+    ///
+    /// UYKU ÖZELLİĞİ KAPATILDI (kullanıcı talebi 2026-08-26) — kod SİLİNMEDİ,
+    /// sadece devre dışı: her zaman false döner, sunucu da artık BEDTIME
+    /// PROXIMITY/sleepRule enjekte etmiyor (bkz. chat/index.ts). Geri açmak
+    /// için bu guard'ı ve sunucudaki ilgili yorumları kaldırmak yeterli.
     private func isNearSleepTime() -> Bool {
+        let sleepFeatureEnabled = false
+        guard sleepFeatureEnabled else { return false }
         guard let schedule = LocalConversationStore.shared.load(for: character.id)?.schedule else { return false }
         let now = Date()
         if ScheduleLookup.currentBlock(schedule: schedule, date: now)?.isSleep == true { return true }
@@ -666,23 +678,32 @@ final class ChatViewModel {
         // Kullanıcı bir şey yazmadıysa varsayılan metin: "Sesli mesaj gönder"
         // (buton etiketiyle aynı) — mesaj balonunda bu görünür.
         let text = typed.isEmpty ? String(localized: "Send me a voice") : typed
-
-        let pendingID = UUID()
         let userMsg = Message(role: .user, content: text)
-        let pendingMsg = Message(id: pendingID, role: .assistant, content: "", pendingVoiceRequest: true)
         messages.append(userMsg)
-        messages.append(pendingMsg)
         LocalConversationStore.shared.appendMessage(userMsg, for: character.id, defaultLevel: relationshipLevel, defaultLevelProgress: levelProgress)
-        LocalConversationStore.shared.appendMessage(pendingMsg, for: character.id, defaultLevel: relationshipLevel, defaultLevelProgress: levelProgress)
-        store?.chatCache[character.id] = realMessages()
         NotificationScheduler.shared.noteUserSent(character: character)
         inputText = ""
         isVoiceArmed = false
         errorMessage = nil
+        appendPendingVoiceBubble(requestText: text)
+    }
+
+    /// Kilitli sesli mesaj balonunu ekler — hem düğme akışı (`sendVoiceRequest`,
+    /// kullanıcı mesajını KENDİSİ ekler, buraya sadece istek metnini geçirir)
+    /// hem de Grok'un düz metinde ses isteğini anlayıp [[SEND_VOICE]] işareti
+    /// döndürdüğü otomatik akış (bkz. `send()`, MEDIA_REQUEST_RULE) AYNI bu
+    /// fonksiyonu çağırır — üretim/kilit/maliyet (12 token, bkz.
+    /// generatePendingVoice) TEK yerde, iki yol arasında fark yok.
+    private func appendPendingVoiceBubble(requestText: String) {
+        let pendingID = UUID()
+        let pendingMsg = Message(id: pendingID, role: .assistant, content: "", pendingVoiceRequest: true)
+        messages.append(pendingMsg)
+        LocalConversationStore.shared.appendMessage(pendingMsg, for: character.id, defaultLevel: relationshipLevel, defaultLevelProgress: levelProgress)
+        store?.chatCache[character.id] = realMessages()
 
         // "Kilitli/açılmamış" sesi SUNUCUDA sakla (foto isteğindeki gibi) — üretmeden
         // çıkıp girse bile kilitli ses balonu olarak geri gelir (kind=voice_pending).
-        Task { await service.saveVoiceMessage(character: character, requestText: text, url: nil) }
+        Task { await service.saveVoiceMessage(character: character, requestText: requestText, url: nil) }
 
         // ~3 sn "hazırlanıyor" (yanıp sönen mikrofon) — sonra kalp/kilit
         // animasyonlu belirir (bkz. PendingVoiceBubble transition).
@@ -856,7 +877,37 @@ final class ChatViewModel {
         inputText = ""
         isImageArmed = false
         errorMessage = nil
+        appendPendingImageBubble(prompt: prompt)
+    }
 
+    /// Kilitli foto balonunu ekler — hem düğme akışı (`sendImageRequest`) hem
+    /// de Grok'un düz metinde foto isteğini anlayıp [[SEND_PHOTO: ...]]
+    /// işareti döndürdüğü otomatik akış (bkz. `send()`, MEDIA_REQUEST_RULE)
+    /// AYNI bu fonksiyonu çağırır — üretim/kilit/maliyet mantığı TEK yerde,
+    /// iki yol arasında hiçbir fark yok (bkz. kullanıcı talebi: "düğmeye
+    /// basılmış gibi davranmalı").
+    /// `send()`'in sonunda çağrılır — sunucu `autoMedia` döndüyse (Grok düz
+    /// metinde foto/ses isteğini anladıysa) düğmeyle AYNI kilitli-balon akışını
+    /// tetikler. Hak yoksa (isPro/canUseVoice) SESSİZCE atlanır — bu kullanıcının
+    /// kendi bastığı bir düğme değil, AI'ın kendi kararı; davetsiz bir paywall
+    /// sheet'i açmak yanlış an'da rahatsız edici olurdu (bkz. kullanıcı talebi
+    /// — sadece üretim/kilit/maliyet mantığının düğmeyle AYNI kalması istendi,
+    /// paywall'ın kendiliğinden açılması istenmedi).
+    private func triggerAutoMediaIfNeeded(_ media: WireAutoMedia?) {
+        guard let media else { return }
+        switch media.kind {
+        case "photo":
+            guard PurchaseService.shared.isPro else { return }
+            appendPendingImageBubble(prompt: media.prompt ?? "a photo of you right now")
+        case "voice":
+            guard PurchaseService.shared.canUseVoice else { return }
+            appendPendingVoiceBubble(requestText: String(localized: "Send me a voice"))
+        default:
+            break
+        }
+    }
+
+    private func appendPendingImageBubble(prompt: String) {
         Task {
             await handleWakeUpIfAsleep()
             // "Fotoğraf hazırlıyor" hissi: kısa yazıyor balonu → sonra bulanık
@@ -937,47 +988,10 @@ final class ChatViewModel {
                     character: character, prompt: prompt, url: imageResult.url.absoluteString
                 )
 
-                // İsteğe bağlı metin tepkisi — sırayla, fotoğraftan SONRA gelir.
-                // `imageResult.redirected` true ise (orijinal istek reddedilip
-                // yumuşatılmış bir fotoğrafla değiştirildi) normal tepki yerine
-                // doğal bir yönlendirme cevabı istenir (bkz. IMAGE_REDIRECT_RULE).
-                // Fotoğraftan SONRA gelen metin tepkisi normal "yazıyor" 3-nokta
-                // balonuyla gösterilir (foto üretim spinner'ı DEĞİL) — bkz.
-                // kullanıcı talebi: "foto altına mesaj gelince typing olmalı".
-                showsTypingBubble = true
-                store?.setTyping(character.id, true)
-                let bubbleStartedAt = Date()
-                let realMsgs = realMessages()
-                let result = try await service.sendWithLocalHistory(
-                    character: character,
-                    localMessages: realMsgs,
-                    summary: stored?.summary ?? "",
-                    userMessage: prompt,
-                    level: relationshipLevel,
-                    imageReactionChat: true,
-                    currentActivity: currentActivity?.detail,
-                    imageRedirected: imageResult.redirected
-                )
-
-                let elapsed = Date().timeIntervalSince(bubbleStartedAt)
-                let wanted = TypingTiming.duration(forReplyLength: result.reply.count)
-                let remaining = wanted - elapsed
-                if remaining > 0 {
-                    try? await Task.sleep(nanoseconds: UInt64(remaining * 1_000_000_000))
-                }
-                showsTypingBubble = false
+                // Foto-sonrası metin tepkisi (IMAGE_CAPTION_RULE) KALDIRILDI —
+                // kullanıcı talebi 2026-08-26: "weird", istenmiyor. Foto reveal
+                // artık başka hiçbir mesaj eklemeden burada biter.
                 isSendingImageReply = false
-                store?.setTyping(character.id, false)
-
-                let caption = result.reply.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !caption.isEmpty {
-                    let captionMsg = Message(role: .assistant, content: caption)
-                    messages.append(captionMsg)
-                    LocalConversationStore.shared.appendMessage(captionMsg, for: character.id, defaultLevel: relationshipLevel, defaultLevelProgress: levelProgress)
-                    LocalConversationStore.shared.refreshDetectedLanguage(for: character.id)
-                    store?.chatCache[character.id] = realMessages()
-                }
-
                 applyPostReplyEffects(gotPhoto: imageResult.url, stored: stored)
             } catch {
                 generatingImageMessageIDs.remove(messageID)
@@ -1144,6 +1158,13 @@ final class ChatViewModel {
             currentActivity = nil
             return
         }
+        // UYKU ÖZELLİĞİ KAPATILDI (kullanıcı talebi 2026-08-26) — "Asleep"/"Uyuyor"
+        // gibi uyku bloğu etiketleri artık UI'da GÖSTERİLMEZ (header "Online"
+        // görünmeye devam eder). Kod SİLİNMEDİ, sadece bu blok UI'a yansımıyor.
+        guard !block.isSleep else {
+            currentActivity = nil
+            return
+        }
         currentActivity = (label: block.label, detail: block.detail)
     }
 
@@ -1161,6 +1182,13 @@ final class ChatViewModel {
     /// o predicate'e bağlı kalamaz — aksi halde ikinci mesajdan itibaren hiç
     /// tetiklenmez (bkz. Task 7 review, bu tam olarak o hatanın düzeltmesi).
     private func handleWakeUpIfAsleep() async {
+        // UYKU ÖZELLİĞİ KAPATILDI (kullanıcı talebi 2026-08-26) — kod SİLİNMEDİ,
+        // sadece devre dışı: fonksiyon hiçbir şey yapmadan döner (uyandırma
+        // gecikmesi, "az önce uyandı" durumu, sleepy-goodnight zamanlayıcısı
+        // hiçbiri tetiklenmez). Geri açmak için bu guard'ı kaldırmak yeterli.
+        let sleepFeatureEnabled = false
+        guard sleepFeatureEnabled else { return }
+
         let stored = LocalConversationStore.shared.load(for: character.id)
 
         if stored?.wokenUpAt != nil {

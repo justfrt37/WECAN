@@ -59,6 +59,11 @@ struct FeedView: View {
                     .frame(width: geo.size.width, height: geo.size.height)
                     .scaleEffect(nextCardScale)
                     .allowsHitTesting(false)
+                    // allowsHitTesting(false) yalnızca dokunuşları engelliyordu — Galeri/
+                    // Sohbet butonları VoiceOver/accessibility ağacında hâlâ vardı (bkz.
+                    // QA notu 2026-08-26, describe-all ile iki kartın da butonları
+                    // aynı anda görünüyordu).
+                    .accessibilityHidden(true)
 
                     // Üstteki kart (geçerli)
                     ZStack {

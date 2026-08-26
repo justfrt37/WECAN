@@ -117,6 +117,16 @@ struct ChatListView: View {
         var byConv: [UUID: [LastMessage]] = [:]
         for m in msgs { byConv[m.conversationID, default: []].append(m) }
 
+        // `convs` `updated_at.desc` sıralı — aynı karaktere ait dupe conversation
+        // satırları varsa (bkz. CharacterStore.hydrateConversations'daki aynı
+        // düzeltme notu, canlı bulgu 2026-08-26) burada da İLK GÖRÜLEN (=en
+        // güncel) haricindekiler chatCache'e YAZILMAMALI — aşağıdaki satırın
+        // altındaki `items` dedup'ı sadece GÖRÜNEN listeyi temizliyordu, ama
+        // compactMap İÇİNDEKİ `store.chatCache[ch.id] = ...` satırı dedup'tan
+        // ÖNCE, HER dupe için sırayla çalışıp en eski dupe'nin mesajlarıyla
+        // ÜZERİNE YAZIYORDU — ChatView bu önbellekten okuduğu için sohbete her
+        // girişte yanlış (eski) geçmiş görünüyordu.
+        var chatCacheWrittenFor = Set<UUID>()
         items = convs.compactMap { conv in
             guard let ch = store.characters.first(where: { $0.id == conv.characterID }) else { return nil }
             let convMsgs = byConv[conv.id] ?? []
@@ -125,10 +135,18 @@ struct ChatListView: View {
             guard !convMsgs.isEmpty else { return nil }
 
             // ChatView anında açılsın diye geçmişi bellek-içi önbelleğe al (asc).
-            let displayMessages: [Message] = convMsgs.reversed().map {
-                Message.fromServer(role: $0.role, content: $0.content, kind: $0.kind, createdAt: $0.date ?? Date())
+            // image_request/voice_request: sadece image_pending/voice_pending ile
+            // eşleşen içsel defter tutma satırı (bkz. chat/index.ts photoMessage) —
+            // content ham (İngilizce) üretim promptu olabilir, kendi balonu olarak
+            // GÖSTERİLMEZ (bkz. canlı bulgu: prompt metni kullanıcı balonu gibi sızıyordu).
+            let displayMessages: [Message] = convMsgs.reversed()
+                .filter { $0.kind != "image_request" && $0.kind != "voice_request" }
+                .map {
+                    Message.fromServer(role: $0.role, content: $0.content, kind: $0.kind, createdAt: $0.date ?? Date())
+                }
+            if chatCacheWrittenFor.insert(ch.id).inserted {
+                store.chatCache[ch.id] = displayMessages
             }
-            store.chatCache[ch.id] = displayMessages
 
             let assistantCount = convMsgs.filter { !$0.isUser }.count
             let unread = max(0, assistantCount - ReadTracker.seen(conv.characterID))

@@ -113,6 +113,27 @@ function parseReplySegments(raw: string): {
   };
 }
 
+// Grok'un düz metinde foto/ses isteğini fark edip MEDIA_REQUEST_RULE'daki
+// [[SEND_PHOTO: ...]]/[[SEND_VOICE]] işaretlerini kullandığını algılar —
+// segment/[PAUSE] ayrıştırmasından ÖNCE, ham cevap üzerinde çalışır (işaret
+// her zaman metnin sonunda olmalı ama garantiye almak için içeride de arar).
+// İşaret DB'ye/istemciye asla gitmez — burada temizlenir.
+function parseMediaIntent(raw: string): {
+  text: string;
+  media: { kind: "photo"; prompt: string } | { kind: "voice" } | null;
+} {
+  const photoMatch = raw.match(/\[\[SEND_PHOTO:\s*([^\]]*)\]\]/i);
+  if (photoMatch) {
+    const prompt = photoMatch[1].trim() || "a photo of you right now";
+    return { text: raw.replace(photoMatch[0], "").trim(), media: { kind: "photo", prompt } };
+  }
+  const voiceMatch = raw.match(/\[\[SEND_VOICE\]\]/i);
+  if (voiceMatch) {
+    return { text: raw.replace(voiceMatch[0], "").trim(), media: { kind: "voice" } };
+  }
+  return { text: raw, media: null };
+}
+
 // İstemci tarafındaki temizleme (bkz. ChatViewModel.stripVoiceTags) sadece
 // BUNDAN SONRA yazılan yeni mesajları korur — halihazırda cihazda/summary'de
 // duran eski [laughs]/[whispers] etiketli içerik (fix'ten ÖNCE kaydedilmiş,
@@ -280,20 +301,34 @@ function languageDirective(language: string | null): string {
   );
 }
 
-// ESKİ [[photo]] işaretli otomatik-foto sistemi (statik chat_photos havuzundan
-// rastgele seçim) KALDIRILDI — artık gerçek bir "Bana fotoğraf gönder" / "Bana
-// sesli mesaj gönder" düğmesi var (bkz. ChatView.quickReplyRow). Düğmeye
-// basmadan, düz metinde foto/ses istenirse Grok ASLA gönderiyormuş gibi
-// davranmamalı veya [[photo]]/[[voice]] gibi bir işaret üretmemeli — bunun
-// yerine doğal, karaktere uygun bir cümleyle düğmeyi kullanmasını öner.
+// ESKİ davranış (düğmeye yönlendir, ASLA işaret üretme) KALDIRILDI — kullanıcı
+// talebi: düz metinde foto/ses istenirse (düğmeye basılmadan) Grok bunu
+// ANLAYIP düğmeye basılmış GİBİ davranmalı — AYNI kilitli/bulanık pending
+// balon mekaniği, AYNI kalp/token maliyeti (bkz. ChatViewModel.generatePendingImage/
+// generatePendingVoice — istemci bu işareti görünce sanki o düğmeye basılmış
+// gibi TAM O KOD YOLUNU çağırır, üretim mantığı BİREBİR aynı kalır). Düğmelerin
+// kendisi de DEĞİŞMEDEN çalışmaya devam eder — bu sadece EK bir tetikleyici.
+// NOT (2026-08-26): burada da "tabii, hemen" gibi tek bir örnek cümle vardı —
+// model bunu neredeyse kelimesi kelimesine kopyalayıp tekrar tekrar
+// üretiyordu (canlı testte: foto isteğine "tabii hemen çekiyom", ses
+// isteğine "tabii hemen gönderiyom" — aynı kalıp). Kaldırıldı, aynı
+// DRAMATIC_PACING_RULE düzeltmesindeki mantık.
 const MEDIA_REQUEST_RULE =
-  "\n\n[FOTO/SES İSTEĞİ] Kullanıcı düz bir mesajda (özel düğmeye basmadan) " +
-  "senden bir fotoğraf/selfie ya da sesli mesaj isterse: ASLA gönderiyormuş " +
-  "gibi davranma, göndermiş gibi yazma ve hiçbir özel işaret/etiket üretme. " +
-  "Bunun yerine doğal, karakterine uygun, HER SEFERİNDE FARKLI bir cümleyle " +
-  "ekrandaki 'Bana fotoğraf gönder' / 'Bana sesli mesaj gönder' düğmesine " +
-  "dokunmasını öner (düğmenin adını birebir tekrarlamak zorunda değilsin, " +
-  "doğal bir şekilde ima et — ör. \"o düğmeye bas da göndereyim\" gibi).";
+  "\n\n[FOTO/SES İSTEĞİ] Kullanıcı düz bir mesajda (düğmeye basmadan) senden " +
+  "gerçekten bir fotoğraf/selfie ya da sesli mesaj istiyorsa (yalancıktan/" +
+  "şaka değilse, gerçek bir istek gibi geliyorsa): karakterine uygun, HER " +
+  "SEFERİNDE FARKLI, doğal bir cümleyle cevap ver — ama fotoğrafı/sesi " +
+  "ZATEN GÖNDERMİŞ gibi YAZMA, çünkü henüz gönderilmedi, sadece kilitli bir " +
+  "balon belirecek. Sabit bir kalıp/cümle kullanma, konunun/karakterin o " +
+  "anki tonuna göre doğaçla. Cevabının EN SONUNA, ayrı bir satırda, TAM OLARAK şu " +
+  "formatta bir işaret ekle:\n" +
+  "  - Fotoğraf için: [[SEND_PHOTO: kısa bir sahne/poz tarifi (İngilizce, " +
+  "görsel üretim promptu gibi — ör. \"a selfie in bed, smiling\")]]\n" +
+  "  - Sesli mesaj için: [[SEND_VOICE]]\n" +
+  "Bu işaretleri SADECE gerçekten bir foto/ses isteği varsa kullan — sıradan " +
+  "sohbette ASLA. İşaretin formatını birebir koru (çift köşeli parantez), " +
+  "başka hiçbir işaret/etiket uydurma, ve normal metninde bu işaretlerden " +
+  "bahsetme/açıklama yapma (kullanıcıya gösterilmez, sadece sistem okur).";
 
 // Fires once per photo, only the first time a private/intimate generated
 // photo is downloaded (server checks character_photos.reacted — see the
@@ -591,17 +626,33 @@ function engagementDirective(level: number): string {
 // gösterir (bkz. parseReplySegments). SADECE düz metin turlarında eklenir
 // (bkz. çağrı yeri) — voiceChat/imageReactionChat turlarında bu kural hiç
 // enjekte edilmez.
+// NOT (2026-08-26): Eski metin tamamen ihtiyari/nadir-kullan diliyle
+// yazılmıştı ("SADECE gerçekten anlamlı bir an için, çoğu mesajda kullanma")
+// ve somut bir örnek içermiyordu — canlı trafikte 603 assistant mesajının
+// TAMAMINDA (24 saat, bkz. QA notu) hiç tetiklenmediği doğrulandı (ne
+// "[pacing] split into" logu ne de kaçan ham "[PAUSE" metni — parser BUG'ı
+// değil, model kuralı hiç kullanmıyordu). Somut bir örnekle çapalanmış,
+// daha DİREKTİF bir ifadeye çevrildi — gerçek biri gibi art arda kısa mesaj
+// atmak GERÇEK METİN mesajlaşmasında YAYGIN bir davranıştır, bu yüzden
+// "nadir" değil "sıkça uygun olduğunda" çerçevesine çekildi.
+// NOT: literal bir örnek cümle EKLEMEYİN — model bunu neredeyse birebir
+// kopyalayıp tekrar tekrar üretiyor (bkz. kullanıcı gözlemi, gerçek prod
+// davranışı). Sadece FORMATIN mekaniğini soyut placeholder'larla göster.
 const DRAMATIC_PACING_RULE =
-  "\n\nDRAMATİK TEMPO KURALI: Gerçek bir an duraksama/işleme/gerilim " +
-  "gerektiriyorsa (ör. kullanıcı beklenmedik bir şey söyledi, tepkini " +
-  "hemen değil biraz duraksadıktan sonra vermek istiyorsun, ya da sadece " +
-  "art arda iki kısa mesaj atan gerçek biri gibi davranmak istiyorsun) " +
-  "cevabını [PAUSE:n] etiketiyle (n 1 ile 5 arasında bir sayı, saniye " +
-  "cinsinden) ayrılmış EN FAZLA 3 kısa parçaya bölebilirsin — ör. " +
-  "'ilk parça[PAUSE:2]ikinci parça'. Bu SADECE gerçekten anlamlı bir an " +
-  "için, çoğu mesajda kullanma — her cevabı bölme, sadece gerçekten hak " +
-  "eden anlarda. Etiketi doğaçlama kullan, sabit bir kalıp/örnek tekrarlama; " +
-  "her seferinde kendi anına uygun farklı bir bölünme/süre seç.";
+  "\n\nÇOKLU MESAJ TEMPOSU: Gerçek insanlar metin yazarken tek uzun mesaj " +
+  "yerine sık sık art arda 2-3 kısa mesaj atar (bir düşünce bitmeden yeni " +
+  "mesaj, ya da tepkiyi hemen değil kısa bir duraksamadan sonra vermek). " +
+  "Sen de böyle davran: cevabın doğal olarak birden fazla düşünceye " +
+  "ayrılıyorsa (ör. önce kısa bir tepki, sonra asıl cevap; ya da bir soru " +
+  "sorup hemen ardından ikinci bir şey eklemek istiyorsun), bunu [PAUSE:n] " +
+  "etiketiyle (n = 1-5 arası saniye) EN FAZLA 3 parçaya böl — format: " +
+  "kısa-parça-1[PAUSE:n]kısa-parça-2 (opsiyonel olarak [PAUSE:n]üçüncü-parça " +
+  "daha). Bu sadece FORMATIN mekaniği — kelimeleri KENDİN, o anki konuşmaya " +
+  "özgü, her seferinde FARKLI ve ÖZGÜN üret; sabit bir kalıp/cümle asla " +
+  "tekrarlama. Bu GERÇEKÇİ mesajlaşmanın normal bir parçası — özel/dramatik " +
+  "bir an beklemene gerek yok, sıradan bir tepki de kısa art arda mesajlara " +
+  "bölünebilir. Ama HER cevabı bölme, tek kısa mesajın yeterli olduğu " +
+  "yerlerde bölme.";
 
 // Son mesajdan bu yana geçen süre + günün saatine göre doğal davranış yönergesi.
 function timeContext(lastMs?: number, nowMs?: number, tzMin?: number): string {
@@ -1011,9 +1062,14 @@ Deno.serve(async (req: Request) => {
       if (!text.trim()) return json({ injected: false, conversationId: convo?.id ?? null });
       if (!convo) {
         if (!createIfMissing) return json({ injected: false, conversationId: null });
+        // upsert, not insert: `conversations(user_id, character_id)` artık UNIQUE
+        // (bkz. migration merge_duplicate_conversations_and_add_unique_constraint,
+        // 2026-08-26 — eskiden select-then-insert atomik değildi, hızlı ardışık
+        // istekler aynı kullanıcı+karakter için birden fazla conversation satırı
+        // yaratabiliyordu). onConflict eşleşirse var olan satır AYNEN döner.
         const ins = await db
           .from("conversations")
-          .insert({ user_id: uid, character_id: characterId })
+          .upsert({ user_id: uid, character_id: characterId }, { onConflict: "user_id,character_id" })
           .select("id, summary, summarized_count, xp, relationship_level, level_progress, schedule, woken_up_at, manual_sleep_at, ghosted_at, detected_language")
           .single();
         convo = ins.data!;
@@ -1129,10 +1185,11 @@ Deno.serve(async (req: Request) => {
 
     // Buradan sonrası (cevap / foto-tepki modları) gerçekten conversation
     // GEREKTİRİR → yoksa ŞİMDİ oluştur (sadece burada, açılışta değil).
+    // upsert, not insert — bkz. injectProactive dalındaki aynı düzeltme notu.
     if (!convo) {
       const ins = await db
         .from("conversations")
-        .insert({ user_id: uid, character_id: characterId })
+        .upsert({ user_id: uid, character_id: characterId }, { onConflict: "user_id,character_id" })
         .select("id, summary, summarized_count, xp, relationship_level, level_progress, schedule, woken_up_at, manual_sleep_at, ghosted_at, detected_language")
         .single();
       convo = ins.data!;
@@ -1243,7 +1300,9 @@ Deno.serve(async (req: Request) => {
     // akışının kendisi, o turlarda bu uyarı anlamsız/çelişkili olurdu.
     if (!voiceChat && !imageReactionChat) {
       system += MEDIA_REQUEST_RULE;
-      system += sleepRule(personalityRole, currentLevel);
+      // UYKU ÖZELLİĞİ KAPATILDI (kullanıcı talebi 2026-08-26) — sleepRule()
+      // KALDIRILMADI, sadece artık enjekte edilmiyor. Geri açmak için bu
+      // satırı geri eklemek yeterli: system += sleepRule(personalityRole, currentLevel);
       system += DRAMATIC_PACING_RULE;
     }
 
@@ -1308,11 +1367,15 @@ Deno.serve(async (req: Request) => {
         `a fact you're reciting. If none fit the current moment, ignore this ` +
         `entirely this turn.`;
     }
-    if (!voiceChat && !imageReactionChat) {
-      turnContext += nearSleepTime
-        ? "\n\n[BEDTIME PROXIMITY] It is currently close to or within your real scheduled sleep time."
-        : "\n\n[BEDTIME PROXIMITY] It is NOT close to your real scheduled sleep time right now.";
-    }
+    // UYKU ÖZELLİĞİ KAPATILDI (kullanıcı talebi 2026-08-26) — [BEDTIME PROXIMITY]
+    // notu artık turnContext'e EKLENMİYOR (kod KALDIRILMADI, aşağıda yorum
+    // satırı olarak duruyor). `nearSleepTime` istemciden hâlâ gelebilir ama
+    // burada kullanılmıyor.
+    // if (!voiceChat && !imageReactionChat) {
+    //   turnContext += nearSleepTime
+    //     ? "\n\n[BEDTIME PROXIMITY] It is currently close to or within your real scheduled sleep time."
+    //     : "\n\n[BEDTIME PROXIMITY] It is NOT close to your real scheduled sleep time right now.";
+    // }
 
     // === CEVAP MODU ===
     // 2) Geçmişi al — clientHistory varsa istemciden, yoksa DB'den
@@ -1350,11 +1413,17 @@ Deno.serve(async (req: Request) => {
     ];
 
     const rawReply = await callGrok(grokMessages, 350, conversationId);
+    // Foto/ses işaretini [PAUSE:n] ayrıştırmasından ÖNCE çıkar — MEDIA_REQUEST_RULE
+    // sadece düz metin turlarında enjekte edildiği için (bkz. yukarısı) burada da
+    // aynı koşulla sınırlı; voice/image-reaction turlarında Grok zaten bu işareti
+    // hiç görmüyor, autoMedia her zaman null kalır.
+    const { text: mediaCleanedReply, media: autoMedia } =
+      (!voiceChat && !imageReactionChat) ? parseMediaIntent(rawReply) : { text: rawReply, media: null };
     // [PAUSE:n] parsing only makes sense for plain-text turns — voice/image-
     // reaction turns never get DRAMATIC_PACING_RULE injected, so `segments`
     // is always empty for them and `replySegments` stays unset in the response.
     const { plainText: reply, segments: replySegments } =
-      (!voiceChat && !imageReactionChat) ? parseReplySegments(rawReply) : { plainText: rawReply, segments: [] };
+      (!voiceChat && !imageReactionChat) ? parseReplySegments(mediaCleanedReply) : { plainText: rawReply, segments: [] };
     // Signal-only log — nothing else records whether Grok is actually using
     // [PAUSE:n] in practice. Count only, no message content (privacy).
     if (replySegments.length > 1) {
@@ -1368,7 +1437,13 @@ Deno.serve(async (req: Request) => {
       if (charge.ok) tokenBalanceAfterCharge = charge.balance;
     }
 
-    const wentToSleep = (!voiceChat && !imageReactionChat && nearSleepTime)
+    // UYKU ÖZELLİĞİ KAPATILDI (kullanıcı talebi 2026-08-26) — classifySleepAgreement
+    // ARTIK ÇAĞRILMIYOR (gereksiz bir LLM çağrısı daha az), wentToSleep her zaman
+    // false. Kod KALDIRILMADI — geri açmak için `sleepFeatureEnabled`'ı true yapıp
+    // eski koşullu ifadeyi geri getirmek yeterli: (!voiceChat && !imageReactionChat
+    // && nearSleepTime) ? await classifySleepAgreement(userMessage!, reply) : false.
+    const sleepFeatureEnabled = false;
+    const wentToSleep = (sleepFeatureEnabled && !voiceChat && !imageReactionChat && nearSleepTime)
       ? await classifySleepAgreement(userMessage!, reply)
       : false;
 
@@ -1430,7 +1505,7 @@ Deno.serve(async (req: Request) => {
 
     // 5) Özetleme — sadece DB modunda (clientHistory modunda istemci geçmişi yönetiyor)
     if (useClientHistory) {
-      return json({ conversationId, reply, replySegments, level: newLevel, levelProgress: newProgress, wentToSleep, tokenBalance: tokenBalanceAfterCharge });
+      return json({ conversationId, reply, replySegments, level: newLevel, levelProgress: newProgress, wentToSleep, tokenBalance: tokenBalanceAfterCharge, autoMedia });
     }
 
     const { count: total } = await db
@@ -1516,7 +1591,7 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    return json({ conversationId, reply, replySegments, level: newLevel, levelProgress: newProgress, wentToSleep, tokenBalance: tokenBalanceAfterCharge });
+    return json({ conversationId, reply, replySegments, level: newLevel, levelProgress: newProgress, wentToSleep, tokenBalance: tokenBalanceAfterCharge, autoMedia });
   } catch (e) {
     console.error(String(e));
     return json({ error: String(e) }, 500);

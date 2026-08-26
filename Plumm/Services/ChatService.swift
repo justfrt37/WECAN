@@ -89,6 +89,15 @@ struct ReplySegment: Codable, Hashable {
     let delaySeconds: Double
 }
 
+/// Grok'un düz metinde anladığı foto/ses isteği — bkz. chat/index.ts
+/// MEDIA_REQUEST_RULE / parseMediaIntent. `kind` "photo" ya da "voice";
+/// `prompt` yalnızca foto için dolu (sahne/poz tarifi, chat-image'a AYNEN
+/// düğme-tetiklemeli akıştaki gibi iletilir — bkz. ChatViewModel.sendImageRequest).
+struct WireAutoMedia: Codable, Hashable {
+    let kind: String
+    let prompt: String?
+}
+
 private struct ChatResponse: Codable {
     let conversationId: String?
     let reply: String?
@@ -112,6 +121,8 @@ private struct ChatResponse: Codable {
     /// chargeOrReject. voiceChat/imageReactionChat turlarında (kendi
     /// fonksiyonlarında zaten tahsil edildiği için) nil gelir.
     let tokenBalance: Int?
+    /// bkz. WireAutoMedia — yalnızca düz metin turlarında dolu gelir.
+    let autoMedia: WireAutoMedia?
 }
 
 struct ChatHistory {
@@ -135,6 +146,9 @@ struct ChatReply {
     let wentToSleep: Bool
     /// bkz. ChatResponse.tokenBalance.
     let tokenBalance: Int?
+    /// bkz. ChatResponse.autoMedia — `sendWithLocalHistory` (düz metin) dışında
+    /// hep nil.
+    let autoMedia: WireAutoMedia?
 }
 
 enum ChatServiceError: Error, LocalizedError {
@@ -306,9 +320,11 @@ struct ChatService {
     /// Preset karakter: sunucudan geçmiş yükle.
     func loadHistory(character: Character) async throws -> ChatHistory {
         let resp = try await call(character: character, userMessage: nil)
-        let messages = (resp.history ?? []).map {
-            Message.fromServer(role: $0.role, content: $0.content, kind: $0.kind, createdAt: Date())
-        }
+        let messages = (resp.history ?? [])
+            .filter { $0.kind != "image_request" && $0.kind != "voice_request" }
+            .map {
+                Message.fromServer(role: $0.role, content: $0.content, kind: $0.kind, createdAt: Date())
+            }
         return ChatHistory(messages: messages, level: resp.level ?? 1, xp: resp.xp ?? 0, levelProgress: resp.levelProgress)
     }
 
@@ -324,7 +340,8 @@ struct ChatService {
             levelProgress: resp.levelProgress,
             photoURL: resp.photoUrl.flatMap(URL.init(string:)),
             wentToSleep: resp.wentToSleep ?? false,
-            tokenBalance: resp.tokenBalance
+            tokenBalance: resp.tokenBalance,
+            autoMedia: resp.autoMedia
         )
     }
 
@@ -370,7 +387,8 @@ struct ChatService {
             levelProgress: resp.levelProgress,
             photoURL: resp.photoUrl.flatMap(URL.init(string:)),
             wentToSleep: resp.wentToSleep ?? false,
-            tokenBalance: resp.tokenBalance
+            tokenBalance: resp.tokenBalance,
+            autoMedia: resp.autoMedia
         )
     }
 
@@ -412,7 +430,8 @@ struct ChatService {
             levelProgress: resp.levelProgress,
             photoURL: resp.photoUrl.flatMap(URL.init(string:)),
             wentToSleep: resp.wentToSleep ?? false,
-            tokenBalance: resp.tokenBalance
+            tokenBalance: resp.tokenBalance,
+            autoMedia: resp.autoMedia
         )
     }
 

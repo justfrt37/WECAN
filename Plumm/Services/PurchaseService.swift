@@ -38,6 +38,30 @@ struct PaywallPackage: Identifiable {
     #if canImport(RevenueCat)
     let rcPackage: Package
     #endif
+
+    /// `periodName`'in yerelleştirilmiş gösterim hâli — kart UI'ında bunu kullanın,
+    /// `periodName`'in kendisi karşılaştırma anahtarı olarak kullanıldığı için
+    /// (bkz. renewalPhrase) sabit İngilizce kalmalı.
+    var localizedPeriodName: String {
+        switch periodName {
+        case "Weekly":  return String(localized: "Weekly")
+        case "Daily":   return String(localized: "Daily")
+        case "Monthly": return String(localized: "Monthly")
+        case "Yearly":  return String(localized: "Yearly")
+        default:        return periodName
+        }
+    }
+
+    /// `periodLabel`'ın yerelleştirilmiş gösterim hâli.
+    var localizedPeriodLabel: String? {
+        switch periodLabel {
+        case "/week":  return String(localized: "/week")
+        case "/day":   return String(localized: "/day")
+        case "/month": return String(localized: "/month")
+        case "/year":  return String(localized: "/year")
+        default:       return periodLabel
+        }
+    }
 }
 
 /// Ürün kataloğu — product id → tier ve token miktarı (dashboard fiyatları
@@ -490,6 +514,10 @@ final class PurchaseService {
 
     #if canImport(RevenueCat)
     /// Temiz İngilizce periyot adı — kart başlığı için ("Weekly"/"Monthly"/"Yearly").
+    // NOT: dönüş değeri hem UI'da gösteriliyor HEM DE renewalPhrase() gibi yerlerde
+    // switch-case karşılaştırma anahtarı olarak kullanılıyor — burada localize
+    // ETMEYİN, o zaman karşılaştırmalar kırılır. Gösterim tarafında
+    // `localizedPeriodName`/`localizedPeriodLabel` kullanın (bkz. planCard).
     private static func periodName(for product: StoreProduct) -> String {
         guard let period = product.subscriptionPeriod else { return "" }
         switch period.unit {

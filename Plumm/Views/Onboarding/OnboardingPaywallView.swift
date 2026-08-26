@@ -89,7 +89,7 @@ struct OnboardingPaywallView: View {
             let pct = ((1 - mine / top) as NSDecimalNumber).doubleValue * 100
             return String(format: "%d%% OFF", Int(pct.rounded()))
         }
-        return "Best Value"
+        return String(localized: "Best Value")
     }
 
     /// Arkada oynayacak video — ONB3'te seçilen kızınki (yoksa varsayılan).
@@ -109,30 +109,34 @@ struct OnboardingPaywallView: View {
         //    atlanır. Jeton her dönem YENİLENİR (tek seferlik değil, bkz.
         //    sync-subscription dönem grant'ı) — metin bunu açıkça söylüyor.
         if let pkg = selectedPackage, pkg.tokenAmount > 0 {
-            list.append("\(pkg.tokenAmount.formatted()) renewable coins, \(Self.renewalPhrase(pkg.periodName))")
+            list.append(String(localized: "\(pkg.tokenAmount.formatted()) renewable coins, \(Self.renewalPhrase(pkg.periodName))"))
         }
 
         // 2) Karakter yaratma hakkı — Pro 1, Pro+ 5, Pro Max sınırsız.
+        // NOT: `String(localized:)` ile sarmalanmadan bu literaller Localizable.xcstrings
+        // katalogunu HİÇ görmüyordu ([String] dizisine eklenip Text(f) ile basılıyorlar —
+        // Text'in verbatim String overload'ı, LocalizedStringKey değil — bkz. QA notu
+        // 2026-08-26: paylaşım sadece İngilizce görünüyordu).
         switch tier.weeklyCharacterSlots {
         case nil:
-            list.append("Unlimited character creation")
+            list.append(String(localized: "Unlimited character creation"))
         case 1:
-            list.append("Create 1 character per week")
+            list.append(String(localized: "Create 1 character per week"))
         case let slots?:
-            list.append("Create \(slots) characters per week")
+            list.append(String(localized: "Create \(slots) characters per week"))
         }
 
         // 3) Ses — Pro'da YOK, kalanlarda var. Yoksa listeye hiç eklenmez
         //    (tik'li listede "yok" satırı göstermek kafa karıştırır).
         if tier.canUseVoice {
-            list.append("Voice messages & voice calls")
+            list.append(String(localized: "Voice messages & voice calls"))
         }
 
         // 4) Her tier'da aynı olanlar.
         list.append(contentsOf: [
-            "Unlimited photos",
-            "Unlimited access (24/7)",
-            "Long-term memory",
+            String(localized: "Unlimited photos"),
+            String(localized: "Unlimited access (24/7)"),
+            String(localized: "Long-term memory"),
         ])
         return list
     }
@@ -256,7 +260,19 @@ struct OnboardingPaywallView: View {
             if buyTokensSelected {
                 EmptyView()
             } else if packages.isEmpty {
-                ProgressView().tint(.white).frame(height: 200)
+                // isLoadingOfferings false + hâlâ boş = RC offering'leri yüklenemedi
+                // (StoreKit sandbox yok vb.) — sonsuz spinner yerine geri bildirim
+                // göster (bkz. QA notu 2026-08-26).
+                if purchases.isLoadingOfferings {
+                    ProgressView().tint(.white).frame(height: 200)
+                } else {
+                    Text("Plans aren't available right now. Please try again later.")
+                        .font(.system(size: 13))
+                        .foregroundStyle(.white.opacity(0.7))
+                        .multilineTextAlignment(.center)
+                        .frame(height: 200)
+                        .padding(.horizontal, 24)
+                }
             } else {
                 VStack(spacing: 8) {
                     // Seçili tier'ın süre seçenekleri (dikey), en pahalıda rozet.
@@ -345,7 +361,7 @@ struct OnboardingPaywallView: View {
         let selected = selectedPackage?.id == pkg.id
         return Button { selectedPackageID = pkg.id } label: {
             HStack(spacing: 10) {
-                Text(pkg.periodName).font(.system(size: 19, weight: .bold)).foregroundStyle(.white)
+                Text(pkg.localizedPeriodName).font(.system(size: 19, weight: .bold)).foregroundStyle(.white)
                 Spacer()
                 if isTop {
                     Text(savingsBadge(for: pkg))
@@ -355,7 +371,7 @@ struct OnboardingPaywallView: View {
                 }
                 VStack(alignment: .trailing, spacing: 0) {
                     Text(pkg.localizedPrice).font(.system(size: 20, weight: .heavy)).foregroundStyle(.white)
-                    if let period = pkg.periodLabel {
+                    if let period = pkg.localizedPeriodLabel {
                         Text(period).font(.system(size: 13)).foregroundStyle(.white.opacity(0.5))
                     }
                 }

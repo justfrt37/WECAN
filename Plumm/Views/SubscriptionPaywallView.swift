@@ -31,7 +31,7 @@ struct SubscriptionPaywallView: View {
             let pct = ((1 - mine / top) as NSDecimalNumber).doubleValue * 100
             return String(format: "%d%% OFF", Int(pct.rounded()))
         }
-        return "Best Value"
+        return String(localized: "Best Value")
     }
 
     var body: some View {
@@ -50,7 +50,20 @@ struct SubscriptionPaywallView: View {
                             tierSelector
 
                             if packages.isEmpty {
-                                ProgressView().tint(.white).frame(height: 160)
+                                // isLoadingOfferings false + hâlâ boş = RC offering'leri
+                                // yüklenemedi (StoreKit sandbox yok vb.) — sonsuz spinner
+                                // yerine geri bildirim göster (bkz. QA notu 2026-08-26,
+                                // TokenStoreView'daki fallback ile aynı desen).
+                                if purchases.isLoadingOfferings {
+                                    ProgressView().tint(.white).frame(height: 160)
+                                } else {
+                                    Text("Plans aren't available right now. Please try again later.")
+                                        .font(.system(size: 13))
+                                        .foregroundStyle(.white.opacity(0.6))
+                                        .multilineTextAlignment(.center)
+                                        .frame(height: 160)
+                                        .padding(.horizontal, 24)
+                                }
                             } else {
                                 VStack(spacing: 10) {
                                     ForEach(packages) { pkg in
@@ -141,12 +154,12 @@ struct SubscriptionPaywallView: View {
                             .strokeBorder(selected ? AppColor.amber : .white.opacity(0.3), lineWidth: 2)
                             .background(Circle().fill(selected ? AppColor.amber : .clear).padding(3))
                             .frame(width: 16, height: 16)
-                        Text(pkg.periodName).font(.system(size: 15, weight: .bold)).foregroundStyle(.white)
+                        Text(pkg.localizedPeriodName).font(.system(size: 15, weight: .bold)).foregroundStyle(.white)
                     }
                     Spacer()
                     HStack(alignment: .lastTextBaseline, spacing: 2) {
                         Text(pkg.localizedPrice).font(.system(size: 15, weight: .heavy)).foregroundStyle(AppColor.amber)
-                        if let period = pkg.periodLabel {
+                        if let period = pkg.localizedPeriodLabel {
                             Text(period).font(.system(size: 10, weight: .semibold)).foregroundStyle(.white.opacity(0.5))
                         }
                     }
@@ -197,7 +210,7 @@ struct SubscriptionPaywallView: View {
             Button { purchaseSelected() } label: {
                 Group {
                     if let pkg = selectedPackage {
-                        Text("Continue — \(pkg.periodName) \(pkg.localizedPrice)\(pkg.periodLabel ?? "")")
+                        Text("Continue — \(pkg.localizedPeriodName) \(pkg.localizedPrice)\(pkg.localizedPeriodLabel ?? "")")
                     } else {
                         Text("Continue")
                     }
