@@ -82,7 +82,7 @@ struct StreakPopupView: View {
     }
 
     private var header: some View {
-        Text("Günlük Ödüller")
+        Text("Daily Rewards")
             .font(.system(size: 24, weight: .heavy))
             .foregroundStyle(.white)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -113,7 +113,7 @@ struct StreakPopupView: View {
         let labelColor: Color = isToday ? .white : .white.opacity(isClaimed ? 0.55 : 0.4)
 
         return VStack(spacing: 6) {
-            Text("Gün \(day)")
+            Text("Day \(day)")
                 .font(.system(size: 11, weight: isToday ? .heavy : .bold))
                 .foregroundStyle(labelColor)
             Group {
@@ -141,7 +141,7 @@ struct StreakPopupView: View {
                 Image(systemName: "heart.fill")
                     .font(.system(size: 16))
                     .foregroundStyle(redHeart)
-                Text("Ödülü Al  ·  +\(result.amount ?? amount(forDay: cycleDay))")
+                Text("Claim Reward  ·  +\(result.amount ?? amount(forDay: cycleDay))")
                     .font(.system(size: 16, weight: .heavy))
                     .foregroundStyle(Color(hex: 0x1A0B14))
             }

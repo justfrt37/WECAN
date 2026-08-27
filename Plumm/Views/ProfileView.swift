@@ -21,8 +21,6 @@ struct ProfileView: View {
     @State private var notificationsOn = false
     /// uid kopyalandı → ikon kısa süre ✓ olur (bkz. avatarCard).
     @State private var didCopyUID = false
-    /// Açık olan yasal metin (gizlilik / koşullar) — nil ise kapalı.
-    @State private var legalDocument: LegalDocument?
     @State private var showPaywall = false
     private var purchases: PurchaseService { PurchaseService.shared }
 
@@ -52,7 +50,6 @@ struct ProfileView: View {
                 .ignoresSafeArea()
         )
         .task { notificationsOn = await currentNotificationStatus() }
-        .sheet(item: $legalDocument) { LegalDocumentView(document: $0) }
         .fullScreenCover(isPresented: $showPaywall) { OnboardingPaywallView() }
     }
 
@@ -192,13 +189,13 @@ struct ProfileView: View {
             notificationsCard
 
             ShareLink(item: shareURL) {
-                row("Arkadaşına Öner", trailingIcon: "square.and.arrow.up")
+                row("Share a Friend", trailingIcon: "square.and.arrow.up")
             }
             .buttonStyle(.plain)
 
             Button { requestReview() } label: {
                 HStack {
-                    Text("Bizi Değerlendir")
+                    Text("Rate Us")
                         .font(.system(size: 16, weight: .medium))
                         .foregroundStyle(.white)
                     Spacer()
@@ -216,18 +213,18 @@ struct ProfileView: View {
             .buttonStyle(.plain)
 
             Button { openURL(supportMailURL) } label: {
-                row("Yardım & Destek", trailingIcon: "envelope.fill")
+                row("Help & Support", trailingIcon: "envelope.fill")
             }
             .buttonStyle(.plain)
 
-            // Yasal metinler — uygulama İÇİNDE sheet olarak açılır (dış tarayıcıya
-            // ÇIKMAZ, bkz. LegalDocumentView). Etiketler ve metin İngilizce.
-            Button { legalDocument = .privacy } label: {
+            // Yasal metinler — dış tarayıcıda plummai.com'a açılır (App Store
+            // Connect'teki Privacy/Terms URL'leriyle aynı, artık in-app sheet yok).
+            Button { openURL(Config.privacyURL) } label: {
                 row("Privacy Policy", trailingIcon: "lock.shield.fill")
             }
             .buttonStyle(.plain)
 
-            Button { legalDocument = .terms } label: {
+            Button { openURL(Config.termsURL) } label: {
                 row("Terms of Use", trailingIcon: "doc.text.fill")
             }
             .buttonStyle(.plain)
@@ -236,7 +233,7 @@ struct ProfileView: View {
 
     private var notificationsCard: some View {
         HStack(spacing: 12) {
-            Text("Bildirimler")
+            Text("Notifications")
                 .font(.system(size: 16, weight: .medium))
                 .foregroundStyle(.white)
             Spacer()

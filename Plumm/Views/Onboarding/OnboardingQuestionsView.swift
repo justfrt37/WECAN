@@ -26,15 +26,15 @@ struct OnboardingQuestionsView: View {
 
     private let questions: [OBQuestion] = [
         OBQuestion(
-            prompt: "Ooh… cesur bir seçim. Hadi tam sana uyan birini bulalım.",
+            prompt: "Ooh… bold choice. Let's find the perfect match for you.",
             emoji: "😉",
-            options: ["Eğlenceli ve alaycı", "Yoğun kimya 🔥"],
+            options: ["Fun and playful", "Intense chemistry 🔥"],
             duration: 6
         ),
         OBQuestion(
-            prompt: "Mükemmel. Peki o ortaya çıktığında nasıl hissettirmesini istersin?",
+            prompt: "Perfect. So when it happens, how do you want it to feel?",
             emoji: "😳",
-            options: ["Yavaş yavaş gelişen… beni bağımlısı yap", "Hızlı ve korkusuz 😏"],
+            options: ["Slow burn… make me addicted", "Fast and fearless 😏"],
             duration: 5
         ),
     ]

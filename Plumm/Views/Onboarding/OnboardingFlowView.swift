@@ -57,7 +57,7 @@ private struct OnboardingComingSoonView: View {
                 .foregroundStyle(.white)
                 .multilineTextAlignment(.center)
 
-            Text("Sıradaki adımlar (social proof, karakter seçimi) yakında.")
+            Text("Next steps (social proof, character selection) coming soon.")
                 .font(.system(size: 15, weight: .medium))
                 .foregroundStyle(.white.opacity(0.6))
                 .multilineTextAlignment(.center)
@@ -68,7 +68,7 @@ private struct OnboardingComingSoonView: View {
             Button {
                 onboarding.complete()
             } label: {
-                Text("Uygulamaya gir")
+                Text("Enter the app")
                     .font(.system(size: 18, weight: .bold))
                     .foregroundStyle(.white)
                     .frame(maxWidth: .infinity)
@@ -82,6 +82,6 @@ private struct OnboardingComingSoonView: View {
 
     private var greeting: String {
         let name = onboarding.userName.trimmingCharacters(in: .whitespacesAndNewlines)
-        return name.isEmpty ? "Hoş geldin!" : "Hoş geldin, \(name)!"
+        return name.isEmpty ? "Welcome!" : "Welcome, \(name)!"
     }
 }

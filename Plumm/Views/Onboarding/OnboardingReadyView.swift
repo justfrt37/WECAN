@@ -41,7 +41,7 @@ struct OnboardingReadyView: View {
                     HStack(spacing: 10) {
                         Image(systemName: "hand.tap.fill")
                             .font(.system(size: 20, weight: .bold))
-                        Text("Görmek için Dokun")
+                        Text("Tap to see")
                             .font(.system(size: 20, weight: .heavy))
                     }
                     .foregroundStyle(.white)

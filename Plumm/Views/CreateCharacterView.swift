@@ -182,16 +182,16 @@ struct CreateCharacterView: View {
 
     /// İlgi alanları / hobiler (50 seçenek, çoklu seçim).
     static let hobbies: [String] = [
-        "🎵 Müzik", "🎬 Sinema", "✈️ Seyahat", "⚽ Spor", "🧘 Yoga",
-        "💃 Dans", "🍳 Yemek", "📷 Fotoğraf", "🎨 Resim", "📚 Kitap",
-        "🎮 Oyun", "✨ Anime", "🥾 Doğa yürüyüşü", "🏕️ Kamp", "🏊 Yüzme",
-        "🏃 Koşu", "🏋️ Fitness", "🚴 Bisiklet", "⛷️ Kayak", "🏄 Sörf",
-        "☕ Kahve", "🍷 Şarap", "🍸 Kokteyl", "👗 Moda", "💄 Makyaj",
-        "🛍️ Alışveriş", "🖋️ Dövme", "🔮 Astroloji", "🧘‍♀️ Meditasyon", "🌱 Bahçıvanlık",
-        "🐱 Kediler", "🐶 Köpekler", "🚗 Arabalar", "🏍️ Motosiklet", "💻 Teknoloji",
-        "👩‍💻 Kodlama", "🎙️ Podcast", "😂 Stand-up", "🎭 Tiyatro", "🎤 Konser",
-        "🎪 Festival", "🎶 Karaoke", "♟️ Satranç", "🧶 Örgü", "🏺 Seramik",
-        "🎣 Balık tutma", "🧗 Dağcılık", "🤿 Dalış", "🧺 Piknik", "🌃 Gece hayatı",
+        "🎵 Music", "🎬 Movies", "✈️ Travel", "⚽ Sports", "🧘 Yoga",
+        "💃 Dancing", "🍳 Cooking", "📷 Photography", "🎨 Painting", "📚 Reading",
+        "🎮 Gaming", "✨ Anime", "🥾 Hiking", "🏕️ Camping", "🏊 Swimming",
+        "🏃 Running", "🏋️ Fitness", "🚴 Cycling", "⛷️ Skiing", "🏄 Surfing",
+        "☕ Coffee", "🍷 Wine", "🍸 Cocktails", "👗 Fashion", "💄 Makeup",
+        "🛍️ Shopping", "🖋️ Tattoos", "🔮 Astrology", "🧘‍♀️ Meditation", "🌱 Gardening",
+        "🐱 Cats", "🐶 Dogs", "🚗 Cars", "🏍️ Motorcycles", "💻 Technology",
+        "👩‍💻 Coding", "🎙️ Podcasts", "😂 Stand-up", "🎭 Theater", "🎤 Concerts",
+        "🎪 Festivals", "🎶 Karaoke", "♟️ Chess", "🧶 Knitting", "🏺 Ceramics",
+        "🎣 Fishing", "🧗 Climbing", "🤿 Diving", "🧺 Picnics", "🌃 Nightlife",
     ]
 
     // ── Üretilen fotoğraf (görünüm adımlarından sonra, geçmiş adımından önce) ──
@@ -421,7 +421,7 @@ struct CreateCharacterView: View {
                 LinearGradient(colors: [.clear, .black.opacity(0.75)], startPoint: .center, endPoint: .bottom)
             }
             .overlay(alignment: .bottomLeading) {
-                Text(AppearanceOptions.tr(opt))
+                Text(opt)
                     .font(.system(size: 16, weight: .bold)).foregroundStyle(.white).padding(12)
             }
             .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
@@ -604,9 +604,9 @@ struct CreateCharacterView: View {
                 let selected = binding.wrappedValue == opt
                 Button { binding.wrappedValue = opt } label: {
                     if let key = imageKey, let asset = BuilderImages.asset(key, opt) {
-                        imageOptionCard(asset: asset, label: AppearanceOptions.tr(opt), selected: selected, height: cardHeight(for: key))
+                        imageOptionCard(asset: asset, label: opt, selected: selected, height: cardHeight(for: key))
                     } else {
-                        textOptionCard(label: AppearanceOptions.tr(opt), selected: selected)
+                        textOptionCard(label: opt, selected: selected)
                     }
                 }
                 .buttonStyle(.plain)
@@ -622,7 +622,7 @@ struct CreateCharacterView: View {
                 let selected = binding.wrappedValue == opt
                 Button { binding.wrappedValue = opt } label: {
                     if let key = imageKey, let asset = BuilderImages.asset(key, opt) {
-                        imageOptionCard(asset: asset, label: AppearanceOptions.tr(opt), selected: selected, height: cardHeight(for: key))
+                        imageOptionCard(asset: asset, label: opt, selected: selected, height: cardHeight(for: key))
                     } else {
                         facePreviewOptionCard(feature: feature, value: opt, selected: selected)
                     }
@@ -650,7 +650,7 @@ struct CreateCharacterView: View {
                         // alttan koyu degrade.
                         LinearGradient(colors: [.clear, .black.opacity(0.7)],
                                        startPoint: .center, endPoint: .bottom)
-                        Text(AppearanceOptions.tr(c))
+                        Text(c)
                             .font(.system(size: 16, weight: .bold))
                             .foregroundStyle(.white)
                             .padding(.leading, 16).padding(.bottom, 12)
@@ -724,7 +724,7 @@ struct CreateCharacterView: View {
     private func facePreviewOptionCard(feature: FacePreview.Feature, value: String, selected: Bool) -> some View {
         VStack(spacing: 8) {
             facePreviewCard(feature: feature, value: value).frame(width: 56, height: 56)
-            Text(AppearanceOptions.tr(value)).font(.system(size: 14, weight: .semibold)).foregroundStyle(.white)
+            Text(value).font(.system(size: 14, weight: .semibold)).foregroundStyle(.white)
         }
         .padding(.vertical, 14).frame(maxWidth: .infinity)
         .background(LinearGradient(colors: selected
@@ -1190,7 +1190,7 @@ struct CreateCharacterView: View {
                         }
                     } else {
                         HStack(spacing: 8) {
-                            Text(generating ? "\(builderName) hazırlanıyor" : "\(builderName) seni bekliyor")
+                            Text(generating ? "Preparing \(builderName)" : "\(builderName) is waiting for you")
                                 .font(.system(size: 24, weight: .bold))
                                 .foregroundStyle(.white)
                             Image(systemName: "heart.fill")
@@ -1262,7 +1262,7 @@ struct CreateCharacterView: View {
                     Button {
                         goToChat(with: c)
                     } label: {
-                        Text("Devam et")
+                        Text("Continue")
                             .font(.system(size: 17, weight: .bold))
                             .foregroundStyle(.white)
                             .frame(maxWidth: .infinity).frame(height: 54)
@@ -1277,7 +1277,7 @@ struct CreateCharacterView: View {
                 } else {
                     Button { reveal() } label: {
                         TimelineView(.animation) { tl in
-                            Text(generating ? "\(builderName) hazırlanıyor..." : "See character")
+                            Text(generating ? "Preparing \(builderName)..." : "See character")
                                 .font(.system(size: 17, weight: .bold))
                                 .foregroundStyle(.white)
                                 .frame(maxWidth: .infinity).frame(height: 54)
@@ -1424,7 +1424,7 @@ struct CreateCharacterView: View {
     private var stepTitle: String {
         switch stepIndex {
         case 0: return String(localized: "Category")
-        case 1: return String(localized: "Karakterine bir isim seç")
+        case 1: return String(localized: "Choose a name for your character")
         case 2: return String(localized: "Ethnicity")
         case 3: return String(localized: "Age range")
         case 4: return String(localized: "Select Mood")
