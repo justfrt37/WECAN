@@ -48,6 +48,12 @@ struct MainTabView: View {
     @State private var showTokenStore = false
     @State private var showPaywall = false
     @State private var streakResult: StreakClaimResult?
+    @Environment(\.scenePhase) private var scenePhase
+    /// `.onAppear` sadece cold launch'ta değil, NavigationStack'te bir chat'ten
+    /// GERİ dönüldüğünde de tekrar ateşleniyor — bu yüzden launch-kontrolünü
+    /// (paywall) süreç başına TEK sefere kilitliyoruz (bkz. kullanıcı talebi:
+    /// "her chat sayfası kapanışında paywall açılıyor").
+    @State private var didCheckPaywallOnLaunch = false
 
     /// Onboarding biterken seçilen karakterin (Scarlet/Maya) chat'ini, uygulama
     /// açılır açılmaz DOĞRUDAN açar — paywall YOK (bkz. OnboardingReadyView).
@@ -76,6 +82,18 @@ struct MainTabView: View {
         // nil — böylece gate MainTabView'de kalır, OnboardingFlow'a dönmez).
         onboarding.complete()
         onboarding.pendingChatCharacterName = nil
+    }
+
+    /// Pro olmayan her kullanıcıya, uygulamaya her girişte (cold launch +
+    /// her foreground) paywall'ı gösterir — kokomombo (Apple review modu)
+    /// AÇIKSA hiç açılmaz, Pro olsa da olmasa da (bkz. kullanıcı talebi).
+    /// Onboarding'i YENİ bitiren kullanıcıda tetiklenmez — paywall'ı zaten
+    /// ONB6'da gördü (bkz. openPendingOnboardingChat).
+    private func maybeShowPaywall() {
+        guard !ReviewModeService.shared.isEnabled,
+              !PurchaseService.shared.isPro,
+              onboarding.pendingChatCharacterName == nil else { return }
+        showPaywall = true
     }
 
     /// PRO değilken, token rozetinin (kalp+sayı) yerinde tüm sekmelerde
@@ -143,7 +161,17 @@ struct MainTabView: View {
                     store.pendingTab = nil
                 }
             }
-            .onAppear { openPendingOnboardingChat() }
+            .onAppear {
+                let cameFromOnboarding = onboarding.pendingChatCharacterName != nil
+                openPendingOnboardingChat()
+                if !didCheckPaywallOnLaunch {
+                    didCheckPaywallOnLaunch = true
+                    if !cameFromOnboarding { maybeShowPaywall() }
+                }
+            }
+            .onChange(of: scenePhase) { _, phase in
+                if phase == .active { maybeShowPaywall() }
+            }
         }
         .tint(AppColor.pink)
         // NavigationStack'in KENDİSİNE bindirilmiş overlay — kök içeriğe değil,

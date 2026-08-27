@@ -153,11 +153,17 @@ struct OnboardingPaywallView: View {
     var body: some View {
         ZStack {
             // Seçilen kızın videosu — bulanık + karartma ("kilidini aç" hissi).
-            LoopingVideoPlayer(resourceName: bgVideo)
-                .id(bgVideo)
-                .ignoresSafeArea()
-                .blur(radius: 6)
-                .overlay(scrim.ignoresSafeArea())
+            // Kokomombo (Apple review modu) AÇIKKEN video oynatılmaz — düz zemin
+            // (bkz. kullanıcı talebi, ReviewModeService).
+            if ReviewModeService.shared.isEnabled {
+                OBTheme.bg.ignoresSafeArea()
+            } else {
+                LoopingVideoPlayer(resourceName: bgVideo)
+                    .id(bgVideo)
+                    .ignoresSafeArea()
+                    .blur(radius: 6)
+                    .overlay(scrim.ignoresSafeArea())
+            }
 
             VStack(spacing: 0) {
                 topBar

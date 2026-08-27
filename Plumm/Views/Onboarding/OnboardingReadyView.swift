@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import UIKit
 
 struct OnboardingReadyView: View {
     @Environment(OnboardingStore.self) private var onboarding
@@ -37,6 +38,8 @@ struct OnboardingReadyView: View {
                 Spacer()
 
                 // Düz buton — basılı tutma yok, tek dokunuşla sonraki adım (paywall).
+                // Sabit genişlik (ekran genişliği - 2×40), .infinity + dıştan padding
+                // bazı cihazlarda kenara yapışık görünüyordu (bkz. kullanıcı talebi).
                 Button { next() } label: {
                     HStack(spacing: 10) {
                         Image(systemName: "hand.tap.fill")
@@ -45,12 +48,12 @@ struct OnboardingReadyView: View {
                             .font(.system(size: 20, weight: .heavy))
                     }
                     .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity)
                     .frame(height: 62)
+                    .frame(width: UIScreen.main.bounds.width - 80)
                     .background(OBTheme.buttonGradient, in: RoundedRectangle(cornerRadius: 20))
                     .shadow(color: .black.opacity(0.45), radius: 18, y: 6)
                 }
-                .padding(.horizontal, OBTheme.screenPadding)
+                .buttonStyle(.plain)
                 .padding(.bottom, 72)
             }
             .frame(maxWidth: .infinity)
