@@ -41,7 +41,13 @@ const corsHeaders = {
 
 const XAI_API_KEY = Deno.env.get("XAI_API_KEY") ?? "";
 const XAI_URL = "https://api.x.ai/v1/chat/completions";
-const MODEL = "grok-4-1-fast-non-reasoning";
+// "grok-4-1-fast-non-reasoning" was retired by xAI 2026-05-15 — it's been
+// silently auto-redirecting to grok-4.3 (reasoning effort "none") and billed
+// at grok-4.3 rates ever since (confirmed against xAI's retirement list,
+// 2026-08-27). Pinning explicitly here: same model, same cost, same output
+// that's already been running for 3+ months — just no longer depending on an
+// undocumented legacy redirect that could be removed without warning.
+const MODEL = "grok-4.3";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -729,6 +735,11 @@ async function callGrok(messages: GrokMessage[], maxTokens: number, convId?: str
       messages,
       temperature: 0.9,
       max_tokens: maxTokens,
+      // grok-4.3 is reasoning-first by default (low effort) — this app has
+      // never used/wanted reasoning (was on the non-reasoning variant before
+      // it got retired, see MODEL comment). "none" matches what the retired
+      // model's auto-redirect was already using.
+      reasoning_effort: "none",
     }),
   });
   if (!resp.ok) {
