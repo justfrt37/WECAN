@@ -10,13 +10,10 @@ import SwiftUI
 struct OnboardingPaywallView: View {
     @Environment(OnboardingStore.self) private var onboarding
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
 
     /// X (kapat) butonu 2 sn sonra belirir — kullanıcı önce paywall'ı görsün.
     @State private var showClose = false
-
-    /// Yasal metinler UYGULAMA İÇİNDE açılır (dış tarayıcı/host'a bağımlı değil,
-    /// bkz. LegalDocumentView) — App Review linklerin çalıştığını görmeli.
-    @State private var legalDocument: LegalDocument?
 
     /// Kapatma: bir cover olarak (PRO butonundan) açıldıysa dismiss() yeter.
     /// Onboarding'in son adımı olarak açıldıysa (isCompleted henüz false) —
@@ -156,11 +153,17 @@ struct OnboardingPaywallView: View {
     var body: some View {
         ZStack {
             // Seçilen kızın videosu — bulanık + karartma ("kilidini aç" hissi).
-            LoopingVideoPlayer(resourceName: bgVideo)
-                .id(bgVideo)
-                .ignoresSafeArea()
-                .blur(radius: 6)
-                .overlay(scrim.ignoresSafeArea())
+            // Kokomombo (Apple review modu) AÇIKKEN video oynatılmaz — düz zemin
+            // (bkz. kullanıcı talebi, ReviewModeService).
+            if ReviewModeService.shared.isEnabled {
+                OBTheme.bg.ignoresSafeArea()
+            } else {
+                LoopingVideoPlayer(resourceName: bgVideo)
+                    .id(bgVideo)
+                    .ignoresSafeArea()
+                    .blur(radius: 6)
+                    .overlay(scrim.ignoresSafeArea())
+            }
 
             VStack(spacing: 0) {
                 topBar
@@ -207,7 +210,6 @@ struct OnboardingPaywallView: View {
             try? await Task.sleep(nanoseconds: 2_000_000_000)
             withAnimation(.easeIn(duration: 0.4)) { showClose = true }
         }
-        .sheet(item: $legalDocument) { LegalDocumentView(document: $0) }
     }
 
     // MARK: Üst bar (X + logo PRO)
@@ -405,8 +407,8 @@ struct OnboardingPaywallView: View {
     /// Butonun altındaki yasal linkler — Privacy, Terms, Restore.
     private var legalRow: some View {
         HStack(spacing: 16) {
-            Button("Privacy Policy") { legalDocument = .privacy }
-            Button("Terms of Use") { legalDocument = .terms }
+            Button("Privacy Policy") { openURL(Config.privacyURL) }
+            Button("Terms of Use") { openURL(Config.termsURL) }
             Button("Restore") { restore() }
         }
         .font(.system(size: 14, weight: .medium))

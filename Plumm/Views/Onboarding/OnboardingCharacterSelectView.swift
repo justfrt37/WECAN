@@ -33,13 +33,13 @@ struct OnboardingCharacterSelectView: View {
                 OBBrandMark(size: 22)
                     .padding(.top, 8)
 
-                Text("Birini seçin")
+                Text("Choose someone")
                     .font(.system(size: 32, weight: .heavy))
                     .foregroundStyle(.white)
 
                 HStack(spacing: 14) {
-                    card(.red, emoji: "❤️", label: "Fantazi")
-                    card(.second, emoji: "💑", label: "İlişki")
+                    card(.red, emoji: "❤️", label: "Fantasy")
+                    card(.second, emoji: "💑", label: "Relationship")
                 }
                 .frame(maxHeight: .infinity)
                 .padding(.bottom, 8)

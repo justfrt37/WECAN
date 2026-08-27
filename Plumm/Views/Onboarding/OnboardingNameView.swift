@@ -30,7 +30,7 @@ struct OnboardingNameView: View {
                     OBBrandMark(size: 22)
                         .padding(.top, 4)
 
-                    Text("Adınız Nedir?")
+                    Text("What's your name?")
                         .font(.system(size: 32, weight: .heavy))
                         .foregroundStyle(.white)
                         .multilineTextAlignment(.center)
@@ -38,7 +38,7 @@ struct OnboardingNameView: View {
                     TextField(
                         "",
                         text: $onboarding.userName,
-                        prompt: Text("Adını gir").foregroundStyle(.white.opacity(0.5))
+                        prompt: Text("Enter a name...").foregroundStyle(.white.opacity(0.5))
                     )
                     .font(.system(size: 17, weight: .semibold))
                     .foregroundStyle(.white)
@@ -70,7 +70,7 @@ struct OnboardingNameView: View {
                 Spacer(minLength: 24)
 
                 Button(action: advance) {
-                    Text("Devam et")
+                    Text("Continue")
                         .font(.system(size: 18, weight: .bold))
                         .foregroundStyle(.white)
                         .frame(maxWidth: .infinity)

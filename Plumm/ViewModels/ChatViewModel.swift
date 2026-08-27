@@ -1077,7 +1077,7 @@ final class ChatViewModel {
                     // kullanıcıya net bir hata göster (Grok'tan üretim YOK).
                     messages.removeAll { $0.id == messageID }
                     updateCache()
-                    errorMessage = String(localized: "Şu an sana gönderebileceğim bir fotoğraf yok.")
+                    errorMessage = String(localized: "I don't have a photo to send you right now.")
                     Task { await tokenStore?.refresh() }  // ücretlendirilmedi → düzelt
                 } else {
                     errorMessage = error.localizedDescription

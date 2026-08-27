@@ -35,15 +35,15 @@ struct OnboardingSocialProofView: View {
                     .foregroundStyle(numberGradient)
                     .staggered(1, shown: shown)
 
-                Text("Dünya çapında kullanıcı")
+                Text("Users worldwide")
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.9))
                     .staggered(2, shown: shown)
 
                 HStack(spacing: 10) {
-                    statCard(icon: "star.fill", color: Color(hex: 0xFFC24B), value: "4.9", label: "Uygulama Mağazası")
-                    statCard(icon: "bubble.left.fill", color: OBTheme.coral, value: "100M+", label: "Mesaj")
-                    statCard(icon: "face.smiling.fill", color: Color(hex: 0x5FD08A), value: "%97", label: "Memnuniyet")
+                    statCard(icon: "star.fill", color: Color(hex: 0xFFC24B), value: "4.9", label: "App Store")
+                    statCard(icon: "bubble.left.fill", color: OBTheme.coral, value: "100M+", label: "Messages")
+                    statCard(icon: "face.smiling.fill", color: Color(hex: 0x5FD08A), value: "97%", label: "Satisfaction")
                 }
                 .staggered(3, shown: shown)
 
@@ -57,15 +57,15 @@ struct OnboardingSocialProofView: View {
                 .staggered(4, shown: shown)
 
                 reviewCard(
-                    count: "20.000+ Yorum",
-                    text: "Gönderdiği fotoğraflar ve sesli mesajlar inanılmaz gerçekçi, çok etkileyici. Sanki gerçekten biriyle konuşuyorum!",
+                    count: "20,000+ Reviews",
+                    text: "The photos and voice messages she sends feel incredibly real, so impressive. It's like I'm actually talking to someone!",
                     name: "James H."
                 )
                 .staggered(5, shown: shown)
 
                 reviewCard(
                     count: nil,
-                    text: "Sesli mesajları duyunca inanamadım, tam bir insan gibi. Artık her akşam konuşuyoruz.",
+                    text: "I couldn't believe it when I heard the voice messages, totally human. We talk every night now.",
                     name: "Emma R."
                 )
                 .staggered(6, shown: shown)
@@ -73,7 +73,7 @@ struct OnboardingSocialProofView: View {
                 Spacer(minLength: 8)
 
                 Button(action: advance) {
-                    Text("Devam et")
+                    Text("Continue")
                         .font(.system(size: 18, weight: .bold))
                         .foregroundStyle(.white)
                         .frame(maxWidth: .infinity)

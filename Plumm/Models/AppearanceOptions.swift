@@ -29,39 +29,6 @@ enum AppearanceOptions {
                                "North African", "Latina", "Middle Eastern", "Slavic", "Mixed"]
     static let ageRanges = ["18-21", "22-27", "28-35", "36-42", "43-52", "53-65", "65+"]
 
-    /// Değer (İngilizce) → Türkçe gösterim adı. Bilinmeyen değeri aynen döndürür.
-    static func tr(_ v: String) -> String { trMap[v] ?? v }
-
-    private static let trMap: [String: String] = [
-        // Kategori
-        "Realistic": "Gerçekçi", "Anime": "Anime", "Fictional": "Kurgusal", "Fantasy": "Fantezi", "Sci-Fi": "Bilim Kurgu",
-        // Tarz
-        "Sweet": "Tatlı", "Mysterious": "Gizemli", "Energetic": "Enerjik", "Elegant": "Zarif",
-        // Saç stili
-        "Straight": "Düz", "Wavy": "Dalgalı", "Curly": "Kıvırcık", "Ponytail": "At Kuyruğu",
-        "Bun": "Topuz", "Pixie": "Pixie Kesim", "Braided": "Örgülü", "Bob": "Bob Kesim",
-        "Long Layers": "Uzun Katlı", "Undercut": "Undercut",
-        // Saç rengi
-        "Black": "Siyah", "Brown": "Kahverengi", "Blonde": "Sarışın", "Red": "Kızıl",
-        "Auburn": "Kestane Kızılı", "Pink": "Pembe", "Silver": "Gümüş", "Blue": "Mavi",
-        "Copper": "Bakır", "Purple": "Mor",
-        // Göz rengi (Brown/Blue/Pink çakışmaları saç ile aynı Türkçe — sorun değil)
-        "Green": "Yeşil", "Hazel": "Ela", "Gray": "Gri", "Amber": "Amber",
-        "Turquoise": "Turkuaz", "Violet": "Menekşe", "Emerald": "Zümrüt", "Steel Blue": "Çelik Mavisi",
-        // Ten tonu
-        "Porcelain": "Porselen", "Fair": "Açık", "Light": "Açık Ton", "Medium": "Orta",
-        "Tan": "Bronz", "Deep": "Koyu", "Ivory": "Fildişi", "Golden": "Altın Ton",
-        "Caramel": "Karamel", "Ebony": "Abanoz",
-        // Etnik köken
-        "African": "Afrikalı", "Mediterranean": "Akdeniz", "European": "Avrupalı",
-        "East Asian": "Doğu Asya", "South Asian": "Güney Asya", "Southeast Asian": "Güneydoğu Asya",
-        "Scandinavian": "İskandinav", "Mixed": "Karışık", "North African": "Kuzey Afrikalı",
-        "Latina": "Latin", "Middle Eastern": "Orta Doğu", "Slavic": "Slav",
-        // Vücut tipi
-        "Slim": "İnce", "Athletic": "Atletik", "Curvy": "Dolgun Hatlı",
-        "Average": "Ortalama", "Voluptuous": "Vücutlu", "Plus Size": "Artı Beden",
-    ]
-
     static func hairColorValue(_ name: String) -> Color {
         switch name {
         case "Black":    return Color(hex: 0x1C1B1A)

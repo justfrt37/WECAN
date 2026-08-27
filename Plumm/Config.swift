@@ -15,6 +15,10 @@ enum Config {
     // ↓ Dashboard > Settings > API Keys > "anon / public" anahtarını buraya yapıştır
     static let supabaseAnonKey = "sb_publishable_AdvrSU0EhHDJyWsOtGGhZg_DHca3OaB"
 
+    // Legal — Terms/Privacy open externally in Safari, not an in-app sheet.
+    static let termsURL = URL(string: "https://www.plummai.com/terms")!
+    static let privacyURL = URL(string: "https://www.plummai.com/privacy")!
+
     // Edge Function endpoint'i (LLM çağrısını sunucuda yapar, key'i gizler)
     static var chatFunctionURL: URL {
         URL(string: "\(supabaseURL)/functions/v1/chat")!

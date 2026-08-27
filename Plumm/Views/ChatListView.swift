@@ -419,7 +419,7 @@ private struct SwipeToDeleteRow<Content: View>: View {
                 } label: {
                     VStack(spacing: 4) {
                         Image(systemName: "trash.fill").font(.system(size: 18, weight: .semibold))
-                        Text("Sil").font(.system(size: 12, weight: .bold))
+                        Text("Delete").font(.system(size: 12, weight: .bold))
                     }
                     .foregroundStyle(.white)
                     .frame(width: deleteWidth)

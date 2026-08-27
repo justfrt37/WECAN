@@ -87,7 +87,7 @@ struct TokenStoreView: View {
 
     private var header: some View {
         ZStack {
-            Text("Mağaza")
+            Text("Store")
                 .font(.system(size: 20, weight: .heavy))
                 .foregroundStyle(.white)
 
