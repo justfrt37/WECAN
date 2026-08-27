@@ -70,7 +70,7 @@ struct PaywallPackage: Identifiable {
 enum PlummCatalog {
     /// Abonelik ürününün dönem başına verdiği token.
     static let subscriptionTokens: [String: Int] = [
-        "weekly_pro_normal": 250, "monthly_pro_default": 1000, "yearly_pro_normal": 12000,
+        "weekly_pro_normal": 250, "monthly_pro_normal": 1000, "yearly_pro_normal": 12000,
         "weekly_pro_plus": 500,   "monthly_pro_plus": 2000,    "yearly_pro_plus": 25000,
         "weekly_pro_max": 750,    "monthly_pro_max": 3000,     "yearly_pro_max": 35000,
     ]
@@ -80,7 +80,7 @@ enum PlummCatalog {
         "token_1000": 1000, "token_2000": 2000, "token_5000": 5000,
     ]
     static let productTier: [String: SubscriptionTier] = [
-        "weekly_pro_normal": .pro,     "monthly_pro_default": .pro,  "yearly_pro_normal": .pro,
+        "weekly_pro_normal": .pro,     "monthly_pro_normal": .pro,  "yearly_pro_normal": .pro,
         "weekly_pro_plus": .proPlus,   "monthly_pro_plus": .proPlus, "yearly_pro_plus": .proPlus,
         "weekly_pro_max": .max,        "monthly_pro_max": .max,      "yearly_pro_max": .max,
     ]

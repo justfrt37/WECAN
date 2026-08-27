@@ -153,14 +153,14 @@
           "introductoryOffer": null,
           "localizations": [
             {
-              "description": "monthly_pro_default",
-              "displayName": "monthly_pro_default",
+              "description": "monthly_pro_normal",
+              "displayName": "monthly_pro_normal",
               "locale": "en_US"
             }
           ],
-          "productID": "monthly_pro_default",
+          "productID": "monthly_pro_normal",
           "recurringSubscriptionPeriod": "P1M",
-          "referenceName": "monthly_pro_default",
+          "referenceName": "monthly_pro_normal",
           "subscriptionGroupID": "8AFDAEB5",
           "type": "RecurringSubscription",
           "winbackOffers": []
