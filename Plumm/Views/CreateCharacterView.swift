@@ -783,11 +783,19 @@ struct CreateCharacterView: View {
                     exHistory = ""
                     advance()
                 } label: {
+                    // Dokunma hedefi en az 44x44pt — Apple HIG'in asgarisi.
+                    // Eskiden yalnızca 13pt'lik metnin kendisi tıklanabilirdi,
+                    // bu hem zor basılıyordu hem de review'da risk (bkz.
+                    // kullanıcı talebi).
                     Text("Skip")
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(AppColor.pinkSoft)
+                        .padding(.horizontal, 20)
+                        .frame(minWidth: 44, minHeight: 44)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel(Text("Skip"))
             }
         }
         .padding(.top, 4)

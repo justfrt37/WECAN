@@ -360,8 +360,12 @@ struct CharacterProfileView: View {
                 .tracking(0.5)
                 .foregroundStyle(.white.opacity(0.8))
             FlowLayout(spacing: 8) {
-                ForEach(Array(character.interests.enumerated()), id: \.offset) { idx, item in
-                    interestChip(item, highlighted: idx == 0)
+                // highlighted: false — ilk çip eskiden `idx == 0` ile vurguluydu,
+                // bu da onu "seçili" gibi gösteriyordu. Seçilebilir bir şey
+                // değil (bu ekranda ilgi alanları salt okunur), o yüzden hepsi
+                // aynı görünüyor (bkz. kullanıcı talebi).
+                ForEach(Array(character.interests.enumerated()), id: \.offset) { _, item in
+                    interestChip(item, highlighted: false)
                 }
             }
         }
