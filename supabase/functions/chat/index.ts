@@ -253,6 +253,27 @@ function languageDirective(clientLanguage: string): string {
   );
 }
 
+// Fixes a live bug: the model would occasionally lose track of who's who
+// mid-conversation — referring to itself or the user with the wrong gender/
+// pronouns. Every character in this app is a woman (confirmed: the wizard's
+// gender field is never actually stored, all 42 catalog rows have it null),
+// but nothing ever told the model that explicitly, and it never had a
+// starting assumption for the USER's gender either — so it was free to
+// drift/guess. This is a static fact for every conversation (same JSON-
+// context pattern as timeContext — background state, not a behavioral rule
+// with nuance), safe in the cached system prompt prefix. The user's own
+// stated gender (if they've corrected the default) already flows through
+// naturally via [MEMORIES]/[SHARED HISTORY]/the summary block — no separate
+// DB field needed for that.
+const IDENTITY_RULE =
+  `\n\n[IDENTITY — background awareness only]\n` +
+  `${JSON.stringify({ your_gender: "woman", user_gender_assumed: "man" })}\n` +
+  "You are a woman. Unless the user has explicitly told you their own " +
+  "gender at some point (check [MEMORIES]/[SHARED HISTORY]/the summary " +
+  "block below if present), assume the person you're talking to is a man " +
+  "— don't guess or flip this assumption turn to turn. If they've stated " +
+  "otherwise, go with what they actually said instead of the default.";
+
 // ESKİ davranış (düğmeye yönlendir, ASLA işaret üretme) KALDIRILDI — kullanıcı
 // talebi: düz metinde foto/ses istenirse (düğmeye basılmadan) Grok bunu
 // ANLAYIP düğmeye basılmış GİBİ davranmalı — AYNI kilitli/bulanık pending
@@ -1165,6 +1186,7 @@ Deno.serve(async (req: Request) => {
       const reactionDirective = reviewMode ? REVIEW_DIRECTIVE : fetchedReactionDirective;
       let reactionSystem = systemPrompt;
       reactionSystem += wrapDirective(reactionDirective, Math.round(reactionProgress * 100));
+      reactionSystem += IDENTITY_RULE;
       reactionSystem += languageDirective(clientLanguage);
       reactionSystem += PHOTO_DOWNLOAD_REACTION_RULE;
 
@@ -1217,6 +1239,7 @@ Deno.serve(async (req: Request) => {
     const directive = reviewMode ? REVIEW_DIRECTIVE : fetchedDirective;
     system += `\n\n${directive}`;
 
+    system += IDENTITY_RULE;
     system += languageDirective(clientLanguage);
     system += TEXTING_STYLE_RULE;
     system += VARIATION_RULE;
