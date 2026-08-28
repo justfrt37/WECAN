@@ -179,7 +179,7 @@ struct ProfileView: View {
     private var settingsSection: some View {
         VStack(spacing: 14) {
             HStack {
-                Text("Ayarlar")
+                Text("Settings")
                     .font(.system(size: 15, weight: .bold))
                     .foregroundStyle(.white.opacity(0.55))
                 Spacer()

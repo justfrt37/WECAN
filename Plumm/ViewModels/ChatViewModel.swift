@@ -427,6 +427,14 @@ final class ChatViewModel {
     private static let softCharThreshold = 65
     private static let softSplitChance = 0.5
 
+    /// İkinci parçanın "yazıyor..." süresi — kalan metnin uzunluğuna göre
+    /// 2-4 saniye arasına sıkıştırılır (TypingTiming ile aynı karakter/saniye
+    /// varsayımı, farklı bant — bu bir duraklama, tam yazma süresi değil).
+    private static func splitDelay(forRemainingLength length: Int) -> TimeInterval {
+        let raw = Double(length) / 30.0
+        return min(max(raw, 2.0), 4.0)
+    }
+
     /// Kaba cümle bölücü — "." "!" "?" "…" görülünce cümleyi kapatır. Kısaltma/
     /// ondalık sayı gibi durumları ayırt etmez ama gündelik mesajlaşma metni
     /// için yeterli (yanlış bölünme en kötü ihtimalle kısa bir ekstra balon).
@@ -476,9 +484,10 @@ final class ChatViewModel {
         let restSentences = Array(sentences.dropFirst(firstPart.count))
         guard !restSentences.isEmpty else { return [segment] }
 
+        let restText = restSentences.joined(separator: " ")
         return [
             ReplySegment(text: firstPart.joined(separator: " "), delaySeconds: segment.delaySeconds),
-            ReplySegment(text: restSentences.joined(separator: " "), delaySeconds: Double.random(in: 1...2)),
+            ReplySegment(text: restText, delaySeconds: Self.splitDelay(forRemainingLength: restText.count)),
         ]
     }
 

@@ -25,7 +25,7 @@ const corsHeaders = {
 
 const XAI_API_KEY = Deno.env.get("XAI_API_KEY") ?? "";
 const XAI_CHAT_URL = "https://api.x.ai/v1/chat/completions";
-const TEXT_MODEL = "grok-4-1-fast-non-reasoning";
+const TEXT_MODEL = "grok-4.3";
 
 const CIVITAI_API_TOKEN = Deno.env.get("CIVITAI_API") ?? "";
 const CIVITAI_ORCHESTRATION_URL = "https://orchestration.civitai.com/v2/consumer/workflows?wait=60";

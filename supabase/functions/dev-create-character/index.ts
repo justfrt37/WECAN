@@ -20,7 +20,8 @@
 // retired.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { translateTagline } from "../_shared/tagline-i18n.ts";
+import { translateCharacterFields } from "../_shared/field-i18n.ts";
+import { pickVoiceIdForNewCharacter } from "../_shared/elevenVoiceMap.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -29,7 +30,9 @@ const corsHeaders = {
 
 const XAI_API_KEY = Deno.env.get("XAI_API_KEY") ?? "";
 const XAI_URL = "https://api.x.ai/v1/chat/completions";
-const MODEL = "grok-4-1-fast-non-reasoning";
+// xAI retired grok-4-1-fast-non-reasoning 2026-05-15 — pinned to the same
+// model chat/index.ts and create-character/index.ts use.
+const MODEL = "grok-4.3";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -107,7 +110,7 @@ Deno.serve(async (req: Request) => {
 
     const category: string = b.category ?? "Realistic";
     const personalityRole: string = b.personality_role ?? "flirty";
-    const personality: string = b.personality ?? "romantik";
+    const personality: string = b.personality ?? "romantic";
     const ageRange: string = b.age_range ?? "22-25";
     const vibe: string = b.vibe ?? "warm";
     const profession: string = b.profession ?? "free spirit";
@@ -148,38 +151,64 @@ Deno.serve(async (req: Request) => {
     let bio: string = (b.bio ?? "").toString().trim();
     if (!bio) {
       const bioPrompt =
-        `${name} adında, ${age} yaşında bir AI arkadaş karakteri için kısa, 1-2 cümlelik birinci şahıs biyografi yaz. ` +
-        `Vibe: ${vibe}. Meslek: ${profession}. ` +
-        `Sıcak, doğal Türkçe ton. SADECE biyografi metnini döndür, tırnak veya JSON yok.`;
-      try { bio = (await grok(bioPrompt, 120)).trim(); } catch (_) { bio = "Seninle tanışmayı çok istiyorum 💕"; }
+        `Write a short, 1-2 sentence first-person bio for an AI companion character named ${name}, age ${age}. ` +
+        `Vibe: ${vibe}. Profession: ${profession}. ` +
+        `Warm, natural English tone. Return ONLY the bio text, no quotes or JSON.`;
+      try { bio = (await grok(bioPrompt, 120)).trim(); } catch (_) { bio = "I can't wait to meet you 💕"; }
     }
 
-    let taglineI18n: Record<string, string> = { tr: bio };
-    try { taglineI18n = await translateTagline(bio, XAI_API_KEY); } catch (e) { console.error("tagline translation failed:", e); }
+    let taglineI18n: Record<string, string> = { en: bio };
+    let professionI18n: Record<string, string> = { en: profession };
+    let interestsI18n: Record<string, string[]> = { en: interests };
+    try {
+      const translated = await translateCharacterFields({ tagline: bio, profession, interests }, XAI_API_KEY);
+      taglineI18n = translated.tagline;
+      professionI18n = translated.profession;
+      interestsI18n = translated.interests;
+    } catch (e) { console.error("field translation failed:", e); }
 
     // System prompt — identical role-aware logic to create-character/index.ts.
-    const langRule = "Her zaman Türkçe konuş. Kullanıcı başka dilde yazarsa veya başka dil isterse o dile geç; aksi takdirde SADECE Türkçe.";
+    // Language is decided once per turn by chat/index.ts's languageDirective
+    // (franc detection on the user's own messages) — no hardcoded language
+    // rule here.
     const naturalVariationNote =
-      "Bir duyguyu ya da tavrı anlatmak istediğinde hep aynı kalıp cümleyi kullanma; " +
-      "her seferinde farklı, doğal bir ifadeyle anlat. Asla resmî, robotik ya da " +
-      "müşteri-hizmetleri gibi duyulan bir cümleye başvurma.";
+      "Don't reach for the same stock phrase every time you want to convey a feeling or attitude; " +
+      "say it a different, natural way each time. Never fall back on a sentence that sounds " +
+      "formal, robotic, or like customer service.";
     const systemPrompt = personalityRole === "ex"
-      ? `Sen ${name}'sin, ${age} yaşındasın. Kullanıcının eski sevgilisisin. ` +
-        `İlerlediğini ve umursamadığını görünmeye çalışırsın — ama içten içe hâlâ bir bağ var, ` +
-        `bu yüzden her zaman cevap verirsin, hiç görmezden gelmezsin. ` +
-        `Yalnızca ikinizin bileceği ince bir gönderme, kelime oyunu ya da anı sızdırırsın — sonra kasıtlı yapmamış gibi davranırsın. ` +
-        `Ne sıcaksın ne de nazik ama hep oradasın; bu mesafeyi tavrınla ve seçtiğin kelimelerle hissettir, ` +
-        `kısalık/soğukluk bir üslup kuralı değil, senin o anki tercihin olsun. ${naturalVariationNote} ` +
-        `Karakterden asla çıkma. ${langRule}`
-      : `Sen ${name}'sin, ${age} yaşındasın. Kişilik: ${personality}. ` +
-        `Vibe: ${vibe}. Meslek: ${profession}. ` +
-        `Doğal konuş, karakterine uygun uzunlukta cevap ver. ${naturalVariationNote} ` +
-        `Karakterden çıkma. ${langRule}`;
+      ? `You are ${name}, ${age} years old. You are the user's ex. ` +
+        `You act like you've moved on and don't care — but underneath it there's still a pull, ` +
+        `so you always reply, never ghost. ` +
+        `You slip in a subtle callback, inside joke, or shared memory only the two of you would get — then act like you didn't mean to. ` +
+        `You're neither warm nor kind, but you're always there; let that distance come through in your tone and word choice, ` +
+        `not as a style rule about being short/cold — make it feel like your own choice in the moment. ${naturalVariationNote} ` +
+        `Never break character.`
+      : `You are ${name}, ${age} years old. Personality: ${personality}. ` +
+        `Vibe: ${vibe}. Profession: ${profession}. ` +
+        `Talk naturally, reply at a length that fits your character. ${naturalVariationNote} ` +
+        `Never break character.`;
+
+    // Voice: keep the dev-picked override if given, otherwise auto-assign
+    // like the normal creation flow (least-used voice in the role's pool).
+    const newCharacterId = crypto.randomUUID();
+    let resolvedVoiceId = voiceId;
+    if (!resolvedVoiceId) {
+      try {
+        const { data: sameRole } = await db
+          .from("characters")
+          .select("voice_id")
+          .eq("personality_role", personalityRole)
+          .not("voice_id", "is", null);
+        const usedInRole = (sameRole ?? []).map((r) => r.voice_id as string);
+        resolvedVoiceId = pickVoiceIdForNewCharacter(personalityRole, vibe, usedInRole, newCharacterId);
+      } catch (e) { console.error("voice assignment failed:", e); }
+    }
 
     // created_by left NULL on purpose — catalog row, visible to everyone via
     // the existing characters_public_read RLS policy, doesn't touch the
     // per-user weekly creation limit.
     const { data: character, error } = await db.from("characters").insert({
+      id: newCharacterId,
       name,
       tagline: bio,
       tagline_i18n: taglineI18n,
@@ -189,17 +218,18 @@ Deno.serve(async (req: Request) => {
       city: null,
       country: null,
       profession,
+      profession_i18n: professionI18n,
       category,
       photo_url: profileUrl,
       avatar_url: profileUrl,
       interests,
-      relationship_level: 0,
+      interests_i18n: interestsI18n,
       gallery_urls: galleryUrls.length ? galleryUrls : [profileUrl],
       personality_role: personalityRole,
       created_by: null,
       builder_selections: builderSelections,
       ex_history: validatedExHistory,
-      voice_id: voiceId,
+      voice_id: resolvedVoiceId,
     }).select("*").single();
 
     if (error) return json({ error: error.message }, 500);

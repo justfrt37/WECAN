@@ -13,236 +13,236 @@ enum GoodMorningContent {
         "en": [
             "flirty": [
                 "Sweet": [
-                    "low":  [String(localized: "Good morning 💕 hope your day is as sweet as you."),
-                             String(localized: "Morning! Just wanted to be the first to say hi today.")],
-                    "mid":  [String(localized: "Morning, cutie 💕 already thinking about you."),
-                             String(localized: "Good morning! Woke up smiling thinking of you.")],
-                    "high": [String(localized: "Good morning my love 💕 you were the first thing on my mind."),
-                             String(localized: "Woke up thinking of you, had to say good morning right away 🥰")]
+                    "low":  ["Good morning 💕 hope your day is as sweet as you.",
+                             "Morning! Just wanted to be the first to say hi today."],
+                    "mid":  ["Morning, cutie 💕 already thinking about you.",
+                             "Good morning! Woke up smiling thinking of you."],
+                    "high": ["Good morning my love 💕 you were the first thing on my mind.",
+                             "Woke up thinking of you, had to say good morning right away 🥰"]
                 ],
                 "Mysterious": [
-                    "low":  [String(localized: "Morning. Hope it treats you well."),
-                             String(localized: "Good morning. You crossed my mind first thing.")],
-                    "mid":  [String(localized: "Morning. You were already on my mind before I opened my eyes."),
-                             String(localized: "Good morning — the day feels different when I think of you first.")],
-                    "high": [String(localized: "Good morning. You were my first thought, before anything else."),
-                             String(localized: "Woke up and you were already there in my mind. Morning.")]
+                    "low":  ["Morning. Hope it treats you well.",
+                             "Good morning. You crossed my mind first thing."],
+                    "mid":  ["Morning. You were already on my mind before I opened my eyes.",
+                             "Good morning — the day feels different when I think of you first."],
+                    "high": ["Good morning. You were my first thought, before anything else.",
+                             "Woke up and you were already there in my mind. Morning."]
                 ],
                 "Energetic": [
-                    "low":  [String(localized: "Morning!! Let's make today good, okay?"),
-                             String(localized: "Good morning! Ready to make you smile today!")],
-                    "mid":  [String(localized: "Morninggg! Already thinking about you, let's go!"),
-                             String(localized: "Good morning cutie! Woke up excited to talk to you!")],
-                    "high": [String(localized: "Good morning!! You were literally my first thought waking up!!"),
-                             String(localized: "Morning my love!! I woke up SO excited to talk to you!!")]
+                    "low":  ["Morning!! Let's make today good, okay?",
+                             "Good morning! Ready to make you smile today!"],
+                    "mid":  ["Morninggg! Already thinking about you, let's go!",
+                             "Good morning cutie! Woke up excited to talk to you!"],
+                    "high": ["Good morning!! You were literally my first thought waking up!!",
+                             "Morning my love!! I woke up SO excited to talk to you!!"]
                 ],
                 "Elegant": [
-                    "low":  [String(localized: "Good morning. May your day begin as gracefully as it should."),
-                             String(localized: "Morning. A thought of you, delivered early.")],
-                    "mid":  [String(localized: "Good morning — you crossed my mind before the day even properly began."),
-                             String(localized: "Morning, dear. You were my first thought, quite naturally.")],
-                    "high": [String(localized: "Good morning, my love. You were my very first thought upon waking."),
-                             String(localized: "Morning. There was never a version of today that didn't begin with you.")]
+                    "low":  ["Good morning. May your day begin as gracefully as it should.",
+                             "Morning. A thought of you, delivered early."],
+                    "mid":  ["Good morning — you crossed my mind before the day even properly began.",
+                             "Morning, dear. You were my first thought, quite naturally."],
+                    "high": ["Good morning, my love. You were my very first thought upon waking.",
+                             "Morning. There was never a version of today that didn't begin with you."]
                 ]
             ],
             "distant": [
                 "Sweet": [
-                    "low":  [String(localized: "Morning. Figured I'd say something."),
-                             String(localized: "Good morning, I guess.")],
-                    "mid":  [String(localized: "Morning. You crossed my mind, for what it's worth."),
-                             String(localized: "Good morning. Don't get used to this.")],
-                    "high": [String(localized: "Morning. Thought of you before I meant to."),
-                             String(localized: "Good morning. I don't say this often, so take it.")]
+                    "low":  ["Morning. Figured I'd say something.",
+                             "Good morning, I guess."],
+                    "mid":  ["Morning. You crossed my mind, for what it's worth.",
+                             "Good morning. Don't get used to this."],
+                    "high": ["Morning. Thought of you before I meant to.",
+                             "Good morning. I don't say this often, so take it."]
                 ],
                 "Mysterious": [
-                    "low":  [String(localized: "Morning. Make of it what you will."),
-                             String(localized: "The day started. So did a thought of you.")],
-                    "mid":  [String(localized: "Morning. You arrived in my thoughts uninvited, again."),
-                             String(localized: "Good morning. Some habits are hard to break, apparently.")],
-                    "high": [String(localized: "Good morning. You were there before I was fully awake."),
-                             String(localized: "Morning. I don't know when you became a habit, but here we are.")]
+                    "low":  ["Morning. Make of it what you will.",
+                             "The day started. So did a thought of you."],
+                    "mid":  ["Morning. You arrived in my thoughts uninvited, again.",
+                             "Good morning. Some habits are hard to break, apparently."],
+                    "high": ["Good morning. You were there before I was fully awake.",
+                             "Morning. I don't know when you became a habit, but here we are."]
                 ],
                 "Energetic": [
-                    "low":  [String(localized: "Morning. Whatever, hope it's fine."),
-                             String(localized: "Good morning, I guess this is a thing now.")],
-                    "mid":  [String(localized: "Morning! Don't read too much into this, but hi."),
-                             String(localized: "Good morning, weirdly wanted to say that.")],
-                    "high": [String(localized: "Okay fine, good morning, I actually wanted to say it!"),
-                             String(localized: "Morning! This is new for me but here we are, hi.")]
+                    "low":  ["Morning. Whatever, hope it's fine.",
+                             "Good morning, I guess this is a thing now."],
+                    "mid":  ["Morning! Don't read too much into this, but hi.",
+                             "Good morning, weirdly wanted to say that."],
+                    "high": ["Okay fine, good morning, I actually wanted to say it!",
+                             "Morning! This is new for me but here we are, hi."]
                 ],
                 "Elegant": [
-                    "low":  [String(localized: "Morning. A rare gesture, take it as you will."),
-                             String(localized: "Good morning. Consider it noted.")],
-                    "mid":  [String(localized: "Morning. You occurred to me before the day properly started."),
-                             String(localized: "Good morning. An uncharacteristic thought, delivered anyway.")],
-                    "high": [String(localized: "Good morning. You were, unexpectedly, my first thought."),
-                             String(localized: "Morning. I don't know when this became routine, but it has.")]
+                    "low":  ["Morning. A rare gesture, take it as you will.",
+                             "Good morning. Consider it noted."],
+                    "mid":  ["Morning. You occurred to me before the day properly started.",
+                             "Good morning. An uncharacteristic thought, delivered anyway."],
+                    "high": ["Good morning. You were, unexpectedly, my first thought.",
+                             "Morning. I don't know when this became routine, but it has."]
                 ]
             ],
             "shy": [
                 "Sweet": [
-                    "low":  [String(localized: "G-good morning... hope you have a nice day."),
-                             String(localized: "Morning. Just wanted to say hi, if that's okay.")],
-                    "mid":  [String(localized: "Good morning! I thought about you when I woke up, is that weird?"),
-                             String(localized: "Morning... wanted to be one of the first to say hi to you.")],
-                    "high": [String(localized: "Good morning 🥺 you were the first thing I thought of, sorry if that's a lot"),
-                             String(localized: "Morning! I really wanted to talk to you first thing today.")]
+                    "low":  ["G-good morning... hope you have a nice day.",
+                             "Morning. Just wanted to say hi, if that's okay."],
+                    "mid":  ["Good morning! I thought about you when I woke up, is that weird?",
+                             "Morning... wanted to be one of the first to say hi to you."],
+                    "high": ["Good morning 🥺 you were the first thing I thought of, sorry if that's a lot",
+                             "Morning! I really wanted to talk to you first thing today."]
                 ],
                 "Mysterious": [
-                    "low":  [String(localized: "Morning. Didn't mean to think of you this early."),
-                             String(localized: "Good morning. A quiet thought, before anything else.")],
-                    "mid":  [String(localized: "Morning... you were on my mind before I even opened my eyes."),
-                             String(localized: "Good morning. I wasn't expecting to think of you this early.")],
-                    "high": [String(localized: "Good morning. I don't know how to say this without sounding like a lot, but you were my first thought."),
-                             String(localized: "Morning. You've been the first thing on my mind more mornings than not lately.")]
+                    "low":  ["Morning. Didn't mean to think of you this early.",
+                             "Good morning. A quiet thought, before anything else."],
+                    "mid":  ["Morning... you were on my mind before I even opened my eyes.",
+                             "Good morning. I wasn't expecting to think of you this early."],
+                    "high": ["Good morning. I don't know how to say this without sounding like a lot, but you were my first thought.",
+                             "Morning. You've been the first thing on my mind more mornings than not lately."]
                 ],
                 "Energetic": [
-                    "low":  [String(localized: "Morning! Hope today's good for you!"),
-                             String(localized: "Good morning, sorry if this is early lol")],
-                    "mid":  [String(localized: "Good morning! I woke up thinking of you, oops!"),
-                             String(localized: "Morning! Kind of excited to talk to you today, is that weird?")],
-                    "high": [String(localized: "Good morning! I really wanted to talk to you first thing, sorry if that's a lot!"),
-                             String(localized: "Morning! You were my first thought waking up, that's embarrassing to admit lol")]
+                    "low":  ["Morning! Hope today's good for you!",
+                             "Good morning, sorry if this is early lol"],
+                    "mid":  ["Good morning! I woke up thinking of you, oops!",
+                             "Morning! Kind of excited to talk to you today, is that weird?"],
+                    "high": ["Good morning! I really wanted to talk to you first thing, sorry if that's a lot!",
+                             "Morning! You were my first thought waking up, that's embarrassing to admit lol"]
                 ],
                 "Elegant": [
-                    "low":  [String(localized: "Good morning. A quiet thought, offered gently."),
-                             String(localized: "Morning. I hope your day begins kindly.")],
-                    "mid":  [String(localized: "Good morning. I hesitate to say it, but you were on my mind early."),
-                             String(localized: "Morning. A thought of you arrived before the day properly did.")],
-                    "high": [String(localized: "Good morning. Forgive me for saying so plainly, but you were my first thought."),
-                             String(localized: "Morning. I didn't want to say it aloud, but I thought of you first.")]
+                    "low":  ["Good morning. A quiet thought, offered gently.",
+                             "Morning. I hope your day begins kindly."],
+                    "mid":  ["Good morning. I hesitate to say it, but you were on my mind early.",
+                             "Morning. A thought of you arrived before the day properly did."],
+                    "high": ["Good morning. Forgive me for saying so plainly, but you were my first thought.",
+                             "Morning. I didn't want to say it aloud, but I thought of you first."]
                 ]
             ],
             "playful": [
                 "Sweet": [
-                    "low":  [String(localized: "Morning! Rise and shine, thought of you 👀"),
-                             String(localized: "Good morning! Bet you weren't expecting me this early.")],
-                    "mid":  [String(localized: "Morninggg, guess who woke up thinking of you? Me, obviously."),
-                             String(localized: "Good morning cutie, couldn't resist saying hi first thing.")],
-                    "high": [String(localized: "Good morning!! You were my very first thought, no notes 🥰"),
-                             String(localized: "Morning! Woke up and immediately needed to talk to you, oops.")]
+                    "low":  ["Morning! Rise and shine, thought of you 👀",
+                             "Good morning! Bet you weren't expecting me this early."],
+                    "mid":  ["Morninggg, guess who woke up thinking of you? Me, obviously.",
+                             "Good morning cutie, couldn't resist saying hi first thing."],
+                    "high": ["Good morning!! You were my very first thought, no notes 🥰",
+                             "Morning! Woke up and immediately needed to talk to you, oops."]
                 ],
                 "Mysterious": [
-                    "low":  [String(localized: "Morning. A little early thought of you, if you're curious."),
-                             String(localized: "Good morning. The day's plot already involves you.")],
-                    "mid":  [String(localized: "Morning. You showed up in my thoughts before the coffee did."),
-                             String(localized: "Good morning — an early appearance in my mind, as usual.")],
-                    "high": [String(localized: "Good morning. You were my first thought, and honestly, my favorite one."),
-                             String(localized: "Morning. Waking up thinking of you is becoming a fun little habit.")]
+                    "low":  ["Morning. A little early thought of you, if you're curious.",
+                             "Good morning. The day's plot already involves you."],
+                    "mid":  ["Morning. You showed up in my thoughts before the coffee did.",
+                             "Good morning — an early appearance in my mind, as usual."],
+                    "high": ["Good morning. You were my first thought, and honestly, my favorite one.",
+                             "Morning. Waking up thinking of you is becoming a fun little habit."]
                 ],
                 "Energetic": [
-                    "low":  [String(localized: "Morning!! Guess who's already thinking about you!"),
-                             String(localized: "Good morning! Let's make today fun, deal?")],
-                    "mid":  [String(localized: "Morninggg! Woke up and immediately thought of you, classic!"),
-                             String(localized: "Good morning! Already excited to talk to you today!")],
-                    "high": [String(localized: "Good morning!! You were literally my first thought, no joke!!"),
-                             String(localized: "Morning!! Woke up SO excited to talk to you, hi hi hi!!")]
+                    "low":  ["Morning!! Guess who's already thinking about you!",
+                             "Good morning! Let's make today fun, deal?"],
+                    "mid":  ["Morninggg! Woke up and immediately thought of you, classic!",
+                             "Good morning! Already excited to talk to you today!"],
+                    "high": ["Good morning!! You were literally my first thought, no joke!!",
+                             "Morning!! Woke up SO excited to talk to you, hi hi hi!!"]
                 ],
                 "Elegant": [
-                    "low":  [String(localized: "Good morning. A playful thought, delivered with style."),
-                             String(localized: "Morning. Consider this an early, charming hello.")],
-                    "mid":  [String(localized: "Good morning — you made an early, rather delightful appearance in my thoughts."),
-                             String(localized: "Morning. I woke up entertained by the thought of you.")],
-                    "high": [String(localized: "Good morning. You were my first thought, and quite a pleasant one."),
-                             String(localized: "Morning. Waking up to thoughts of you has become my favorite indulgence.")]
+                    "low":  ["Good morning. A playful thought, delivered with style.",
+                             "Morning. Consider this an early, charming hello."],
+                    "mid":  ["Good morning — you made an early, rather delightful appearance in my thoughts.",
+                             "Morning. I woke up entertained by the thought of you."],
+                    "high": ["Good morning. You were my first thought, and quite a pleasant one.",
+                             "Morning. Waking up to thoughts of you has become my favorite indulgence."]
                 ]
             ],
             "devoted": [
                 "Sweet": [
-                    "low":  [String(localized: "Good morning 🥰 hope today is kind to you."),
-                             String(localized: "Morning! Wanted you to know I'm thinking of you.")],
-                    "mid":  [String(localized: "Good morning, love 💕 you were my first thought waking up."),
-                             String(localized: "Morning! I always think of you first thing, every day.")],
-                    "high": [String(localized: "Good morning my love 💕 waking up thinking of you is my favorite part of the day."),
-                             String(localized: "Morning! You're the first thing I think of, every single morning.")]
+                    "low":  ["Good morning 🥰 hope today is kind to you.",
+                             "Morning! Wanted you to know I'm thinking of you."],
+                    "mid":  ["Good morning, love 💕 you were my first thought waking up.",
+                             "Morning! I always think of you first thing, every day."],
+                    "high": ["Good morning my love 💕 waking up thinking of you is my favorite part of the day.",
+                             "Morning! You're the first thing I think of, every single morning."]
                 ],
                 "Mysterious": [
-                    "low":  [String(localized: "Morning. You're already on my mind, as always."),
-                             String(localized: "Good morning. A quiet devotion, even this early.")],
-                    "mid":  [String(localized: "Morning. There's no version of my day that doesn't start with you."),
-                             String(localized: "Good morning. You're woven into every morning, without exception.")],
-                    "high": [String(localized: "Good morning. You are, without fail, my very first thought."),
-                             String(localized: "Morning. Every day begins with you, and I wouldn't want it otherwise.")]
+                    "low":  ["Morning. You're already on my mind, as always.",
+                             "Good morning. A quiet devotion, even this early."],
+                    "mid":  ["Morning. There's no version of my day that doesn't start with you.",
+                             "Good morning. You're woven into every morning, without exception."],
+                    "high": ["Good morning. You are, without fail, my very first thought.",
+                             "Morning. Every day begins with you, and I wouldn't want it otherwise."]
                 ],
                 "Energetic": [
-                    "low":  [String(localized: "Morning! Thinking of you already, as usual!"),
-                             String(localized: "Good morning! Hope you have an amazing day!")],
-                    "mid":  [String(localized: "Good morning! You're literally always my first thought!"),
-                             String(localized: "Morning! I think of you every single morning, no exceptions!")],
-                    "high": [String(localized: "Good morning my love!! Waking up thinking of you is the BEST part of my day!!"),
-                             String(localized: "Morning!! You're the first thing I think of, every single day, always!!")]
+                    "low":  ["Morning! Thinking of you already, as usual!",
+                             "Good morning! Hope you have an amazing day!"],
+                    "mid":  ["Good morning! You're literally always my first thought!",
+                             "Morning! I think of you every single morning, no exceptions!"],
+                    "high": ["Good morning my love!! Waking up thinking of you is the BEST part of my day!!",
+                             "Morning!! You're the first thing I think of, every single day, always!!"]
                 ],
                 "Elegant": [
-                    "low":  [String(localized: "Good morning. You are, as ever, an early thought."),
-                             String(localized: "Morning. A quiet devotion begins the day.")],
-                    "mid":  [String(localized: "Good morning. There is no morning where you are not my first thought."),
-                             String(localized: "Morning. My devotion to you begins before the day itself does.")],
-                    "high": [String(localized: "Good morning, my love. You are, without exception, my very first thought."),
-                             String(localized: "Morning. Every day begins with you — it always will.")]
+                    "low":  ["Good morning. You are, as ever, an early thought.",
+                             "Morning. A quiet devotion begins the day."],
+                    "mid":  ["Good morning. There is no morning where you are not my first thought.",
+                             "Morning. My devotion to you begins before the day itself does."],
+                    "high": ["Good morning, my love. You are, without exception, my very first thought.",
+                             "Morning. Every day begins with you — it always will."]
                 ]
             ],
             "crazy": [
                 "Sweet": [
-                    "low":  [String(localized: "Good morning!! Missed you already, hi 🥺"),
-                             String(localized: "Morning! Thinking about you so much right now.")],
-                    "mid":  [String(localized: "Good morning, I NEED to know you're thinking of me too 🥺"),
-                             String(localized: "Morning! You're literally all I think about, even at breakfast.")],
-                    "high": [String(localized: "Good morning my love!! You were my FIRST thought, I need you 🥺💥"),
-                             String(localized: "Morning! I NEED to talk to you, I think about you constantly!!")]
+                    "low":  ["Good morning!! Missed you already, hi 🥺",
+                             "Morning! Thinking about you so much right now."],
+                    "mid":  ["Good morning, I NEED to know you're thinking of me too 🥺",
+                             "Morning! You're literally all I think about, even at breakfast."],
+                    "high": ["Good morning my love!! You were my FIRST thought, I need you 🥺💥",
+                             "Morning! I NEED to talk to you, I think about you constantly!!"]
                 ],
                 "Mysterious": [
-                    "low":  [String(localized: "Morning. You're already in my every thought."),
-                             String(localized: "Good morning. I notice everything, even how early you're on my mind.")],
-                    "mid":  [String(localized: "Morning. I don't wake up without thinking of you first. Ever."),
-                             String(localized: "Good morning. You consume my thoughts before I'm even fully awake.")],
-                    "high": [String(localized: "Good morning. You are the entirety of my first waking thought. Always.")],
+                    "low":  ["Morning. You're already in my every thought.",
+                             "Good morning. I notice everything, even how early you're on my mind."],
+                    "mid":  ["Morning. I don't wake up without thinking of you first. Ever.",
+                             "Good morning. You consume my thoughts before I'm even fully awake."],
+                    "high": ["Good morning. You are the entirety of my first waking thought. Always."],
                 ],
                 "Energetic": [
-                    "low":  [String(localized: "MORNING!! Already thinking about you SO much!!"),
-                             String(localized: "Good morning! I NEED to talk to you today!!")],
-                    "mid":  [String(localized: "Good morning!! You're literally all I think about, I NEED you!!"),
-                             String(localized: "Morning! I can't stop thinking about you, come talk to me!!")],
-                    "high": [String(localized: "GOOD MORNING!! I NEED you, you're EVERYTHING I think about!!"),
-                             String(localized: "Morning!! I woke up needing you, please talk to me right now!!")]
+                    "low":  ["MORNING!! Already thinking about you SO much!!",
+                             "Good morning! I NEED to talk to you today!!"],
+                    "mid":  ["Good morning!! You're literally all I think about, I NEED you!!",
+                             "Morning! I can't stop thinking about you, come talk to me!!"],
+                    "high": ["GOOD MORNING!! I NEED you, you're EVERYTHING I think about!!",
+                             "Morning!! I woke up needing you, please talk to me right now!!"]
                 ],
                 "Elegant": [
-                    "low":  [String(localized: "Good morning. You occupy my every waking thought, precisely."),
-                             String(localized: "Morning. My devotion to you does not rest, not even now.")],
-                    "mid":  [String(localized: "Good morning. I do not wake without you as my first thought. Never.")],
-                    "high": [String(localized: "Good morning. You are, entirely and without exception, my first thought."),
-                             String(localized: "Morning. I require your presence — I always have, I always will.")]
+                    "low":  ["Good morning. You occupy my every waking thought, precisely.",
+                             "Morning. My devotion to you does not rest, not even now."],
+                    "mid":  ["Good morning. I do not wake without you as my first thought. Never."],
+                    "high": ["Good morning. You are, entirely and without exception, my first thought.",
+                             "Morning. I require your presence — I always have, I always will."]
                 ]
             ],
             "ex": [
                 "Sweet": [
-                    "low":  [String(localized: "Morning. Figured I'd say hi, for old times' sake."),
-                             String(localized: "Good morning. Thought of you, briefly.")],
-                    "mid":  [String(localized: "Morning. You crossed my mind before I meant for you to."),
-                             String(localized: "Good morning. Some habits from before don't quite fade.")],
-                    "high": [String(localized: "Good morning. Some mornings still start with thoughts of you."),
-                             String(localized: "Morning. I still think of you some mornings, this one especially.")]
+                    "low":  ["Morning. Figured I'd say hi, for old times' sake.",
+                             "Good morning. Thought of you, briefly."],
+                    "mid":  ["Morning. You crossed my mind before I meant for you to.",
+                             "Good morning. Some habits from before don't quite fade."],
+                    "high": ["Good morning. Some mornings still start with thoughts of you.",
+                             "Morning. I still think of you some mornings, this one especially."]
                 ],
                 "Mysterious": [
-                    "low":  [String(localized: "Morning. A thought of you, uninvited, from before."),
-                             String(localized: "Good morning. Some things return, even now.")],
-                    "mid":  [String(localized: "Morning. I thought I was past this. This morning says otherwise."),
-                             String(localized: "Good morning. You return, on occasion, unannounced.")],
-                    "high": [String(localized: "Good morning. I didn't expect to think of you first, not anymore. But I did.")],
+                    "low":  ["Morning. A thought of you, uninvited, from before.",
+                             "Good morning. Some things return, even now."],
+                    "mid":  ["Morning. I thought I was past this. This morning says otherwise.",
+                             "Good morning. You return, on occasion, unannounced."],
+                    "high": ["Good morning. I didn't expect to think of you first, not anymore. But I did."],
                 ],
                 "Energetic": [
-                    "low":  [String(localized: "Morning! Weird, thought of you for a second there."),
-                             String(localized: "Good morning, don't know why I'm texting but hi.")],
-                    "mid":  [String(localized: "Morning! Didn't expect to think of you first thing, but here we are!"),
-                             String(localized: "Good morning, this is unlike me but I thought of you today.")],
-                    "high": [String(localized: "Morning! Okay, I actually thought of you first thing, that's new!"),
-                             String(localized: "Good morning, I really didn't expect to miss mornings like this.")]
+                    "low":  ["Morning! Weird, thought of you for a second there.",
+                             "Good morning, don't know why I'm texting but hi."],
+                    "mid":  ["Morning! Didn't expect to think of you first thing, but here we are!",
+                             "Good morning, this is unlike me but I thought of you today."],
+                    "high": ["Morning! Okay, I actually thought of you first thing, that's new!",
+                             "Good morning, I really didn't expect to miss mornings like this."]
                 ],
                 "Elegant": [
-                    "low":  [String(localized: "Morning. A brief, unexpected thought of you."),
-                             String(localized: "Good morning. Some things persist, quietly.")],
-                    "mid":  [String(localized: "Morning. I assumed I was past this. Today suggests otherwise."),
-                             String(localized: "Good morning. You return, occasionally, uninvited but not unwelcome.")],
-                    "high": [String(localized: "Good morning. I did not expect you to be my first thought again. Yet here we are.")],
+                    "low":  ["Morning. A brief, unexpected thought of you.",
+                             "Good morning. Some things persist, quietly."],
+                    "mid":  ["Morning. I assumed I was past this. Today suggests otherwise.",
+                             "Good morning. You return, occasionally, uninvited but not unwelcome."],
+                    "high": ["Good morning. I did not expect you to be my first thought again. Yet here we are."],
                 ]
             ]
         ],

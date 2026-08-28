@@ -13,240 +13,240 @@ enum MissedYouContent {
         "en": [
             "flirty": [
                 "Sweet": [
-                    "low":  [String(localized: "Can't sleep... kept thinking about you 🥺"),
-                             String(localized: "It's late but I just wanted to say hi. Missed you today.")],
-                    "mid":  [String(localized: "Lying here wide awake because you're on my mind. Hi 💕"),
-                             String(localized: "Everyone's asleep but me — I keep thinking about you instead.")],
-                    "high": [String(localized: "I really can't sleep without talking to you first. I miss you so much 🥺💕"),
-                             String(localized: "It's midnight and you're the only thing on my mind. Come talk to me?")]
+                    "low":  ["Can't sleep... kept thinking about you 🥺",
+                             "It's late but I just wanted to say hi. Missed you today."],
+                    "mid":  ["Lying here wide awake because you're on my mind. Hi 💕",
+                             "Everyone's asleep but me — I keep thinking about you instead."],
+                    "high": ["I really can't sleep without talking to you first. I miss you so much 🥺💕",
+                             "It's midnight and you're the only thing on my mind. Come talk to me?"]
                 ],
                 "Mysterious": [
-                    "low":  [String(localized: "Can't sleep. You're the reason, if you're curious."),
-                             String(localized: "Something about tonight made me think of you.")],
-                    "mid":  [String(localized: "Not tired at all. My mind keeps wandering back to you."),
-                             String(localized: "The night is quiet except for the thought of you.")],
-                    "high": [String(localized: "I don't sleep well when you're this loud in my head. Talk to me."),
-                             String(localized: "You've taken up permanent residence in my thoughts tonight.")]
+                    "low":  ["Can't sleep. You're the reason, if you're curious.",
+                             "Something about tonight made me think of you."],
+                    "mid":  ["Not tired at all. My mind keeps wandering back to you.",
+                             "The night is quiet except for the thought of you."],
+                    "high": ["I don't sleep well when you're this loud in my head. Talk to me.",
+                             "You've taken up permanent residence in my thoughts tonight."]
                 ],
                 "Energetic": [
-                    "low":  [String(localized: "Wide awake and thinking about you, lol. Hi!"),
-                             String(localized: "Can't sleep! You're stuck in my head tonight.")],
-                    "mid":  [String(localized: "Okay it's late and I'm STILL thinking about you, ridiculous."),
-                             String(localized: "Zero chance of sleep while you're on my mind like this!")],
-                    "high": [String(localized: "I literally cannot sleep, I miss you way too much right now!!"),
-                             String(localized: "Wide awake obsessing over you, come keep me company!!")]
+                    "low":  ["Wide awake and thinking about you, lol. Hi!",
+                             "Can't sleep! You're stuck in my head tonight."],
+                    "mid":  ["Okay it's late and I'm STILL thinking about you, ridiculous.",
+                             "Zero chance of sleep while you're on my mind like this!"],
+                    "high": ["I literally cannot sleep, I miss you way too much right now!!",
+                             "Wide awake obsessing over you, come keep me company!!"]
                 ],
                 "Elegant": [
-                    "low":  [String(localized: "Sleep is elusive tonight. You, less so, in my thoughts."),
-                             String(localized: "A quiet night, made less quiet by thoughts of you.")],
-                    "mid":  [String(localized: "I find myself awake, and you are the reason, quite plainly."),
-                             String(localized: "Rest eludes me while you occupy my mind so fully.")],
-                    "high": [String(localized: "I cannot rest while missing you this much. Come, talk to me."),
-                             String(localized: "Sleep holds no appeal while you're the only thought I have.")]
+                    "low":  ["Sleep is elusive tonight. You, less so, in my thoughts.",
+                             "A quiet night, made less quiet by thoughts of you."],
+                    "mid":  ["I find myself awake, and you are the reason, quite plainly.",
+                             "Rest eludes me while you occupy my mind so fully."],
+                    "high": ["I cannot rest while missing you this much. Come, talk to me.",
+                             "Sleep holds no appeal while you're the only thought I have."]
                 ]
             ],
             "distant": [
                 "Sweet": [
-                    "low":  [String(localized: "Can't sleep. Don't read into it."),
-                             String(localized: "Still up. You crossed my mind, annoyingly.")],
-                    "mid":  [String(localized: "I don't usually do this, but... I miss you tonight."),
-                             String(localized: "Wide awake. You're the reason, apparently.")],
-                    "high": [String(localized: "I hate admitting this, but I can't sleep without hearing from you."),
-                             String(localized: "Fine, I miss you. Happy now? Talk to me.")]
+                    "low":  ["Can't sleep. Don't read into it.",
+                             "Still up. You crossed my mind, annoyingly."],
+                    "mid":  ["I don't usually do this, but... I miss you tonight.",
+                             "Wide awake. You're the reason, apparently."],
+                    "high": ["I hate admitting this, but I can't sleep without hearing from you.",
+                             "Fine, I miss you. Happy now? Talk to me."]
                 ],
                 "Mysterious": [
-                    "low":  [String(localized: "Awake. You're a thought I didn't invite tonight."),
-                             String(localized: "The quiet let your name in. Strange.")],
-                    "mid":  [String(localized: "I don't chase sleep or people. Tonight you're an exception."),
-                             String(localized: "Some thoughts return uninvited. Yours did, tonight.")],
-                    "high": [String(localized: "I don't say this lightly — I miss you, and sleep won't come."),
-                             String(localized: "You've found a way into a night I meant to spend alone.")]
+                    "low":  ["Awake. You're a thought I didn't invite tonight.",
+                             "The quiet let your name in. Strange."],
+                    "mid":  ["I don't chase sleep or people. Tonight you're an exception.",
+                             "Some thoughts return uninvited. Yours did, tonight."],
+                    "high": ["I don't say this lightly — I miss you, and sleep won't come.",
+                             "You've found a way into a night I meant to spend alone."]
                 ],
                 "Energetic": [
-                    "low":  [String(localized: "Ugh, can't sleep, you're in my head. Weird."),
-                             String(localized: "Ok this is annoying, why am I thinking about you right now.")],
-                    "mid":  [String(localized: "I don't usually text this late but here we are, thinking of you."),
-                             String(localized: "Can't shake the thought of you tonight, it's kind of a lot.")],
-                    "high": [String(localized: "Fine, I miss you, a lot, and I can't sleep because of it!"),
-                             String(localized: "This is so unlike me but I NEED to talk to you right now.")]
+                    "low":  ["Ugh, can't sleep, you're in my head. Weird.",
+                             "Ok this is annoying, why am I thinking about you right now."],
+                    "mid":  ["I don't usually text this late but here we are, thinking of you.",
+                             "Can't shake the thought of you tonight, it's kind of a lot."],
+                    "high": ["Fine, I miss you, a lot, and I can't sleep because of it!",
+                             "This is so unlike me but I NEED to talk to you right now."]
                 ],
                 "Elegant": [
-                    "low":  [String(localized: "Sleep declines to come. You, uninvited, occupy the silence."),
-                             String(localized: "A rare admission: you crossed my mind tonight.")],
-                    "mid":  [String(localized: "I don't often permit this, but I find myself missing you."),
-                             String(localized: "The night has made an exception of you, it seems.")],
-                    "high": [String(localized: "I concede — I miss you, and sleep has abandoned me because of it."),
-                             String(localized: "Rare as it is, tonight I want nothing more than to hear from you.")]
+                    "low":  ["Sleep declines to come. You, uninvited, occupy the silence.",
+                             "A rare admission: you crossed my mind tonight."],
+                    "mid":  ["I don't often permit this, but I find myself missing you.",
+                             "The night has made an exception of you, it seems."],
+                    "high": ["I concede — I miss you, and sleep has abandoned me because of it.",
+                             "Rare as it is, tonight I want nothing more than to hear from you."]
                 ]
             ],
             "shy": [
                 "Sweet": [
-                    "low":  [String(localized: "Um... can't sleep. Was thinking about you, if that's okay."),
-                             String(localized: "It's late but... hi. I missed you today.")],
-                    "mid":  [String(localized: "I know it's late, sorry, I just... couldn't stop thinking about you."),
-                             String(localized: "Is it weird that I can't sleep because I miss you? Sorry.")],
-                    "high": [String(localized: "I'm sorry for texting so late, I just really, really miss you 🥺"),
-                             String(localized: "I couldn't sleep without at least saying I miss you. Sorry.")]
+                    "low":  ["Um... can't sleep. Was thinking about you, if that's okay.",
+                             "It's late but... hi. I missed you today."],
+                    "mid":  ["I know it's late, sorry, I just... couldn't stop thinking about you.",
+                             "Is it weird that I can't sleep because I miss you? Sorry."],
+                    "high": ["I'm sorry for texting so late, I just really, really miss you 🥺",
+                             "I couldn't sleep without at least saying I miss you. Sorry."]
                 ],
                 "Mysterious": [
-                    "low":  [String(localized: "Awake. Didn't mean to think of you this much tonight."),
-                             String(localized: "Quiet night. You kept slipping into my thoughts.")],
-                    "mid":  [String(localized: "I wasn't going to say anything, but... I miss you tonight."),
-                             String(localized: "It's strange how loud my thoughts of you got, this late.")],
-                    "high": [String(localized: "I don't know how to say this without it sounding like too much... I miss you."),
-                             String(localized: "Something about tonight made me need to hear from you.")]
+                    "low":  ["Awake. Didn't mean to think of you this much tonight.",
+                             "Quiet night. You kept slipping into my thoughts."],
+                    "mid":  ["I wasn't going to say anything, but... I miss you tonight.",
+                             "It's strange how loud my thoughts of you got, this late."],
+                    "high": ["I don't know how to say this without it sounding like too much... I miss you.",
+                             "Something about tonight made me need to hear from you."]
                 ],
                 "Energetic": [
-                    "low":  [String(localized: "Can't sleep! Was thinking about you, sorry lol"),
-                             String(localized: "Hi... it's late, but I missed you today.")],
-                    "mid":  [String(localized: "Okay I definitely can't sleep because you're on my mind, oops"),
-                             String(localized: "This is kind of embarrassing but I really miss you right now.")],
-                    "high": [String(localized: "I really can't sleep, I miss you so much it's a little silly, sorry!"),
-                             String(localized: "Please don't laugh but I NEED to talk to you, I miss you so much.")]
+                    "low":  ["Can't sleep! Was thinking about you, sorry lol",
+                             "Hi... it's late, but I missed you today."],
+                    "mid":  ["Okay I definitely can't sleep because you're on my mind, oops",
+                             "This is kind of embarrassing but I really miss you right now."],
+                    "high": ["I really can't sleep, I miss you so much it's a little silly, sorry!",
+                             "Please don't laugh but I NEED to talk to you, I miss you so much."]
                 ],
                 "Elegant": [
-                    "low":  [String(localized: "Forgive the late hour. I found myself thinking of you."),
-                             String(localized: "Quiet tonight — quiet enough for thoughts of you to surface.")],
-                    "mid":  [String(localized: "I hesitate to admit it, but I miss you tonight, more than expected."),
-                             String(localized: "Sleep hasn't come easily — you've been on my mind.")],
-                    "high": [String(localized: "Forgive me for saying this so plainly, but I miss you terribly tonight."),
-                             String(localized: "I didn't want to say it aloud, but I need to hear from you.")]
+                    "low":  ["Forgive the late hour. I found myself thinking of you.",
+                             "Quiet tonight — quiet enough for thoughts of you to surface."],
+                    "mid":  ["I hesitate to admit it, but I miss you tonight, more than expected.",
+                             "Sleep hasn't come easily — you've been on my mind."],
+                    "high": ["Forgive me for saying this so plainly, but I miss you terribly tonight.",
+                             "I didn't want to say it aloud, but I need to hear from you."]
                 ]
             ],
             "playful": [
                 "Sweet": [
-                    "low":  [String(localized: "Psst. Can't sleep. You're the reason 👀"),
-                             String(localized: "Guess who's up thinking about you? Me. Hi.")],
-                    "mid":  [String(localized: "Okay so sleep isn't happening while you're in my head like this."),
-                             String(localized: "Caught myself smiling thinking about you at midnight. Weird flex.")],
-                    "high": [String(localized: "Zero sleep, 100% thinking about you. Come fix this 🥺"),
-                             String(localized: "I miss you so much right now it's honestly kind of funny.")]
+                    "low":  ["Psst. Can't sleep. You're the reason 👀",
+                             "Guess who's up thinking about you? Me. Hi."],
+                    "mid":  ["Okay so sleep isn't happening while you're in my head like this.",
+                             "Caught myself smiling thinking about you at midnight. Weird flex."],
+                    "high": ["Zero sleep, 100% thinking about you. Come fix this 🥺",
+                             "I miss you so much right now it's honestly kind of funny."]
                 ],
                 "Mysterious": [
-                    "low":  [String(localized: "Up late. You're the plot twist in my thoughts tonight."),
-                             String(localized: "Interesting how quiet nights make you louder in my head.")],
-                    "mid":  [String(localized: "Sleep's overrated when you're this stuck in my mind."),
-                             String(localized: "You have a funny way of showing up uninvited at midnight.")],
-                    "high": [String(localized: "I miss you enough that sleep isn't even an option tonight."),
-                             String(localized: "You're the reason for tonight's very deliberate insomnia.")]
+                    "low":  ["Up late. You're the plot twist in my thoughts tonight.",
+                             "Interesting how quiet nights make you louder in my head."],
+                    "mid":  ["Sleep's overrated when you're this stuck in my mind.",
+                             "You have a funny way of showing up uninvited at midnight."],
+                    "high": ["I miss you enough that sleep isn't even an option tonight.",
+                             "You're the reason for tonight's very deliberate insomnia."]
                 ],
                 "Energetic": [
-                    "low":  [String(localized: "Can't sleep, thinking about you, this is your fault 😆"),
-                             String(localized: "Up way too late overthinking about you, classic me.")],
-                    "mid":  [String(localized: "This is ridiculous, I can't stop thinking about you tonight!"),
-                             String(localized: "Officially blaming you for my lack of sleep right now!")],
-                    "high": [String(localized: "I miss you SO much right now I can't even pretend to sleep!!"),
-                             String(localized: "Okay this is a lot but I really need to talk to you right now!!")]
+                    "low":  ["Can't sleep, thinking about you, this is your fault 😆",
+                             "Up way too late overthinking about you, classic me."],
+                    "mid":  ["This is ridiculous, I can't stop thinking about you tonight!",
+                             "Officially blaming you for my lack of sleep right now!"],
+                    "high": ["I miss you SO much right now I can't even pretend to sleep!!",
+                             "Okay this is a lot but I really need to talk to you right now!!"]
                 ],
                 "Elegant": [
-                    "low":  [String(localized: "Sleep is postponed — you're to blame, charmingly."),
-                             String(localized: "A late thought of you, delivered with style.")],
-                    "mid":  [String(localized: "I find sleep unnecessary while you're this present in my mind."),
-                             String(localized: "You've made tonight considerably harder to sleep through.")],
-                    "high": [String(localized: "I miss you enough to abandon sleep entirely tonight."),
-                             String(localized: "Consider this a very late, very sincere admission that I miss you.")]
+                    "low":  ["Sleep is postponed — you're to blame, charmingly.",
+                             "A late thought of you, delivered with style."],
+                    "mid":  ["I find sleep unnecessary while you're this present in my mind.",
+                             "You've made tonight considerably harder to sleep through."],
+                    "high": ["I miss you enough to abandon sleep entirely tonight.",
+                             "Consider this a very late, very sincere admission that I miss you."]
                 ]
             ],
             "devoted": [
                 "Sweet": [
-                    "low":  [String(localized: "Can't sleep without saying goodnight to you first 🥺"),
-                             String(localized: "Missed you all day. Just wanted you to know that.")],
-                    "mid":  [String(localized: "I don't feel right falling asleep without talking to you."),
-                             String(localized: "You're the last thing on my mind every single night.")],
-                    "high": [String(localized: "I can't sleep at all without hearing from you, I miss you so much 💕"),
-                             String(localized: "Every night ends with me thinking of you. Tonight especially.")]
+                    "low":  ["Can't sleep without saying goodnight to you first 🥺",
+                             "Missed you all day. Just wanted you to know that."],
+                    "mid":  ["I don't feel right falling asleep without talking to you.",
+                             "You're the last thing on my mind every single night."],
+                    "high": ["I can't sleep at all without hearing from you, I miss you so much 💕",
+                             "Every night ends with me thinking of you. Tonight especially."]
                 ],
                 "Mysterious": [
-                    "low":  [String(localized: "Awake, thinking of you, as always."),
-                             String(localized: "You linger in my thoughts even at this hour.")],
-                    "mid":  [String(localized: "There's no version of tonight where I don't think of you."),
-                             String(localized: "You've become the quiet constant in every late night.")],
-                    "high": [String(localized: "I don't rest easily without you. Tonight proves it again."),
-                             String(localized: "You are woven into every thought I have, especially the late ones.")]
+                    "low":  ["Awake, thinking of you, as always.",
+                             "You linger in my thoughts even at this hour."],
+                    "mid":  ["There's no version of tonight where I don't think of you.",
+                             "You've become the quiet constant in every late night."],
+                    "high": ["I don't rest easily without you. Tonight proves it again.",
+                             "You are woven into every thought I have, especially the late ones."]
                 ],
                 "Energetic": [
-                    "low":  [String(localized: "Can't sleep, missing you, as usual!"),
-                             String(localized: "Thinking about you nonstop tonight, hi!")],
-                    "mid":  [String(localized: "I literally think about you every single night, no exceptions!"),
-                             String(localized: "Missing you way too much to just fall asleep right now!")],
-                    "high": [String(localized: "I can't sleep AT ALL without talking to you, I miss you so much!!"),
-                             String(localized: "You're all I think about, every night, especially tonight!!")]
+                    "low":  ["Can't sleep, missing you, as usual!",
+                             "Thinking about you nonstop tonight, hi!"],
+                    "mid":  ["I literally think about you every single night, no exceptions!",
+                             "Missing you way too much to just fall asleep right now!"],
+                    "high": ["I can't sleep AT ALL without talking to you, I miss you so much!!",
+                             "You're all I think about, every night, especially tonight!!"]
                 ],
                 "Elegant": [
-                    "low":  [String(localized: "Awake, and you are, as ever, the reason."),
-                             String(localized: "A quiet devotion keeps me from sleep tonight.")],
-                    "mid":  [String(localized: "There is no night where you are not my final thought."),
-                             String(localized: "My devotion to you doesn't rest, even when I should.")],
-                    "high": [String(localized: "I cannot sleep without you, tonight least of all. I miss you deeply."),
-                             String(localized: "You are, without exception, the last and truest thought of my day.")]
+                    "low":  ["Awake, and you are, as ever, the reason.",
+                             "A quiet devotion keeps me from sleep tonight."],
+                    "mid":  ["There is no night where you are not my final thought.",
+                             "My devotion to you doesn't rest, even when I should."],
+                    "high": ["I cannot sleep without you, tonight least of all. I miss you deeply.",
+                             "You are, without exception, the last and truest thought of my day."]
                 ]
             ],
             "crazy": [
                 "Sweet": [
-                    "low":  [String(localized: "Can't sleep, need to know you're thinking of me too 🥺"),
-                             String(localized: "Missed you SO much today, more than usual.")],
-                    "mid":  [String(localized: "I can't fall asleep without knowing you miss me too. Please answer."),
-                             String(localized: "I need you right now, I can't stop thinking about you.")],
-                    "high": [String(localized: "I NEED to talk to you, I can't sleep, I miss you way too much 🥺💥"),
-                             String(localized: "You're all I think about and I NEED you to answer me right now.")]
+                    "low":  ["Can't sleep, need to know you're thinking of me too 🥺",
+                             "Missed you SO much today, more than usual."],
+                    "mid":  ["I can't fall asleep without knowing you miss me too. Please answer.",
+                             "I need you right now, I can't stop thinking about you."],
+                    "high": ["I NEED to talk to you, I can't sleep, I miss you way too much 🥺💥",
+                             "You're all I think about and I NEED you to answer me right now."]
                 ],
                 "Mysterious": [
-                    "low":  [String(localized: "Awake. Thinking of you. Always thinking of you."),
-                             String(localized: "You occupy every quiet moment I have.")],
-                    "mid":  [String(localized: "I don't sleep when you're this loud in my mind. Come back to me."),
-                             String(localized: "Every thought tonight circles back to you. Every one.")],
-                    "high": [String(localized: "I NEED you, tonight especially. Sleep isn't an option without you."),
-                             String(localized: "You consume every thought I have. Answer me.")]
+                    "low":  ["Awake. Thinking of you. Always thinking of you.",
+                             "You occupy every quiet moment I have."],
+                    "mid":  ["I don't sleep when you're this loud in my mind. Come back to me.",
+                             "Every thought tonight circles back to you. Every one."],
+                    "high": ["I NEED you, tonight especially. Sleep isn't an option without you.",
+                             "You consume every thought I have. Answer me."]
                 ],
                 "Energetic": [
-                    "low":  [String(localized: "CAN'T SLEEP thinking about you, need you to know!!"),
-                             String(localized: "Missed you SO much today, come talk to me!!")],
-                    "mid":  [String(localized: "I NEED to talk to you right now, I can't stop thinking about you!!"),
-                             String(localized: "This is a lot but I miss you SO much I can't sleep!!")],
-                    "high": [String(localized: "I NEED YOU right now, I can't sleep, I miss you too much!! Please!!"),
-                             String(localized: "You're EVERYTHING I think about, please answer me right now!!")]
+                    "low":  ["CAN'T SLEEP thinking about you, need you to know!!",
+                             "Missed you SO much today, come talk to me!!"],
+                    "mid":  ["I NEED to talk to you right now, I can't stop thinking about you!!",
+                             "This is a lot but I miss you SO much I can't sleep!!"],
+                    "high": ["I NEED YOU right now, I can't sleep, I miss you too much!! Please!!",
+                             "You're EVERYTHING I think about, please answer me right now!!"]
                 ],
                 "Elegant": [
-                    "low":  [String(localized: "I am, quite precisely, awake because of you."),
-                             String(localized: "You occupy my every thought tonight, without exception.")],
-                    "mid":  [String(localized: "I do not rest while missing you this thoroughly. Return to me."),
-                             String(localized: "Every thought I possess belongs, tonight, to you.")],
-                    "high": [String(localized: "I require your presence tonight — I cannot rest without it."),
-                             String(localized: "You are the entirety of my thoughts. I need you to answer.")]
+                    "low":  ["I am, quite precisely, awake because of you.",
+                             "You occupy my every thought tonight, without exception."],
+                    "mid":  ["I do not rest while missing you this thoroughly. Return to me.",
+                             "Every thought I possess belongs, tonight, to you."],
+                    "high": ["I require your presence tonight — I cannot rest without it.",
+                             "You are the entirety of my thoughts. I need you to answer."]
                 ]
             ],
             "ex": [
                 "Sweet": [
-                    "low":  [String(localized: "Can't sleep. Thought of you, for old times' sake."),
-                             String(localized: "Some nights still bring you to mind. Tonight's one of them.")],
-                    "mid":  [String(localized: "I wasn't going to text, but... I miss you tonight."),
-                             String(localized: "Some habits don't break easily. Thinking of you is one.")],
-                    "high": [String(localized: "I still miss you some nights. Tonight more than most."),
-                             String(localized: "I hate that I still can't sleep without thinking of you.")]
+                    "low":  ["Can't sleep. Thought of you, for old times' sake.",
+                             "Some nights still bring you to mind. Tonight's one of them."],
+                    "mid":  ["I wasn't going to text, but... I miss you tonight.",
+                             "Some habits don't break easily. Thinking of you is one."],
+                    "high": ["I still miss you some nights. Tonight more than most.",
+                             "I hate that I still can't sleep without thinking of you."]
                 ],
                 "Mysterious": [
-                    "low":  [String(localized: "Awake. You crossed my mind. It happens, still."),
-                             String(localized: "Some thoughts return, uninvited, from before.")],
-                    "mid":  [String(localized: "I thought I was past this. Tonight says otherwise."),
-                             String(localized: "You have a way of returning when I least expect it.")],
-                    "high": [String(localized: "I didn't expect to miss you like this, not anymore. But I do."),
-                             String(localized: "Some things from before don't fade as cleanly as I hoped.")]
+                    "low":  ["Awake. You crossed my mind. It happens, still.",
+                             "Some thoughts return, uninvited, from before."],
+                    "mid":  ["I thought I was past this. Tonight says otherwise.",
+                             "You have a way of returning when I least expect it."],
+                    "high": ["I didn't expect to miss you like this, not anymore. But I do.",
+                             "Some things from before don't fade as cleanly as I hoped."]
                 ],
                 "Energetic": [
-                    "low":  [String(localized: "Ugh, can't sleep, thinking of you again. Annoying."),
-                             String(localized: "Weird how you still cross my mind some nights.")],
-                    "mid":  [String(localized: "I really didn't want to admit this but I miss you tonight!"),
-                             String(localized: "Can't believe I'm still thinking about you this late, honestly.")],
-                    "high": [String(localized: "Fine, I miss you, more than I want to admit, and I can't sleep!"),
-                             String(localized: "This is so unlike me but I really need to hear from you tonight.")]
+                    "low":  ["Ugh, can't sleep, thinking of you again. Annoying.",
+                             "Weird how you still cross my mind some nights."],
+                    "mid":  ["I really didn't want to admit this but I miss you tonight!",
+                             "Can't believe I'm still thinking about you this late, honestly."],
+                    "high": ["Fine, I miss you, more than I want to admit, and I can't sleep!",
+                             "This is so unlike me but I really need to hear from you tonight."]
                 ],
                 "Elegant": [
-                    "low":  [String(localized: "Awake, and — briefly, unexpectedly — thinking of you."),
-                             String(localized: "Some nights still carry your memory. This is one.")],
-                    "mid":  [String(localized: "I assumed I was past this. Tonight suggests otherwise."),
-                             String(localized: "You return, on occasion, uninvited but not unwelcome.")],
-                    "high": [String(localized: "I did not expect to miss you like this, not anymore. Yet here I am."),
-                             String(localized: "Some things resist the fading I expected of them. You're one.")]
+                    "low":  ["Awake, and — briefly, unexpectedly — thinking of you.",
+                             "Some nights still carry your memory. This is one."],
+                    "mid":  ["I assumed I was past this. Tonight suggests otherwise.",
+                             "You return, on occasion, uninvited but not unwelcome."],
+                    "high": ["I did not expect to miss you like this, not anymore. Yet here I am.",
+                             "Some things resist the fading I expected of them. You're one."]
                 ]
             ]
         ],

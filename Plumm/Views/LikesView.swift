@@ -184,7 +184,7 @@ private struct LikeCard: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(character.nameWithAge)
                         .font(.system(size: 15, weight: .bold)).foregroundStyle(.white)
-                    Text([character.profession, character.category].compactMap { $0 }.joined(separator: " · "))
+                    Text([character.localizedProfession, character.category].compactMap { $0 }.joined(separator: " · "))
                         .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(.white.opacity(0.8)).lineLimit(1)
                 }

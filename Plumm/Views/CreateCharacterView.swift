@@ -421,7 +421,7 @@ struct CreateCharacterView: View {
                 LinearGradient(colors: [.clear, .black.opacity(0.75)], startPoint: .center, endPoint: .bottom)
             }
             .overlay(alignment: .bottomLeading) {
-                Text(opt)
+                Text(LocalizedStringKey(opt))
                     .font(.system(size: 16, weight: .bold)).foregroundStyle(.white).padding(12)
             }
             .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
@@ -650,7 +650,11 @@ struct CreateCharacterView: View {
                         // alttan koyu degrade.
                         LinearGradient(colors: [.clear, .black.opacity(0.7)],
                                        startPoint: .center, endPoint: .bottom)
-                        Text(c)
+                        // c is the DB/prompt canonical value (English, e.g.
+                        // AppearanceOptions.eyeColors) — LocalizedStringKey
+                        // looks the same string up in the catalog for
+                        // display; falls back to c itself if no entry.
+                        Text(LocalizedStringKey(c))
                             .font(.system(size: 16, weight: .bold))
                             .foregroundStyle(.white)
                             .padding(.leading, 16).padding(.bottom, 12)
@@ -689,7 +693,12 @@ struct CreateCharacterView: View {
             Image(asset).resizable().scaledToFill()
                 .frame(maxWidth: .infinity).frame(height: height).clipped()
             LinearGradient(colors: [.clear, .black.opacity(0.75)], startPoint: .center, endPoint: .bottom)
-            Text(label)
+            // `label` is either an already-localized string (professionOptions)
+            // or a raw English canonical value (AppearanceOptions) — either
+            // way LocalizedStringKey resolves it if there's a catalog match
+            // and falls back to the text itself otherwise, so both callers
+            // are safe.
+            Text(LocalizedStringKey(label))
                 .font(.system(size: 14, weight: .bold)).foregroundStyle(.white)
                 .padding(10)
         }
@@ -708,7 +717,7 @@ struct CreateCharacterView: View {
 
     private func textOptionCard(label: String, selected: Bool) -> some View {
         VStack { Spacer()
-            Text(label).font(.system(size: 16, weight: .semibold))
+            Text(LocalizedStringKey(label)).font(.system(size: 16, weight: .semibold))
                 .foregroundStyle(.white).multilineTextAlignment(.center)
             Spacer() }
         .frame(maxWidth: .infinity).frame(height: 90)
@@ -724,7 +733,7 @@ struct CreateCharacterView: View {
     private func facePreviewOptionCard(feature: FacePreview.Feature, value: String, selected: Bool) -> some View {
         VStack(spacing: 8) {
             facePreviewCard(feature: feature, value: value).frame(width: 56, height: 56)
-            Text(value).font(.system(size: 14, weight: .semibold)).foregroundStyle(.white)
+            Text(LocalizedStringKey(value)).font(.system(size: 14, weight: .semibold)).foregroundStyle(.white)
         }
         .padding(.vertical, 14).frame(maxWidth: .infinity)
         .background(LinearGradient(colors: selected
@@ -815,7 +824,13 @@ struct CreateCharacterView: View {
                     if on { selectedInterests.remove(hobby) }
                     else if !atMax { selectedInterests.insert(hobby) }
                 } label: {
-                    Text(hobby)
+                    // hobby IS the DB value (English canonical, sent verbatim
+                    // in `interests`) — LocalizedStringKey looks the same
+                    // string up in the catalog for display, so storage and
+                    // rendering never diverge (same id/label split as
+                    // roleOptions/professionOptions above, without a
+                    // separate struct since there's no other per-item data).
+                    Text(LocalizedStringKey(hobby))
                         .font(.system(size: 12, weight: on ? .semibold : .medium))
                         .foregroundStyle(on ? AppColor.pinkSoft : Color.white.opacity(0.85))
                         .lineLimit(1).minimumScaleFactor(0.8)
@@ -1191,7 +1206,7 @@ struct CreateCharacterView: View {
                                 .font(.system(size: 26, weight: .bold))
                                 .foregroundStyle(.white)
                         }
-                        if let prof = c.profession, !prof.isEmpty {
+                        if let prof = c.localizedProfession, !prof.isEmpty {
                             Text("\(professionEmoji) \(prof)")
                                 .font(.system(size: 15))
                                 .foregroundStyle(.white.opacity(0.7))
@@ -1400,7 +1415,7 @@ struct CreateCharacterView: View {
                             Text(c.nameWithAge)
                                 .font(.system(size: 22, weight: .bold))
                                 .foregroundStyle(.white)
-                            Text([c.profession, c.category].compactMap { $0 }.joined(separator: " · "))
+                            Text([c.localizedProfession, c.category].compactMap { $0 }.joined(separator: " · "))
                                 .font(.system(size: 14))
                                 .foregroundStyle(.white.opacity(0.7))
                         }
@@ -1540,6 +1555,17 @@ struct CreateCharacterView: View {
                 await generatePhoto()               // en iyi çaba (istek atılır)
             }
             if Task.isCancelled { return }          // kapatıldı → hiçbir şey oluşturma
+            // Üretim başarısızsa (generatedPhotoURL nil) karakteri OLUŞTURMA —
+            // eskiden burada "her durumda karakteri oluştur" ile devam edilirdi,
+            // bu da photo_url/avatar_url NULL bir karakteri (dummy vibe fotosu
+            // arkasında gizli) 50 coin karşılığında yaratıyordu (bkz. Astra
+            // vakası — üretim başarısız oldu ama karakter yine de oluştu).
+            // devMode zaten kendi hata yolunda erken return ediyor (yukarıda).
+            if devMode == nil, generatedPhotoURL == nil {
+                generating = false
+                photoGenError = photoGenError ?? String(localized: "Couldn't generate your character's photo. Please try again.")
+                return
+            }
             // Gerçek fotoğrafı ÖNCEDEN indir ki reveal anında dummy flaşlamasın.
             if let urlStr = generatedPhotoURL, let url = URL(string: urlStr) {
                 var req = URLRequest(url: url)
@@ -1553,7 +1579,7 @@ struct CreateCharacterView: View {
                 }
             }
             if Task.isCancelled { return }
-            await createCharacter()             // her durumda karakteri oluştur
+            await createCharacter()
             if Task.isCancelled { return }
             generating = false
             photoRevealed = true                // blur animasyonsuz, anında kalkar
@@ -1570,7 +1596,7 @@ struct CreateCharacterView: View {
     /// Butonda / başlıkta gösterilecek isim (girilmemişse nötr).
     private var builderName: String {
         let n = capitalizedName(characterName)
-        return n.isEmpty ? String(localized: "Karakter") : n
+        return n.isEmpty ? String(localized: "Character") : n
     }
 
     /// Seçilen mesleğe uygun emoji (profession seçenek listesinden).

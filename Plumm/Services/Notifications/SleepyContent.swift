@@ -14,8 +14,8 @@ import Foundation
 enum SleepyContent {
     private static let byLanguage: [String: (question: String, goodbye: String)] = [
         "en": (
-            question: String(localized: "I want to sleep, if that's ok can we sleep?"),
-            goodbye: String(localized: "I am sleeping, goodnight")
+            question: "I want to sleep, if that's ok can we sleep?",
+            goodbye: "I am sleeping, goodnight"
         ),
         "tr": (
             question: "Uyumak istiyorum, uygunsa uyuyabilir miyiz?",

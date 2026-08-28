@@ -64,7 +64,7 @@ struct GalleryView: View {
                     .font(.system(size: 28, weight: .heavy))
                     .foregroundStyle(.white)
                 HStack(spacing: 8) {
-                    if let prof = character.profession {
+                    if let prof = character.localizedProfession {
                         Text(prof).font(.system(size: 14, weight: .semibold))
                             .foregroundStyle(.white.opacity(0.9))
                     }

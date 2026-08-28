@@ -50,7 +50,7 @@ struct OnboardingSocialProofView: View {
                 HStack(spacing: 8) {
                     Image(systemName: "lock.fill")
                         .font(.system(size: 12))
-                    Text("%100 Private")
+                    Text("100% Private")
                         .font(.system(size: 13, weight: .medium))
                 }
                 .foregroundStyle(.white.opacity(0.7))

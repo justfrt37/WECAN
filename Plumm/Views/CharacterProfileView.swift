@@ -338,7 +338,7 @@ struct CharacterProfileView: View {
                 .font(.system(size: 13, weight: .bold))
                 .tracking(0.5)
                 .foregroundStyle(.white.opacity(0.8))
-            if let profession = character.profession {
+            if let profession = character.localizedProfession {
                 Text(profession)
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(AppColor.pinkSoft)
@@ -364,7 +364,7 @@ struct CharacterProfileView: View {
                 // bu da onu "seçili" gibi gösteriyordu. Seçilebilir bir şey
                 // değil (bu ekranda ilgi alanları salt okunur), o yüzden hepsi
                 // aynı görünüyor (bkz. kullanıcı talebi).
-                ForEach(Array(character.interests.enumerated()), id: \.offset) { _, item in
+                ForEach(Array(character.localizedInterests.enumerated()), id: \.offset) { _, item in
                     interestChip(item, highlighted: false)
                 }
             }

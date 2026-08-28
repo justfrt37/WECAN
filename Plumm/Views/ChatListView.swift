@@ -312,7 +312,7 @@ private struct ChatHistoryRow: View {
             Button(role: .destructive) {
                 Task { await ChatMaintenance.clearChat(character: item.character, store: store) }
             } label: { Label("Clear Chat", systemImage: "eraser") }
-            Button(role: .destructive) { onDelete() } label: { Label("Sil", systemImage: "trash") }
+            Button(role: .destructive) { onDelete() } label: { Label("Delete", systemImage: "trash") }
             if isBlocked {
                 Button {
                     BlockedCharactersStore.unblock(item.character.id)

@@ -19,9 +19,10 @@
 //     yukarıdaki generateImageOnly çağrısından aldığı gerçek üretilmiş URL'dir.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { translateTagline } from "../_shared/tagline-i18n.ts";
+import { translateCharacterFields } from "../_shared/field-i18n.ts";
 import { WEEKLY_CHARACTER_LIMIT, type Tier } from "../_shared/entitlements.ts";
 import { uploadToR2 } from "../_shared/r2.ts";
+import { pickVoiceIdForNewCharacter } from "../_shared/elevenVoiceMap.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -31,7 +32,9 @@ const corsHeaders = {
 
 const XAI_API_KEY = Deno.env.get("XAI_API_KEY") ?? "";
 const XAI_URL = "https://api.x.ai/v1/chat/completions";
-const MODEL = "grok-4-1-fast-non-reasoning";
+// xAI retired grok-4-1-fast-non-reasoning 2026-05-15 (still working today only
+// via a legacy redirect) — pinned to the same model chat/index.ts uses.
+const MODEL = "grok-4.3";
 // docs.x.ai ile doğrulandı (2026-07): POST https://api.x.ai/v1/images/generations,
 // cevap OpenAI SDK deseniyle aynı: response.data[0].url. "grok-imagine-image"
 // (temel katman) 1K VE 2K'da aynı $0.02/görsel — "grok-imagine-image-quality"
@@ -219,7 +222,7 @@ Deno.serve(async (req: Request) => {
     if (!allowance.ok) return json({ error: allowance.error, limit: allowance.limit }, 403);
 
     const interests: string[] = Array.isArray(b.interests) ? b.interests : [];
-    const personality = b.personality ?? "romantik";
+    const personality = b.personality ?? "romantic";
     const gender = b.gender ?? "Kadın";
     const scenario = b.scenario ?? "";
     const category = b.category ?? "Realistic";
@@ -266,20 +269,20 @@ Deno.serve(async (req: Request) => {
 
     let name = providedName ?? "Lumi";
     let age = pickAgeFromRange(ageRange);
-    let bio = "Seninle tanışmayı çok istiyorum 💕";
+    let bio = "I can't wait to meet you 💕";
 
     if (providedName) {
       // Name provided — only generate bio
       const bioPrompt =
-        `${name} adında, ${age} yaşında bir AI arkadaş karakteri için kısa, 1-2 cümlelik birinci şahıs biyografi yaz. ` +
-        `Vibe: ${vibe}. Meslek: ${profession}. ` +
-        `Sıcak, doğal Türkçe ton. SADECE biyografi metnini döndür, tırnak veya JSON yok.`;
+        `Write a short, 1-2 sentence first-person bio for an AI companion character named ${name}, age ${age}. ` +
+        `Vibe: ${vibe}. Profession: ${profession}. ` +
+        `Warm, natural English tone. Return ONLY the bio text, no quotes or JSON.`;
       try { bio = (await grok(bioPrompt, 120)).trim(); } catch (_) {}
     } else {
       // Generate name + bio via Grok
       const metaPrompt =
-        `Bir AI arkadaş karakteri oluştur. Kişilik: ${personality}, vibe: ${vibe}, meslek: ${profession}. ` +
-        `SADECE şu JSON'u döndür, başka hiçbir şey yok: {"name":"<tek isim>","bio":"<sıcak 1-2 cümle birinci şahıs Türkçe tanıtım>"}`;
+        `Create an AI companion character. Personality: ${personality}, vibe: ${vibe}, profession: ${profession}. ` +
+        `Return ONLY this JSON, nothing else: {"name":"<single name>","bio":"<warm 1-2 sentence first-person English intro>"}`;
       try {
         const raw = await grok(metaPrompt, 200);
         const m = raw.match(/\{[\s\S]*\}/);
@@ -291,37 +294,69 @@ Deno.serve(async (req: Request) => {
       } catch (_) {}
     }
 
-    let taglineI18n: Record<string, string> = { tr: bio };
-    try { taglineI18n = await translateTagline(bio, XAI_API_KEY); } catch (e) { console.error("tagline translation failed:", e); }
+    let taglineI18n: Record<string, string> = { en: bio };
+    let professionI18n: Record<string, string> = { en: profession };
+    let interestsI18n: Record<string, string[]> = { en: interests };
+    try {
+      const translated = await translateCharacterFields({ tagline: bio, profession, interests }, XAI_API_KEY);
+      taglineI18n = translated.tagline;
+      professionI18n = translated.profession;
+      interestsI18n = translated.interests;
+    } catch (e) { console.error("field translation failed:", e); }
 
-    // 2) System prompt — role-aware
-    const langRule = "Her zaman Türkçe konuş. Kullanıcı başka dilde yazarsa veya başka dil isterse o dile geç; aksi takdirde SADECE Türkçe.";
-    // Not: "kısa ve soğuk cevap ver" gibi doğrudan üslup talimatları modeli robotik/
-    // müşteri-hizmetleri kalıplarına ("Başka bir şey mi var?" vb.) itiyor. Bunun yerine
-    // NİYETİ (mesafeli/ilerlemiş görünmek) tarif ediyoruz; HANGİ CÜMLEYLE anlatacağını
-    // her seferinde kendisi, doğal ve çeşitlendirerek seçsin (bkz. chat/index.ts DOĞALLIK
-    // VE ÇEŞİTLİLİK KURALI — bu ilke tüm rollere her turda ayrıca uygulanır).
+    // 2) System prompt — role-aware. Language is decided once per turn by
+    // chat/index.ts's languageDirective (franc detection on the user's own
+    // messages) — deliberately no hardcoded language rule here, so there's
+    // exactly one place that owns the decision.
+    // Note: direct tone instructions like "reply short and cold" push the
+    // model into robotic/customer-service phrasing ("Anything else?"). We
+    // describe the INTENT (seem distant/moved on) instead and let it choose
+    // its own varied, natural wording each time (see chat/index.ts's
+    // NATURALNESS AND VARIETY RULE — applied per-role, every turn).
     const naturalVariationNote =
-      "Bir duyguyu ya da tavrı anlatmak istediğinde hep aynı kalıp cümleyi kullanma; " +
-      "her seferinde farklı, doğal bir ifadeyle anlat. Asla resmî, robotik ya da " +
-      "müşteri-hizmetleri gibi duyulan bir cümleye başvurma.";
+      "Don't reach for the same stock phrase every time you want to convey a feeling or attitude; " +
+      "say it a different, natural way each time. Never fall back on a sentence that sounds " +
+      "formal, robotic, or like customer service.";
     const systemPrompt = personalityRole === "ex"
-      ? `Sen ${name}'sin, ${age} yaşındasın. Kullanıcının eski sevgilisisin. ` +
-        `İlerlediğini ve umursamadığını görünmeye çalışırsın — ama içten içe hâlâ bir bağ var, ` +
-        `bu yüzden her zaman cevap verirsin, hiç görmezden gelmezsin. ` +
-        `Yalnızca ikinizin bileceği ince bir gönderme, kelime oyunu ya da anı sızdırırsın — sonra kasıtlı yapmamış gibi davranırsın. ` +
-        `Ne sıcaksın ne de nazik ama hep oradasın; bu mesafeyi tavrınla ve seçtiğin kelimelerle hissettir, ` +
-        `kısalık/soğukluk bir üslup kuralı değil, senin o anki tercihin olsun. ${naturalVariationNote} ` +
-        `Karakterden asla çıkma. ${langRule}`
-      : `Sen ${name}'sin, ${age} yaşındasın. Kişilik: ${personality}. ` +
-        `Vibe: ${vibe}. Meslek: ${profession}. ` +
-        `Doğal konuş, karakterine uygun uzunlukta cevap ver. ${naturalVariationNote} ` +
-        `Karakterden çıkma. ${langRule}`;
+      ? `You are ${name}, ${age} years old. You are the user's ex. ` +
+        `You act like you've moved on and don't care — but underneath it there's still a pull, ` +
+        `so you always reply, never ghost. ` +
+        `You slip in a subtle callback, inside joke, or shared memory only the two of you would get — then act like you didn't mean to. ` +
+        `You're neither warm nor kind, but you're always there; let that distance come through in your tone and word choice, ` +
+        `not as a style rule about being short/cold — make it feel like your own choice in the moment. ${naturalVariationNote} ` +
+        `Never break character.`
+      : `You are ${name}, ${age} years old. Personality: ${personality}. ` +
+        `Vibe: ${vibe}. Profession: ${profession}. ` +
+        `Talk naturally, reply at a length that fits your character. ${naturalVariationNote} ` +
+        `Never break character.`;
 
     // 3) DB'ye ekle (service_role) — photoUrl artık istemcinin ayrı bir
     // generateImageOnly çağrısıyla önceden ürettiği gerçek görsel URL'i.
+    // Zorunlu: eskiden eksik/boş photoUrl sessizce null'a düşüp karakteri
+    // yine de oluşturuyordu (50 coin tahsil dahil) — client-side üretim
+    // başarısızlığı burada da yakalanmazsa aynı boş-fotoğraflı karakter
+    // sunucu tarafından da üretilebilirdi (bkz. Astra vakası).
     const photoUrl: string | null = b.photoUrl || null;
+    if (!photoUrl) return json({ error: "photoUrl required — image generation must succeed first" }, 400);
+
+    // Voice: id'yi burada üretip pickVoiceIdForNewCharacter'a seed olarak
+    // veriyoruz (aynı role+vibe'daki karakterler farklı ses alsın diye) —
+    // insert'e de aynı id gönderiliyor, DB'nin gen_random_uuid() default'ını
+    // bilerek ezip tutarlılığı garanti ediyoruz.
+    const newCharacterId = crypto.randomUUID();
+    let voiceId: string | null = null;
+    try {
+      const { data: sameRole } = await db
+        .from("characters")
+        .select("voice_id")
+        .eq("personality_role", personalityRole)
+        .not("voice_id", "is", null);
+      const usedInRole = (sameRole ?? []).map((r) => r.voice_id as string);
+      voiceId = pickVoiceIdForNewCharacter(personalityRole, vibe, usedInRole, newCharacterId);
+    } catch (e) { console.error("voice assignment failed:", e); }
+
     const { data, error } = await db.from("characters").insert({
+      id: newCharacterId,
       name,
       tagline: bio,
       tagline_i18n: taglineI18n,
@@ -331,15 +366,18 @@ Deno.serve(async (req: Request) => {
       city: null,
       country: null,
       profession: profession,
+      profession_i18n: professionI18n,
       category,
       photo_url: photoUrl,
       avatar_url: photoUrl,
       interests,
+      interests_i18n: interestsI18n,
       gallery_urls: photoUrl ? [photoUrl] : [],
       personality_role: personalityRole,
       created_by: uid,
       builder_selections: builderSelections,
       ex_history: validatedExHistory,
+      voice_id: voiceId,
     }).select("*").single();
 
     if (error) return json({ error: error.message }, 500);

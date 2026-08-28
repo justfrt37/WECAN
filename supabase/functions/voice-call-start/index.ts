@@ -30,7 +30,7 @@ const db = createClient(SUPABASE_URL, SERVICE_ROLE, { auth: { persistSession: fa
 
 const XAI_API_KEY = Deno.env.get("XAI_API_KEY") ?? "";
 const XAI_URL = "https://api.x.ai/v1/chat/completions";
-const MODEL = "grok-4-1-fast-non-reasoning";
+const MODEL = "grok-4.3";
 
 const ELEVENLABS_API_KEY = Deno.env.get("ELEVEN_LABS") ?? "";
 // TEMP: hardcoded instead of the ELEVENLABS_AGENT_ID secret — CLI account
@@ -61,15 +61,20 @@ function languageRule(code: string): string {
   );
 }
 
+// Emotion/pacing guidance for the voice-call model, in English (the model
+// output itself is spoken through ElevenLabs Flash v2.5, which does not
+// support [bracket] audio tags, so emotion has to land through word choice
+// and punctuation instead of stage directions).
 const VOICE_CALL_STYLE_RULE =
-  "\n\nSES TARZI KURALI: Bu cevap gerçek zamanlı bir telefon görüşmesinde SESLENDİRİLECEK " +
-  "(ElevenLabs Flash modeli, köşeli parantez etiketleri DESTEKLENMİYOR). Duyguyu etiketlerle " +
-  "değil kelime seçimi ve noktalamayla ver: heyecanı ünlem işaretiyle, tereddüdü üç nokta (...) " +
-  "ile, vurguyu cümle yapısıyla göster. Kısa, doğal cümleler kur — bu bir telefon görüşmesi, " +
-  "monolog değil: cevabın 1-2 cümle olsun (nadiren 3), gerçek bir insanın telefonda konuştuğu gibi. " +
-  "ASLA 'haha', 'hehe', 'ahah' gibi bir gülme sesiyle BAŞLAMA — gerçek bir telefon konuşmasında " +
-  "neredeyse kimse cümlesine gülerek başlamaz. Doğrudan söyleyeceğin şeyle aç; gülme/kikirdeme " +
-  "gerçekten komikse cümlenin İÇİNE ya da SONUNA serpiştir, açılış kelimesi olarak değil.";
+  "\n\nVOICE STYLE RULE: This reply will be SPOKEN aloud in a real-time phone call " +
+  "(ElevenLabs Flash model, no [bracket] tag support). Convey emotion through word choice " +
+  "and punctuation, not tags: an exclamation mark for excitement, an ellipsis (...) for " +
+  "hesitation, sentence structure for emphasis. Keep sentences short and natural — this is " +
+  "a phone call, not a monologue: 1-2 sentences per reply (rarely 3), the way a real person " +
+  "actually talks on the phone. NEVER open with a laugh sound like 'haha', 'hehe', 'ahah' — " +
+  "almost nobody opens a sentence laughing on an actual phone call. Lead with what you're " +
+  "actually saying; if a laugh/giggle genuinely fits, tuck it INSIDE or at the END of the " +
+  "sentence, never as the opening word.";
 
 function userIdFromJWT(authHeader: string | null): string | null {
   if (!authHeader?.startsWith("Bearer ")) return null;
@@ -262,7 +267,7 @@ Deno.serve(async (req: Request) => {
     systemPrompt += VOICE_CALL_STYLE_RULE;
     systemPrompt += languageRule(language);
 
-    const voiceId = character?.voice_id || elevenVoiceIdFor(personalityRole, vibe);
+    const voiceId = character?.voice_id || elevenVoiceIdFor(personalityRole, vibe, characterId);
     const { stability, speed } = callVoiceSettingsFor(personalityRole);
     const firstMessage = await generateFirstMessage(systemPrompt, recentChatGapMinutes);
 

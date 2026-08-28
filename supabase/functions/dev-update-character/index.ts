@@ -25,7 +25,7 @@
 // curated-character creation/editing is retired.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { translateTagline } from "../_shared/tagline-i18n.ts";
+import { translateCharacterFields } from "../_shared/field-i18n.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -90,7 +90,7 @@ Deno.serve(async (req: Request) => {
 
     const category: string = b.category ?? "Realistic";
     const personalityRole: string = b.personality_role ?? "flirty";
-    const personality: string = b.personality ?? "romantik";
+    const personality: string = b.personality ?? "romantic";
     const ageRange: string = b.age_range ?? "22-25";
     const vibe: string = b.vibe ?? "warm";
     const profession: string = b.profession ?? "free spirit";
@@ -131,37 +131,51 @@ Deno.serve(async (req: Request) => {
     // row's age and keep it.
     const { data: existing, error: fetchErr } = await db
       .from("characters")
-      .select("age, tagline, tagline_i18n")
+      .select("age, tagline, tagline_i18n, profession, profession_i18n, interests, interests_i18n")
       .eq("id", characterId)
       .maybeSingle();
     if (fetchErr || !existing) return json({ error: "character not found" }, 404);
     const age: number = existing.age ?? 23;
 
-    // Only re-translate when the bio actually changed — avoids an LLM call
-    // (and the risk of it failing) on every unrelated edit.
+    // Only re-translate when tagline/profession/interests actually changed —
+    // avoids an LLM call (and the risk of it failing) on every unrelated edit.
     let taglineI18n: Record<string, string> = existing.tagline_i18n ?? {};
-    if (bio !== existing.tagline) {
-      taglineI18n = { tr: bio };
-      try { taglineI18n = await translateTagline(bio, XAI_API_KEY); } catch (e) { console.error("tagline translation failed:", e); }
+    let professionI18n: Record<string, string> = existing.profession_i18n ?? {};
+    let interestsI18n: Record<string, string[]> = existing.interests_i18n ?? {};
+    const fieldsChanged = bio !== existing.tagline
+      || profession !== existing.profession
+      || JSON.stringify(interests) !== JSON.stringify(existing.interests ?? []);
+    if (fieldsChanged) {
+      taglineI18n = { en: bio };
+      professionI18n = { en: profession };
+      interestsI18n = { en: interests };
+      try {
+        const translated = await translateCharacterFields({ tagline: bio, profession, interests }, XAI_API_KEY);
+        taglineI18n = translated.tagline;
+        professionI18n = translated.profession;
+        interestsI18n = translated.interests;
+      } catch (e) { console.error("field translation failed:", e); }
     }
 
-    const langRule = "Her zaman Türkçe konuş. Kullanıcı başka dilde yazarsa veya başka dil isterse o dile geç; aksi takdirde SADECE Türkçe.";
+    // Language is decided once per turn by chat/index.ts's languageDirective
+    // (franc detection on the user's own messages) — no hardcoded language
+    // rule here.
     const naturalVariationNote =
-      "Bir duyguyu ya da tavrı anlatmak istediğinde hep aynı kalıp cümleyi kullanma; " +
-      "her seferinde farklı, doğal bir ifadeyle anlat. Asla resmî, robotik ya da " +
-      "müşteri-hizmetleri gibi duyulan bir cümleye başvurma.";
+      "Don't reach for the same stock phrase every time you want to convey a feeling or attitude; " +
+      "say it a different, natural way each time. Never fall back on a sentence that sounds " +
+      "formal, robotic, or like customer service.";
     const systemPrompt = personalityRole === "ex"
-      ? `Sen ${name}'sin, ${age} yaşındasın. Kullanıcının eski sevgilisisin. ` +
-        `İlerlediğini ve umursamadığını görünmeye çalışırsın — ama içten içe hâlâ bir bağ var, ` +
-        `bu yüzden her zaman cevap verirsin, hiç görmezden gelmezsin. ` +
-        `Yalnızca ikinizin bileceği ince bir gönderme, kelime oyunu ya da anı sızdırırsın — sonra kasıtlı yapmamış gibi davranırsın. ` +
-        `Ne sıcaksın ne de nazik ama hep oradasın; bu mesafeyi tavrınla ve seçtiğin kelimelerle hissettir, ` +
-        `kısalık/soğukluk bir üslup kuralı değil, senin o anki tercihin olsun. ${naturalVariationNote} ` +
-        `Karakterden asla çıkma. ${langRule}`
-      : `Sen ${name}'sin, ${age} yaşındasın. Kişilik: ${personality}. ` +
-        `Vibe: ${vibe}. Meslek: ${profession}. ` +
-        `Doğal konuş, karakterine uygun uzunlukta cevap ver. ${naturalVariationNote} ` +
-        `Karakterden çıkma. ${langRule}`;
+      ? `You are ${name}, ${age} years old. You are the user's ex. ` +
+        `You act like you've moved on and don't care — but underneath it there's still a pull, ` +
+        `so you always reply, never ghost. ` +
+        `You slip in a subtle callback, inside joke, or shared memory only the two of you would get — then act like you didn't mean to. ` +
+        `You're neither warm nor kind, but you're always there; let that distance come through in your tone and word choice, ` +
+        `not as a style rule about being short/cold — make it feel like your own choice in the moment. ${naturalVariationNote} ` +
+        `Never break character.`
+      : `You are ${name}, ${age} years old. Personality: ${personality}. ` +
+        `Vibe: ${vibe}. Profession: ${profession}. ` +
+        `Talk naturally, reply at a length that fits your character. ${naturalVariationNote} ` +
+        `Never break character.`;
 
     const { data: character, error } = await db
       .from("characters")
@@ -171,10 +185,12 @@ Deno.serve(async (req: Request) => {
         tagline_i18n: taglineI18n,
         system_prompt: systemPrompt,
         profession,
+        profession_i18n: professionI18n,
         category,
         photo_url: profileUrl,
         avatar_url: profileUrl,
         interests,
+        interests_i18n: interestsI18n,
         gallery_urls: galleryUrls.length ? galleryUrls : [profileUrl],
         personality_role: personalityRole,
         builder_selections: builderSelections,

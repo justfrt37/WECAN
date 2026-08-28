@@ -9,8 +9,8 @@ import Foundation
 struct Character: Identifiable, Codable, Hashable {
     let id: UUID
     var name: String
-    var tagline: String          // kısa tanıtım (kanonik, Türkçe — bkz. localizedTagline)
-    var taglineI18n: [String: String]  // dil kodu -> tagline (bkz. supabase/functions/_shared/tagline-i18n.ts)
+    var tagline: String          // kısa tanıtım (kanonik, İngilizce — bkz. localizedTagline)
+    var taglineI18n: [String: String]  // dil kodu -> tagline (bkz. supabase/functions/_shared/field-i18n.ts)
     var systemPrompt: String     // karakterin persona promptu (sunucuya gönderilir)
     var avatarSymbol: String     // SF Symbol (görsel yoksa yedek)
 
@@ -19,12 +19,14 @@ struct Character: Identifiable, Codable, Hashable {
     var city: String?
     var country: String?
     var profession: String?
+    var professionI18n: [String: String]  // dil kodu -> meslek (bkz. field-i18n.ts)
     var category: String?        // "Realistic" | "Fantasy" | "Anime" (Tümünü Gör filtreleri)
     var photoURL: URL?           // tam ekran büyük foto
     var avatarURL: URL?          // küçük daire avatar
 
     // Profil sayfası (her karaktere özel, splash'te çekilir)
-    var interests: [String]      // ilgi alanları (emoji + metin)
+    var interests: [String]      // ilgi alanları (emoji + metin, kanonik İngilizce)
+    var interestsI18n: [String: [String]]  // dil kodu -> ilgi alanları (interests ile aynı sırada)
     var relationshipLevel: Int   // ilişki seviyesi (0 başlar, artar)
     var galleryURLs: [URL]       // profildeki kaydırılabilir resimler
     var personalityRole: String  // flirty | distant | shy | playful | devoted | crazy | ex
@@ -42,10 +44,13 @@ struct Character: Identifiable, Codable, Hashable {
         case taglineI18n = "tagline_i18n"
         case systemPrompt = "system_prompt"
         case avatarSymbol = "avatar_symbol"
-        case age, city, country, profession, category
+        case age, city, country, profession
+        case professionI18n = "profession_i18n"
+        case category
         case photoURL = "photo_url"
         case avatarURL = "avatar_url"
         case interests
+        case interestsI18n = "interests_i18n"
         case relationshipLevel = "relationship_level"
         case galleryURLs = "gallery_urls"
         case personalityRole = "personality_role"
@@ -76,10 +81,12 @@ struct Character: Identifiable, Codable, Hashable {
         city: String? = nil,
         country: String? = nil,
         profession: String? = nil,
+        professionI18n: [String: String] = [:],
         category: String? = nil,
         photoURL: URL? = nil,
         avatarURL: URL? = nil,
         interests: [String] = [],
+        interestsI18n: [String: [String]] = [:],
         relationshipLevel: Int = 0,
         galleryURLs: [URL] = [],
         personalityRole: String = "flirty",
@@ -97,10 +104,12 @@ struct Character: Identifiable, Codable, Hashable {
         self.city = city
         self.country = country
         self.profession = profession
+        self.professionI18n = professionI18n
         self.category = category
         self.photoURL = photoURL
         self.avatarURL = avatarURL
         self.interests = interests
+        self.interestsI18n = interestsI18n
         self.relationshipLevel = relationshipLevel
         self.galleryURLs = galleryURLs
         self.personalityRole = personalityRole
@@ -122,10 +131,12 @@ struct Character: Identifiable, Codable, Hashable {
         city = try? c.decodeIfPresent(String.self, forKey: .city)
         country = try? c.decodeIfPresent(String.self, forKey: .country)
         profession = try? c.decodeIfPresent(String.self, forKey: .profession)
+        professionI18n = (try? c.decode([String: String].self, forKey: .professionI18n)) ?? [:]
         category = try? c.decodeIfPresent(String.self, forKey: .category)
         photoURL = try? c.decodeIfPresent(URL.self, forKey: .photoURL)
         avatarURL = try? c.decodeIfPresent(URL.self, forKey: .avatarURL)
         interests = (try? c.decode([String].self, forKey: .interests)) ?? []
+        interestsI18n = (try? c.decode([String: [String]].self, forKey: .interestsI18n)) ?? [:]
         relationshipLevel = (try? c.decode(Int.self, forKey: .relationshipLevel)) ?? 0
         galleryURLs = (try? c.decode([URL].self, forKey: .galleryURLs)) ?? []
         personalityRole = (try? c.decode(String.self, forKey: .personalityRole)) ?? "flirty"
@@ -165,12 +176,27 @@ struct Character: Identifiable, Codable, Hashable {
         return name
     }
 
-    /// Cihazın dilinde tagline — taglineI18n'de karşılık yoksa (çeviri
-    /// eksik/başarısız, ya da desteklenmeyen bir dil — bkz.
-    /// ConversationLanguage.supported) kanonik `tagline`'a düşer.
+    /// UI dilinde (bkz. AppLanguage.uiCode) tagline — taglineI18n'de karşılık
+    /// yoksa (çeviri eksik/başarısız) kanonik `tagline`'a düşer.
     var localizedTagline: String {
-        let code = Locale.current.language.languageCode?.identifier ?? "en"
-        return taglineI18n[code] ?? tagline
+        taglineI18n[AppLanguage.uiCode] ?? tagline
+    }
+
+    /// UI dilinde meslek — professionI18n'de karşılık yoksa kanonik
+    /// `profession`'a düşer.
+    var localizedProfession: String? {
+        guard let profession else { return nil }
+        return professionI18n[AppLanguage.uiCode] ?? profession
+    }
+
+    /// UI dilinde ilgi alanları — interestsI18n'de karşılık yoksa (eksik
+    /// çeviri, ya da uzunluk kanonikle eşleşmiyorsa) kanonik `interests`'e
+    /// düşer.
+    var localizedInterests: [String] {
+        if let translated = interestsI18n[AppLanguage.uiCode], translated.count == interests.count {
+            return translated
+        }
+        return interests
     }
 }
 

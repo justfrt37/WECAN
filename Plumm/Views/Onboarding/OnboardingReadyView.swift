@@ -29,7 +29,7 @@ struct OnboardingReadyView: View {
             .ignoresSafeArea()
 
             VStack {
-                Text("O bekliyor...")
+                Text("She's waiting…")
                     .font(.system(size: 34, weight: .heavy))
                     .foregroundStyle(.white)
                     .shadow(color: .black.opacity(0.7), radius: 8, y: 2)

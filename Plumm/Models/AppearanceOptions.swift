@@ -23,7 +23,9 @@ enum AppearanceOptions {
     // Vücut tipi — görsel üretim promptuna gider (bkz. chat-image/appearanceContext,
     // create-character/buildImagePrompt), önizleme görseli yok (metin chip).
     static let bodyTypes = ["Slim", "Athletic", "Curvy", "Average", "Voluptuous", "Plus Size"]
-    // Etnik köken (değer=İngilizce prompt için, gösterim=Türkçe). Görseller: "Etnik Köken" klasörü.
+    // Etnik köken — değer İngilizce prompt/DB için, gösterim de aynı stringden
+    // Localizable.xcstrings üzerinden (bkz. CreateCharacterView.imageOptionCard
+    // / textOptionCard: Text(LocalizedStringKey(value))). Görseller: "Etnik Köken" klasörü.
     static let ethnicities = ["African", "Mediterranean", "European", "East Asian",
                                "South Asian", "Southeast Asian", "Scandinavian",
                                "North African", "Latina", "Middle Eastern", "Slavic", "Mixed"]

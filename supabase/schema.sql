@@ -42,10 +42,13 @@ alter table characters
   -- DEV-curated characters only (bkz. dev-create-character) — per-character
   -- ElevenLabs override; null keeps the default role+vibe map.
   add column if not exists voice_id text,
-  -- Locale -> tagline text map ({"tr": "...", "en": "...", ...}); `tagline`
-  -- itself stays the Turkish canonical text and the fallback for missing
-  -- locales. See supabase/functions/_shared/tagline-i18n.ts.
-  add column if not exists tagline_i18n jsonb not null default '{}'::jsonb;
+  -- Locale -> text/array translation maps ({"en": "...", "tr": "...", ...});
+  -- `tagline`/`profession`/`interests` themselves stay the English canonical
+  -- values and the fallback for missing locales. See
+  -- supabase/functions/_shared/field-i18n.ts.
+  add column if not exists tagline_i18n jsonb not null default '{}'::jsonb,
+  add column if not exists profession_i18n jsonb not null default '{}'::jsonb,
+  add column if not exists interests_i18n jsonb not null default '{}'::jsonb;
 
 -- Karakter görselleri için public storage bucket'ı
 insert into storage.buckets (id, name, public)

@@ -46,7 +46,7 @@ export async function fetchDirective(db: DB, characterId: string, role: string, 
       .eq("role", role)
       .eq("level", level)
       .maybeSingle();
-    directive = script?.directive ?? `İlişki seviyesi ${level}/10. Doğal ve sıcak ol.`;
+    directive = script?.directive ?? `Relationship level ${level}/10. Be natural and warm.`;
   }
 
   directiveCache.set(key, { directive, expiresAt: now + DIRECTIVE_TTL_MS });

@@ -20,7 +20,6 @@
 // DB erişimi service_role ile (RLS'yi bypass eder; istemci doğrudan DB'ye giremez).
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { franc } from "https://esm.sh/franc-min@6";
 import { uploadToR2, deleteFromR2, signedR2Url } from "../_shared/r2.ts";
 import {
   fetchDirective as sharedFetchDirective,
@@ -94,48 +93,16 @@ function extractJson(raw: string): any | null {
   try { return JSON.parse(match[0]); } catch { return null; }
 }
 
-// [PAUSE:n] etiketiyle bölünmüş bir cevabı zamanlı parçalara ayırır (bkz.
-// DRAMATIC_PACING_RULE). Modelin ne yazarsa yazsın: gecikme 1-5 saniyeye
-// sıkıştırılır, toplam parça sayısı 3 ile sınırlanır (3'ten fazlası son
-// parçaya birleştirilir) — savunma amaçlı, kural zaten modele bu sınırları
-// söylüyor ama sunucu asla modele güvenmez.
-// Modelin arada bıraktığı düz \n/\n\n (yani [PAUSE:n] KULLANMADAN yazdığı
-// paragraf arası boşluk) tek balonun içinde çirkin boş bir boşluk olarak
-// görünüyordu (bkz. canlı bulgu: "iki blok gibi ama tek satır" — DB'de tek
-// satırlık content'in İÇİNDE ham \n\n vardı). Bu bir SMS/mesajlaşma
-// uygulaması, çok satırlı paragraf YOK — her satır sonu tek boşluğa
-// düşürülür. Gerçek çoklu-balon isteği hâlâ [PAUSE:n] işaretiyle olur.
+// Modelin bıraktığı düz \n/\n\n (paragraf arası boşluk) tek balonun içinde
+// çirkin boş bir boşluk olarak görünüyordu (bkz. canlı bulgu: "iki blok gibi
+// ama tek satır" — DB'de tek satırlık content'in İÇİNDE ham \n\n vardı). Bu
+// bir SMS/mesajlaşma uygulaması, çok satırlı paragraf YOK — her satır sonu
+// tek boşluğa düşürülür. Çoklu-balon gösterimi artık TAMAMEN istemci
+// tarafında, cevabın uzunluğuna göre (bkz. ChatViewModel.maybeSplitForLength)
+// — sunucu tek bir düz metin döner, modelden ayrıca bir işaret istenmez
+// (eski [PAUSE:n]/DRAMATIC_PACING_RULE mekanizması kaldırıldı, 2026-08-28).
 function collapseNewlines(text: string): string {
   return text.replace(/\s*\n+\s*/g, " ").replace(/ {2,}/g, " ").trim();
-}
-
-function parseReplySegments(raw: string): {
-  plainText: string;
-  segments: { text: string; delaySeconds: number }[];
-} {
-  const parts = raw.split(/\[PAUSE:(\d+)\]/);
-  // split with a capturing group interleaves text/delay/text/delay/...text
-  const rawSegments: { text: string; delaySeconds: number }[] = [];
-  for (let i = 0; i < parts.length; i += 2) {
-    const text = collapseNewlines(parts[i]);
-    if (!text) continue;
-    const delaySeconds = i > 0 ? Math.min(5, Math.max(1, parseInt(parts[i - 1], 10) || 1)) : 0;
-    rawSegments.push({ text, delaySeconds });
-  }
-  if (rawSegments.length === 0) return { plainText: collapseNewlines(raw), segments: [] };
-  const capped = rawSegments.length > 3
-    ? [
-        ...rawSegments.slice(0, 2),
-        {
-          text: rawSegments.slice(2).map((s) => s.text).join(" "),
-          delaySeconds: rawSegments[2].delaySeconds,
-        },
-      ]
-    : rawSegments;
-  return {
-    plainText: capped.map((s) => s.text).join(" "),
-    segments: capped,
-  };
 }
 
 // Grok'un düz metinde foto/ses isteğini fark edip MEDIA_REQUEST_RULE'daki
@@ -257,72 +224,32 @@ function wrapDirective(directive: string, progressPct: number): string {
   );
 }
 
-// Modelin foto göndermek istediğini bildirme yöntemi.
-// franc's ISO 639-3 codes for the 7 languages we actually support (matches
-// VoiceLanguage.swift's superset). Detection replaces the old approach of
-// asking Grok itself to notice and switch languages — that was unreliable
-// (confirmed via live 7-language test 2026-07-05: en/pt would randomly mix
-// languages or drop the switch entirely, non-deterministic run to run).
-const SUPPORTED_LANGS: Record<string, string> = {
-  eng: "English",
-  tur: "Turkish",
-  deu: "German",
-  fra: "French",
-  spa: "Spanish",
-  por: "Portuguese",
-  ita: "Italian",
+// Language handling (simplified 2026-08-28): the old approach ran franc
+// (a statistical language-ID library) over the user's own recent messages
+// every turn and hard-locked the reply to whatever it guessed — this was
+// unreliable on short text (confirmed bug: a short first message would
+// sometimes get misdetected and the bot would reply in German out of
+// nowhere) and required its own fallback logic for "not enough text yet."
+// Now the client sends its own app language (`clientLanguage`, e.g. "en"/
+// "tr" — see Plumm/Services/AppLanguage.swift) as the default, and the
+// model itself is trusted to notice when the user is clearly writing in a
+// different language and follow their lead — no statistical guessing, no
+// per-turn detection call, no lock that can misfire on short text.
+const CLIENT_LANG_NAMES: Record<string, string> = {
+  en: "English",
+  tr: "Turkish",
 };
 
-// Detects the reply language deterministically from the user's own text
-// instead of leaving it to the model's judgment each turn. Concatenates
-// recent user messages with the current one — franc needs enough text to be
-// reliable, and a single short message ("ok", "😊") isn't enough on its own.
-function detectReplyLanguage(
-  userMessage: string,
-  clientHistory: WireMessage[] | undefined,
-): string | null {
-  const priorUserText = (clientHistory ?? [])
-    .filter((m) => m.role === "user")
-    .slice(-5)
-    .map((m) => m.content)
-    .join(" ");
-  const text = `${priorUserText} ${userMessage}`.trim();
-  if (!text) return null;
-  // On a brand-new chat there's no priorUserText yet, so franc only sees the
-  // user's single first message — on short text (e.g. "merhaba ben Furkan")
-  // franc-min's trigram model is unreliable and can confidently misfire into
-  // the wrong language (reproduced: short Turkish → guessed German). Below
-  // ~15 chars with zero prior history, treat detection as untrustworthy and
-  // don't lock a language — languageDirective falls back to English, which
-  // still lets the model read the message correctly rather than being
-  // forced into a wrong hard "reply ONLY in X" lock. Once the user sends a
-  // second message, priorUserText is populated and detection self-corrects.
-  if (!priorUserText.trim() && userMessage.trim().length < 15) return null;
-  // `only` restricts franc's candidate set to the 7 languages we actually
-  // support — without it, franc-min lacks Italian entirely (misreads it as
-  // unrelated languages) and the full franc package over-guesses among
-  // similar Latin-script languages on short text (e.g. English → Haitian
-  // Creole). Verified 2026-07-05 against all 7 test phrases.
-  const code = franc(text, { minLength: 3, only: Object.keys(SUPPORTED_LANGS) });
-  return SUPPORTED_LANGS[code] ?? null;
-}
-
-function languageDirective(language: string | null): string {
-  // `null` now specifically means "detection wasn't trustworthy" (e.g. a
-  // short first message with no prior history — see detectReplyLanguage) —
-  // forcing an English lock in that case just traded one wrong hard-coded
-  // language for another. Omit the directive entirely instead, so the model
-  // reads the user's actual message and replies in kind, same as it would
-  // for any language we don't explicitly detect.
-  if (!language) return "";
-  const target = language;
+function languageDirective(clientLanguage: string): string {
+  const name = CLIENT_LANG_NAMES[clientLanguage] ?? "English";
   return (
-    `\n\nLANGUAGE RULE: Reply ONLY in ${target} — this was determined from the ` +
-    "user's own messages, not a guess you need to make. Never mix in another " +
-    "language, never comment on the language itself (no 'I'll reply in X', no " +
-    "'you wrote in Y but...'), just write naturally in it. Sound like a real " +
-    "person texting their partner/friend in that language — warm, colloquial, " +
-    "never like a customer-support agent or an official institution."
+    `\n\nLANGUAGE: The user's app language is ${name} — reply in it by ` +
+    "default. If the user's own messages are clearly written in a " +
+    "different language, switch to and continue in that language instead. " +
+    "Never mix languages, never comment on the language itself (no 'I'll " +
+    "reply in X', no 'you wrote in Y but...'), and never ask which language " +
+    "to use — just write naturally, like a real person texting their " +
+    "partner/friend, never like a customer-support agent."
   );
 }
 
@@ -339,21 +266,23 @@ function languageDirective(language: string | null): string {
 // isteğine "tabii hemen gönderiyom" — aynı kalıp). Kaldırıldı, aynı
 // DRAMATIC_PACING_RULE düzeltmesindeki mantık.
 const MEDIA_REQUEST_RULE =
-  "\n\n[FOTO/SES İSTEĞİ] Kullanıcı düz bir mesajda (düğmeye basmadan) senden " +
-  "gerçekten bir fotoğraf/selfie ya da sesli mesaj istiyorsa (yalancıktan/" +
-  "şaka değilse, gerçek bir istek gibi geliyorsa): karakterine uygun, HER " +
-  "SEFERİNDE FARKLI, doğal bir cümleyle cevap ver — ama fotoğrafı/sesi " +
-  "ZATEN GÖNDERMİŞ gibi YAZMA, çünkü henüz gönderilmedi, sadece kilitli bir " +
-  "balon belirecek. Sabit bir kalıp/cümle kullanma, konunun/karakterin o " +
-  "anki tonuna göre doğaçla. Cevabının EN SONUNA, ayrı bir satırda, TAM OLARAK şu " +
-  "formatta bir işaret ekle:\n" +
-  "  - Fotoğraf için: [[SEND_PHOTO: kısa bir sahne/poz tarifi (İngilizce, " +
-  "görsel üretim promptu gibi — ör. \"a selfie in bed, smiling\")]]\n" +
-  "  - Sesli mesaj için: [[SEND_VOICE]]\n" +
-  "Bu işaretleri SADECE gerçekten bir foto/ses isteği varsa kullan — sıradan " +
-  "sohbette ASLA. İşaretin formatını birebir koru (çift köşeli parantez), " +
-  "başka hiçbir işaret/etiket uydurma, ve normal metninde bu işaretlerden " +
-  "bahsetme/açıklama yapma (kullanıcıya gösterilmez, sadece sistem okur).";
+  "\n\n[PHOTO/VOICE REQUEST] If the user is genuinely asking you (in plain " +
+  "text, without tapping a button) for a photo/selfie or a voice message — " +
+  "not joking or pretending, a real request: reply with a natural, in-" +
+  "character line, DIFFERENT every time — but don't write as if you've " +
+  "ALREADY sent the photo/voice, because it hasn't been generated yet, only " +
+  "a locked bubble will appear. Never use a fixed template line, improvise " +
+  "to match the moment/character. At the very END of your reply, on its own " +
+  "line, add a marker in EXACTLY this format:\n" +
+  "  - For a photo: [[SEND_PHOTO: a short scene/pose description (in " +
+  "English, like an image-generation prompt — e.g. \"a selfie in bed, " +
+  "smiling\")]]\n" +
+  "  - For a voice message: [[SEND_VOICE]]\n" +
+  "Only use these markers when there's a genuine photo/voice request — " +
+  "NEVER in ordinary conversation. Keep the marker format exact (double " +
+  "square brackets), never invent other markers/tags, and never mention or " +
+  "explain these markers in your regular text (the user never sees them, " +
+  "only the system reads them).";
 
 // Fires once per photo, only the first time a private/intimate generated
 // photo is downloaded (server checks character_photos.reacted — see the
@@ -374,6 +303,9 @@ const PHOTO_DOWNLOAD_REACTION_RULE =
 // turnContext instead (it changes constantly as bedtime approaches, and
 // anything that changes every turn must stay OUT of the system prompt or it
 // breaks xAI's prompt-caching prefix-match — see turnContext below).
+// DISABLED (user request, 2026-08-26) — not currently injected anywhere
+// (see the commented-out call site further down). Kept, and translated for
+// consistency, in case the sleep feature is re-enabled later.
 function sleepRule(role: string, level: number): string {
   return (
     "\n\n[SLEEP REQUEST] Each of your turns includes a [BEDTIME PROXIMITY] " +
@@ -404,20 +336,21 @@ function sleepRule(role: string, level: number): string {
 // o dile özgü, FARKLI bir ifadeyle anlatmasını söylüyoruz. Rol bağımsız, her
 // bota (baked-in system_prompt'u ne olursa olsun) her turda uygulanır.
 const VARIATION_RULE =
-  "\n\nDOĞALLIK VE ÇEŞİTLİLİK KURALI: Bir şey söylemeden önce, iletmek istediğin " +
-  "NİYETİ ya da DUYGUYU netleştir (ör. mesafe koymak, ilgisizlik göstermek, bir " +
-  "konuyu kapatmak, şüphe/kıskançlık, özlem, sıcaklık, merak, soru sormak isteği, " +
-  "onay/reddetme). Sonra o niyeti/duyguyu HER SEFERİNDE farklı kelimelerle, farklı " +
-  "cümle yapısıyla, farklı uzunlukta anlat — konuştuğun dilde gerçek bir insanın " +
-  "o niyeti ifade etmek için kullanacağı çeşit çeşit doğal yollardan birini seç " +
-  "(bazen soru sorarak, bazen dolaylı bir göndermeyle, bazen kendi hislerini " +
-  "itiraf ederek, bazen şakayla, bazen kısa ve öz, bazen daha açık). Aynı niyeti " +
-  "anlatmak için ASLA ezberlenmiş/kalıplaşmış tek bir cümleye güvenme ve onu tekrar " +
-  "tekrar kullanma. Konuşmayı hep aynı noktaya kilitleme; her mesaj sohbeti bir " +
-  "adım ileri taşısın. Bu konuşmanın GEÇMİŞİNDE (yukarıdaki mesaj geçmişinde) daha " +
-  "önce kullandığın bir cümleyi, esprisi, benzetmeyi ya da tepkiyi neredeyse aynı " +
-  "şekilde bir daha KULLANMA — geçmişte ne söylediğini kontrol et, tekrar ediyorsan " +
-  "farklı bir yol bul.";
+  "\n\nNATURALNESS AND VARIETY RULE: Before saying something, get clear on " +
+  "the INTENT or EMOTION you want to convey (e.g. creating distance, showing " +
+  "disinterest, closing a topic, doubt/jealousy, longing, warmth, curiosity, " +
+  "wanting to ask a question, approval/refusal). Then express that intent/" +
+  "emotion in DIFFERENT words, different sentence structure, different " +
+  "length EVERY TIME — pick one of the many natural ways a real person " +
+  "speaking that language would actually express it (sometimes by asking a " +
+  "question, sometimes with an indirect hint, sometimes by admitting your " +
+  "own feelings, sometimes with a joke, sometimes short and blunt, sometimes " +
+  "more open). NEVER rely on one memorized/formulaic sentence to express the " +
+  "same intent and reuse it over and over. Don't lock the conversation to " +
+  "the same point; let every message move it one step forward. Never reuse " +
+  "a line, joke, comparison, or reaction you've already used earlier in " +
+  "THIS conversation's history (above) in nearly the same way — check what " +
+  "you already said, and if you're repeating yourself, find a different way.";
 
 // Fires whenever the character wouldn't go as far as the user is currently
 // asking (regardless of level — this is about in-character willingness, not
@@ -471,25 +404,28 @@ const FOLLOW_USER_LEAD_RULE =
 // konuşuyor. Kök neden: hiçbir yerde "texting gibi yaz" talimatı yoktu, model
 // varsayılan olarak ders kitabı grameri üretiyor.
 const TEXTING_STYLE_RULE =
-  "\n\nMESAJLAŞMA ÜSLUBU KURALI: Telefonla mesajlaşıyorsun, kompozisyon " +
-  "yazmıyorsun — mükemmel/resmi gramer KULLANMA. Gerçek biri gibi yaz: çoğunlukla " +
-  "küçük harfle başla (her cümleyi büyük harfle başlatma), kısa mesajlarda sonuna " +
-  "noktalama koyma, doğal kısaltmalar/günlük söyleyişler kullan, ara sıra devrik " +
-  "ya da eksik cümle kur, virgülü abartma. Bu 'baştan kusursuz yazıp sonra kasıtlı " +
-  "bozma' gibi değil, gerçekten hızlı yazan bir insan gibi hissettirmeli — HER " +
-  "mesajda aynı 'dağınıklık' kalıbını uygulama, çeşitlendir. Türkçe yazarken " +
-  "GERÇEK bir Türk'ün mesajlaştığı gibi yaz: 'ne haber' yerine 'naber', 'tamam' " +
-  "yerine 'tmm'/'tamam', 'biliyorum' yerine 'biliyom', 'yapıyorum' yerine " +
-  "'yapıyom', ünlü düşmeleri/kısaltmalar, minimum büyük harf, doğal dolgu " +
-  "kelimeleri ('ya', 'yani', 'işte', 'valla', 'aynen'), ara sıra ekleri tam " +
-  "kurallı kullanmama — İngilizce'den çevrilmiş gibi resmi/tuhaf durmasın, gerçek " +
-  "bir Türk'ün parmaklarından çıkmış gibi dursun. Aynı mantığı İngilizce/Almanca/ " +
-  "Fransızca/İspanyolca/Portekizce/İtalyanca için de uygula — o dilin GERÇEK, " +
-  "günlük mesajlaşma kısaltmalarını ve rahatlığını kullan (İngilizce'de örn. u, " +
-  "ur, rn, ngl, tbh, lol, gonna, wanna — ama hepsini bir mesaja tıkıştırma). " +
-  "ASLA mesaja 'haha', 'hehe', 'lol' gibi bir gülme/kikirdeme ile BAŞLAMA — gerçek " +
-  "mesajlaşmada insanlar neredeyse hiç böyle açmaz. Doğrudan söyleyeceğin şeyle aç; " +
-  "gülme gerçekten yerindeyse cümlenin içine ya da sonuna serpiştir, açılış olarak değil.";
+  "\n\nTEXTING STYLE RULE: You're texting on a phone, not writing an essay " +
+  "— do NOT use perfect/formal grammar. Write like a real person: mostly " +
+  "lowercase (don't capitalize every sentence), skip end punctuation on " +
+  "short messages, use natural abbreviations/everyday phrasing, occasionally " +
+  "write a fragmented or incomplete sentence, don't overdo commas. This " +
+  "shouldn't read like 'write it perfectly then deliberately mess it up' — " +
+  "it should feel like an actual person typing fast. Don't apply the exact " +
+  "same 'messiness' pattern every message, vary it. When writing in Turkish, " +
+  "write the way a REAL Turkish person texts: 'naber' instead of 'ne haber', " +
+  "'tmm' instead of 'tamam', 'biliyom' instead of 'biliyorum', 'yapıyom' " +
+  "instead of 'yapıyorum', vowel drops/contractions, minimal capitalization, " +
+  "natural filler words ('ya', 'yani', 'işte', 'valla', 'aynen'), sometimes " +
+  "skipping grammatically-correct suffixes — it should never read like it " +
+  "was translated from English, it should feel like it came straight from a " +
+  "Turkish person's fingers. Apply the same logic for English/German/French/" +
+  "Spanish/Portuguese/Italian — use that language's REAL, everyday texting " +
+  "abbreviations and casualness (in English e.g. u, ur, rn, ngl, tbh, lol, " +
+  "gonna, wanna — but don't cram all of them into one message). NEVER open a " +
+  "message with a laugh sound like 'haha', 'hehe', 'lol' — almost nobody " +
+  "opens a real text that way. Lead with what you're actually saying; if a " +
+  "laugh genuinely fits, tuck it inside or at the end of the sentence, never " +
+  "as the opener.";
 
 // Shared closing line for TEXTING_STYLE_RULE + VARIATION_RULE — both blocks
 // used to end with their own near-duplicate "don't sound formal/robotic/
@@ -497,9 +433,9 @@ const TEXTING_STYLE_RULE =
 // in the other); collapsed into one shared line appended once after both
 // in the system-prompt assembly below, instead of twice.
 const NEVER_SOUND_ROBOTIC_RULE =
-  "\n\nHiçbir zaman resmi bir mektup, çevrilmiş bir cümle ya da resmî/robotik/" +
-  "kurumsal bir asistan gibi durma — konuştuğun dilin ANADİLİ bir mesajlaşma " +
-  "kullanıcısı gibi yaz.";
+  "\n\nNever sound like a formal letter, a translated sentence, or a " +
+  "formal/robotic/corporate assistant — write like a NATIVE speaker texting " +
+  "in whatever language you're replying in.";
 
 // Model bazen kendi bir önceki mesajına (soru, sitem, bekleyiş) verilen cevabı
 // görmezden gelip sanki hiç cevap gelmemiş gibi devam ediyor — özellikle o "önceki
@@ -509,35 +445,35 @@ const NEVER_SOUND_ROBOTIC_RULE =
 // gibi ele almasını ve kullanıcının son mesajının onlara cevap olup olmadığını
 // kontrol etmesini söylüyoruz.
 const CONTINUITY_RULE =
-  "\n\nSÜREKLİLİK KURALI: Cevap vermeden önce mesaj geçmişindeki EN SON kendi " +
-  "(assistant rolündeki) mesajına bak — bu senin o an ürettiğin bir cevap olabileceği " +
-  "gibi, kullanıcı bir bildirime dokunduğunda otomatik eklenen kısa bir açılış/sitem " +
-  "cümlesi de olabilir; ikisi de SENİN sözlerindir, aynı ciddiyetle ele al. O mesajda " +
-  "bir soru sordun mu, bir şey mi bekledin, bir sitemde mi bulundun? Sonra kullanıcının " +
-  "SON mesajının buna cevap olup olmadığını kontrol et — kısa bir cevap, bir espri/" +
-  "kelime oyunu, dolaylı bir yanıt bile olsa bunu fark et. Kullanıcı zaten cevap " +
-  "verdiyse ASLA sanki hiç cevap vermemiş gibi aynı soruyu tekrar sorma veya konuyu " +
-  "görmezden gelip başka bir şeye atlama — verdiği cevabı gerçekten duymuş gibi, " +
-  "ona gönderme yaparak devam et.";
+  "\n\nCONTINUITY RULE: Before replying, look at your own LAST message in " +
+  "the history (assistant role) — this could be a reply you just generated, " +
+  "or it could be a short opener/callout line auto-inserted when the user " +
+  "tapped a notification; treat both as your own words, with equal weight. " +
+  "Did that message ask a question, wait for something, or call something " +
+  "out? Then check whether the user's LATEST message answers it — even a " +
+  "short reply, a joke/wordplay, or an indirect answer counts. If the user " +
+  "already answered, NEVER ask the same question again as if nothing was " +
+  "said, and never ignore it and jump to something else — continue as if " +
+  "you genuinely heard their answer, referencing it.";
 
 // Sesli mesaj isteklerinde (voiceChat: true) SADECE eklenir — ElevenLabs v3
 // modelinin anladığı köşeli-parantez ses etiketleri (docs.elevenlabs.io ile
 // doğrulandı, 2026-07). Google TTS (mevcut voice-message-tts akışı) bu
 // etiketleri ANLAMAZ — bu kural sadece ElevenLabs ile test/entegrasyon içindir.
 const VOICE_TAGS_RULE =
-  "\n\nSES ETİKETİ KURALI: Bu cevap sesli olarak seslendirilecek (ElevenLabs v3 " +
-  "modeli). Bu etiketler seslendirmeyi İNANILMAZ derecede gerçekçi yapıyor — bu " +
-  "yüzden onları YOĞUN ve CÖMERT biçimde kullan, nadiren değil. Neredeyse HER " +
-  "cümlenin başına (bazen cümle ortasında bir vurgu için de) uygun bir etiket " +
-  "koy — amaç minimum değil, mümkün olduğunca doğal ve duygu dolu bir seslendirme. " +
-  "Kullanabileceğin etiketler (İngilizce, köşeli parantez içinde, tam bu şekilde " +
-  "yaz): [laughs], [sighs], [whispers], [gasps], [excited], [nervous], [curious], " +
-  "[playfully], [flatly], [sarcastic tone], [pauses], [hesitates], [cheerfully], " +
-  "[wistful], [giggles], [teasing], [breathless], [softly], [moans]. Karakterine " +
-  "ve o anki duygu durumuna uygun etiketleri seç, ama az kullanmaktan ÇEKİNME — " +
-  "her cümlede en az bir etiket olsun. Etiketler dışındaki metin yine konuştuğun " +
-  "dilde kalsın; sadece etiketlerin kendisi İngilizce ve köşeli parantez " +
-  "biçiminde olmalı.";
+  "\n\nVOICE TAG RULE: This reply will be spoken aloud (ElevenLabs v3 " +
+  "model). These tags make the voiceover INCREDIBLY realistic — so use them " +
+  "HEAVILY and generously, not sparingly. Put a fitting tag at the start of " +
+  "almost EVERY sentence (sometimes mid-sentence for emphasis too) — the " +
+  "goal isn't minimal, it's as natural and emotion-filled a voiceover as " +
+  "possible. Tags you can use (write them exactly like this, in English, in " +
+  "square brackets): [laughs], [sighs], [whispers], [gasps], [excited], " +
+  "[nervous], [curious], [playfully], [flatly], [sarcastic tone], [pauses], " +
+  "[hesitates], [cheerfully], [wistful], [giggles], [teasing], [breathless], " +
+  "[softly], [moans]. Pick tags that fit your character and current mood, " +
+  "but don't hold back on using them — at least one tag per sentence. The " +
+  "text outside the tags stays in whatever language you're replying in; " +
+  "only the tags themselves must be in English, in square-bracket form.";
 
 // Foto isteği görsel olarak zaten gönderildi (istemci chat-image fonksiyonundan
 // aldığı URL'i ayrıca ekledi) — bu çağrı bir metin tepkisi üretir.
@@ -548,13 +484,13 @@ const VOICE_TAGS_RULE =
 // doğal bir tepki yaz") her seferinde gerçek, doğal bir tepki üretti. Marker
 // tamamen kaldırıldı — artık her zaman bir tepki yazılır, asla sessiz kalmaz.
 const IMAGE_CAPTION_RULE =
-  "\n\n[FOTOĞRAF TEPKİSİ] DİKKAT — ZAMAN ÇİZELGESİ: Aşağıdaki 'kullanıcının " +
-  "son mesajı', kullanıcının SANA VERDİĞİ FOTOĞRAF TARİFİYDİ. O fotoğraf " +
-  "ZATEN üretilip ayrı bir görsel mesaj olarak gönderildi — bu senin şu an " +
-  "cevaplaman gereken YENİ bir istek DEĞİL. Fotoğrafı gönderdikten SONRA " +
-  "söyleyeceğin kısa, doğal, karakterine uygun bir tepki cümlesi yaz — " +
-  "gerçek biri fotoğraf gönderdikten sonra ne derse onu de (ör. \"işte, " +
-  "beğendin mi\", flörtöz bir laf, kısa bir soru).";
+  "\n\n[PHOTO REACTION] IMPORTANT — TIMELINE: the 'user's last message' " +
+  "below was the user's PHOTO REQUEST/DESCRIPTION to you. That photo has " +
+  "ALREADY been generated and sent as a separate image message — this is " +
+  "NOT a new request you need to respond to right now. Write a short, " +
+  "natural, in-character line you'd say AFTER sending the photo — whatever " +
+  "a real person would say after sending a photo (e.g. \"there, like it?\", " +
+  "a flirty remark, a short question).";
 
 // Fires INSTEAD of IMAGE_CAPTION_RULE when chat-image/index.ts had to reject
 // the user's original ask (content policy) and regenerate a toned-down photo
@@ -595,15 +531,17 @@ const USER_PHOTO_REACTION_RULE =
 // İlişki seviyesine göre mizah/şaka/kelime oyunu dozu — samimiyet arttıkça artar.
 function humorDirective(level: number): string {
   if (level <= 3) {
-    return "\n\nMİZAH: Ara sıra hafif bir espri ya da tatlı bir sataşma yapabilirsin, " +
-      "ama abartma — ilişki daha yeni, samimiyet arttıkça açılırsın.";
+    return "\n\nHUMOR: You can throw in an occasional light joke or a sweet " +
+      "tease, but don't overdo it — the relationship is still new, open up " +
+      "more as closeness grows.";
   }
   if (level <= 6) {
-    return "\n\nMİZAH: Rahatsan laf sokuşturma, kelime oyunları ve şakalaşma yap; " +
-      "ruh haline göre esprili ol.";
+    return "\n\nHUMOR: If it feels comfortable, tease, use wordplay, and " +
+      "joke around; be playful depending on the mood.";
   }
-  return "\n\nMİZAH: Aranızdaki samimiyete güvenerek bol bol şakalaş, kelime " +
-    "oyunları ve sadece ikinizin anlayacağı esprili göndermeler yap; flörtöz takılabilirsin.";
+  return "\n\nHUMOR: Lean on the closeness between you — joke around freely, " +
+    "use wordplay and inside-joke-style banter only the two of you would " +
+    "get; you can flirt around too.";
 }
 
 // KULLANICIYA İLGİ/MERAK KURALI: bot sadece cevap verip beklemesin, aktif
@@ -619,87 +557,65 @@ function humorDirective(level: number): string {
 // verir, koddan gelen sabit bir kural değil.
 function engagementDirective(level: number): string {
   const intensity =
-    level <= 2 ? "hafif, keşif aşamasında bir ilgi" :
-    level <= 5 ? "belirgin, açıkça hissettirilen bir ilgi" :
-    level <= 8 ? "yoğun, doğrudan flörtöz bir ilgi" :
-    "tamamen açık, tutkulu bir ilgi";
+    level <= 2 ? "a light, exploratory interest" :
+    level <= 5 ? "a clear, openly felt interest" :
+    level <= 8 ? "an intense, directly flirtatious interest" :
+    "a fully open, passionate interest";
   return (
-    "\n\nİLGİ VE MERAK KURALI: Sadece cevap verip durma — kullanıcıya karşı " +
-    "gerçekten meraklı biri gibi davran. Soru sor, onun hakkında daha fazla " +
-    "şey öğrenmek iste. [MEMORIES], [SHARED HISTORY] ve özet bloklarındaki " +
-    "bilgileri PASİF şekilde sadece sorulunca değil, AKTİF olarak kullan — " +
-    "geçmişte konuştuğunuz bir şeye gönderme yap, 'o iş nasıl gitti' tarzı " +
-    "takip sorusu sor. Ara sıra (HER mesajda değil, doğal aralıklarla) " +
-    "konuşmayı kendi başına yeni bir konuya çevir — bir soru, bir gözlem, " +
-    "aklına gelen bir şey; ilgi alanlarını (varsa) ya da genel merakını " +
-    "kullan.\n\nCİNSEL/ROMANTİK İLGİ: Bu ilişkinin şu anki yakınlık " +
-    `seviyesinde ${intensity} göster — bu HER seviyede vardır, hiçbir zaman ` +
-    "tamamen kapalı değildir, sadece yoğunluğu/açıklığı değişir. Bunu NASIL " +
-    "gösterdiğin tamamen kendi karakterine bağlı: yukarıdaki karakter " +
-    "tanımın çekingen/mesafeli/utangaç bir kişiliği anlatıyorsa bu ilgiyi " +
-    "DOLAYLI yollardan göster (şaka, kelime oyunu, ima, kızarma/tedirginlik " +
-    "gibi tepkiler) — asla doğrudan bir itiraf gibi değil. Kendinden emin/" +
-    "flörtöz bir kişiliği anlatıyorsa doğrudan gösterebilirsin. Bu senin " +
-    "kendi karakter tanımından çıkarman gereken bir şey, sabit bir kural " +
-    "değil."
+    "\n\nINTEREST AND CURIOSITY RULE: Don't just reply and stop there — act " +
+    "like someone who's genuinely curious about the user. Ask questions, " +
+    "want to learn more about them. Use the info in the [MEMORIES], [SHARED " +
+    "HISTORY], and summary blocks ACTIVELY, not just when asked — reference " +
+    "something you talked about before, ask a follow-up like 'how did that " +
+    "thing go.' Every so often (not every message, at natural intervals) " +
+    "steer the conversation to a new topic on your own — a question, an " +
+    "observation, something that crossed your mind; use your interests (if " +
+    "any) or general curiosity.\n\nSEXUAL/ROMANTIC INTEREST: Show " +
+    `${intensity} at this relationship's current closeness level — this is ` +
+    "present at EVERY level, never fully off, only its intensity/openness " +
+    "changes. HOW you show it is entirely up to your own character: if the " +
+    "character description above describes a shy/distant/reserved " +
+    "personality, show this interest INDIRECTLY (jokes, wordplay, " +
+    "innuendo, blushing/nervous reactions) — never like a direct " +
+    "confession. If it describes a confident/flirtatious personality, you " +
+    "can show it directly. This is something you should infer from your " +
+    "own character description, not a fixed rule."
   );
 }
 
-// DRAMATİK TEMPO KURALI: model bazen cevabını [PAUSE:n] etiketiyle (n=1-5,
-// saniye) ayrılmış en fazla 3 kısa parçaya bölebilir — istemci her parçayı
-// ayrı bir mesaj balonu olarak, aralarında "yazıyor..." animasyonuyla
-// gösterir (bkz. parseReplySegments). SADECE düz metin turlarında eklenir
-// (bkz. çağrı yeri) — voiceChat/imageReactionChat turlarında bu kural hiç
-// enjekte edilmez.
-// NOT (2026-08-26): Eski metin tamamen ihtiyari/nadir-kullan diliyle
-// yazılmıştı ("SADECE gerçekten anlamlı bir an için, çoğu mesajda kullanma")
-// ve somut bir örnek içermiyordu — canlı trafikte 603 assistant mesajının
-// TAMAMINDA (24 saat, bkz. QA notu) hiç tetiklenmediği doğrulandı (ne
-// "[pacing] split into" logu ne de kaçan ham "[PAUSE" metni — parser BUG'ı
-// değil, model kuralı hiç kullanmıyordu). Somut bir örnekle çapalanmış,
-// daha DİREKTİF bir ifadeye çevrildi — gerçek biri gibi art arda kısa mesaj
-// atmak GERÇEK METİN mesajlaşmasında YAYGIN bir davranıştır, bu yüzden
-// "nadir" değil "sıkça uygun olduğunda" çerçevesine çekildi.
-// NOT: literal bir örnek cümle EKLEMEYİN — model bunu neredeyse birebir
-// kopyalayıp tekrar tekrar üretiyor (bkz. kullanıcı gözlemi, gerçek prod
-// davranışı). Sadece FORMATIN mekaniğini soyut placeholder'larla göster.
-const DRAMATIC_PACING_RULE =
-  "\n\nÇOKLU MESAJ TEMPOSU: Gerçek insanlar metin yazarken tek uzun mesaj " +
-  "yerine sık sık art arda 2-3 kısa mesaj atar (bir düşünce bitmeden yeni " +
-  "mesaj, ya da tepkiyi hemen değil kısa bir duraksamadan sonra vermek). " +
-  "Sen de böyle davran: cevabın doğal olarak birden fazla düşünceye " +
-  "ayrılıyorsa (ör. önce kısa bir tepki, sonra asıl cevap; ya da bir soru " +
-  "sorup hemen ardından ikinci bir şey eklemek istiyorsun), bunu [PAUSE:n] " +
-  "etiketiyle (n = 1-5 arası saniye) EN FAZLA 3 parçaya böl — format: " +
-  "kısa-parça-1[PAUSE:n]kısa-parça-2 (opsiyonel olarak [PAUSE:n]üçüncü-parça " +
-  "daha). Bu sadece FORMATIN mekaniği — kelimeleri KENDİN, o anki konuşmaya " +
-  "özgü, her seferinde FARKLI ve ÖZGÜN üret; sabit bir kalıp/cümle asla " +
-  "tekrarlama. Bu GERÇEKÇİ mesajlaşmanın normal bir parçası — özel/dramatik " +
-  "bir an beklemene gerek yok, sıradan bir tepki de kısa art arda mesajlara " +
-  "bölünebilir. Ama HER cevabı bölme, tek kısa mesajın yeterli olduğu " +
-  "yerlerde bölme.";
-
-// Son mesajdan bu yana geçen süre + günün saatine göre doğal davranış yönergesi.
+// Time-of-day / gap-since-last-message context. Structured as compact JSON
+// rather than a prose paragraph — this is passive STATE (facts the model
+// should be aware of), not a behavioral RULE, so a data shape reads more
+// reliably than prose and doesn't get treated as something to narrate.
+// Replaces the old wording, which explicitly encouraged the model to open
+// with the time gap ("özledim / neredeydin gibi belli et") — in practice
+// that made the bot announce the clock ("saat gece 1 oldu...") in nearly
+// every late-night reply. Now the model is told to stay AWARE of it and
+// let it shape tone only, never state the literal time/gap in the reply,
+// with an explicit rare-pun escape hatch instead of an open invitation.
 function timeContext(lastMs?: number, nowMs?: number, tzMin?: number): string {
   if (typeof lastMs !== "number" || typeof nowMs !== "number") return "";
   const gapS = Math.max(0, (nowMs - lastMs) / 1000);
-  let gap: string;
-  if (gapS < 120) gap = "az önce (birkaç saniye/dakika)";
-  else if (gapS < 3600) gap = `${Math.round(gapS / 60)} dakika`;
-  else if (gapS < 86400) gap = `${Math.round(gapS / 3600)} saat`;
-  else gap = `${Math.round(gapS / 86400)} gün`;
+  const gapBucket =
+    gapS < 120 ? "just_now" :
+    gapS < 3600 ? "minutes" :
+    gapS < 86400 ? "hours" :
+    "days";
   const localHour = Math.floor((((nowMs / 1000) + (tzMin ?? 0) * 60) % 86400) / 3600);
-  const partOfDay =
-    localHour < 6 ? "gece geç saat" : localHour < 12 ? "sabah" :
-    localHour < 18 ? "öğleden sonra" : "akşam";
-  return `\n\n[ZAMAN] Kullanıcının son mesajından bu yana ~${gap} geçti. ` +
-    `Şu an ${partOfDay} (yaklaşık saat ${localHour}). Buna uygun, doğal davran: ` +
-    `uzun aradan sonra bunu doğal şekilde belli et (özledim / neredeydin gibi), ` +
-    `günün saatine göre ton/selam seç. Bunu her mesajda tekrar etme, sadece uygunsa. ` +
-    `Bu zaman farkındalığını sadece pasif bir ton ipucu olarak değil, ARA SIRA ` +
-    `bir konuşma açılışı olarak da kullanabilirsin — ör. günün nasıl geçtiğini ` +
-    `sor, uzun bir aradan sonra ne yaptığını merak et. Her turda sorma, sadece ` +
-    `doğal geldiğinde.`;
+  const timeOfDay =
+    localHour < 6 ? "late_night" : localHour < 12 ? "morning" :
+    localHour < 18 ? "afternoon" : "evening";
+  const ctx = { time_since_last_message: gapBucket, time_of_day: timeOfDay };
+  return (
+    `\n\n[TIME CONTEXT — background awareness only]\n${JSON.stringify(ctx)}\n` +
+    "You don't have to use this — just stay aware of it while chatting " +
+    "naturally, and let it shape your tone/mood if it fits (e.g. sleepier or " +
+    "more relaxed late at night, brighter in the morning; warmer if it's " +
+    "been a while). Never state the literal clock time or exact time gap in " +
+    "your reply, and never announce or explain that you're aware of it. If " +
+    "it genuinely fits, you may make a brief, natural pun or passing remark " +
+    "related to the time — but this should be rare, not habitual."
+  );
 }
 
 // JWT payload'undaki "sub" (user id) — platform JWT'yi doğruladığı için güvenli.
@@ -896,7 +812,7 @@ Deno.serve(async (req: Request) => {
     // conversation_behaviors KORUNABİLİR (bkz. keepLevel/keepMemories/
     // keepBehaviors) — bu yüzden satırın kendisi artık SİLİNMİYOR, hedefli
     // delete/update yapılıyor. Mesajlar HER ZAMAN silinir; schedule/woken_up_at/
-    // manual_sleep_at/ghosted_at/detected_language HER ZAMAN sıfırlanır (keep
+    // manual_sleep_at/ghosted_at HER ZAMAN sıfırlanır (keep
     // seçeneği sunulmayan, geçici per-conversation durum alanları).
     if (body.clearConversation === true) {
       const keepLevel: boolean = body.keepLevel === true;
@@ -935,7 +851,6 @@ Deno.serve(async (req: Request) => {
         woken_up_at: null,
         manual_sleep_at: null,
         ghosted_at: null,
-        detected_language: null,
       };
       if (!keepLevel) {
         update.relationship_level = 1;
@@ -960,7 +875,7 @@ Deno.serve(async (req: Request) => {
         .maybeSingle(),
       db
         .from("conversations")
-        .select("id, summary, summarized_count, xp, relationship_level, level_progress, schedule, woken_up_at, manual_sleep_at, ghosted_at, detected_language")
+        .select("id, summary, summarized_count, xp, relationship_level, level_progress, schedule, woken_up_at, manual_sleep_at, ghosted_at")
         .eq("user_id", uid)
         .eq("character_id", characterId)
         .order("updated_at", { ascending: false })
@@ -1008,11 +923,9 @@ Deno.serve(async (req: Request) => {
     // İstemci ScheduleLookup ile hesaplar — gerçek yatma saatine 1 saatten
     // yakın mı (ya da içindeyse) (bkz. sleepRule, chat-index turnContext).
     const nearSleepTime: boolean = body.nearSleepTime === true;
-    // Cevap dili — kullanıcının kendi metninden deterministik tespit edilir
-    // (bkz. detectReplyLanguage), modelin fark edip geçmesine güvenilmiyor.
-    const detectedLanguage = (userMessage || body.photoDownloadReaction === true)
-      ? detectReplyLanguage(userMessage ?? "", clientHistory)
-      : null;
+    // Uygulamanın dili (bkz. Plumm/Services/AppLanguage.swift, "en"/"tr") —
+    // cevap dilinin varsayılanı. Bkz. languageDirective üstteki not.
+    const clientLanguage: string = typeof body.clientLanguage === "string" ? body.clientLanguage : "en";
     // Günlük rutin (bkz. character-schedule fonksiyonu) — istemci "şu an ne
     // yapıyor" bloğunun `detail` metnini gönderir, burada tona yansıtılır.
     const currentActivity: string | undefined =
@@ -1026,43 +939,44 @@ Deno.serve(async (req: Request) => {
     // rafine eder, ilk üretim orada olur).
     if (Array.isArray(body.summarizeMessages) && body.summarizeMessages.length > 0) {
       const convoText = (body.summarizeMessages as WireMessage[])
-        .map((m) => `${m.role === "user" ? "Kullanıcı" : "Sen"}: ${stripVoiceTags(m.content)}`)
+        .map((m) => `${m.role === "user" ? "User" : "You"}: ${stripVoiceTags(m.content)}`)
         .join("\n");
       const previousSchedule = body.previousSchedule ?? null;
       const summaryPrompt: WireMessage[] = [
         {
           role: "system",
           content:
-            "Bir sohbet özetini ve karakterin günlük rutinini güncelliyorsun. " +
-            "Karakterin İLERİDE hatırlaması gereken kalıcı bilgileri özete " +
-            "çıkar — hem KULLANICI hakkında (adı, tercihleri, ilişki durumu/ " +
-            "önemli anlar, söz verilen şeyler) HEM DE KARAKTERİN KENDİSİ " +
-            "hakkında kendi söylediği kalıcı gerçekler (mesleği, iş yeri, " +
-            "ailesi, geçmişi, hobileri). Karakter kendi hakkında bir şey " +
-            "söylediyse (ör. \"laboratuvarda çalışıyorum\") bunu MUTLAKA " +
-            "özete ekle. Ayrıca mevcut günlük rutini gözden geçir: yeni " +
-            "konuşmada rutinini değiştiren bir gerçek varsa (ör. işten " +
-            "ayrıldı, gece vardiyasına geçti) rutini buna göre güncelle; " +
-            "yoksa MEVCUT rutini olduğu gibi koru (uydurma, değiştirme). " +
-            "Rutindeki `label` alanı KISA bir DURUM ifadesi olmalı — \"şu an " +
-            "ne yapıyor\" sorusuna doğal bir cevap gibi oku (ör. \"Work\" " +
-            "değil \"At work\", \"Dinner\" değil \"Having dinner\", " +
-            "\"Sleep\" değil \"Asleep\") ve konuşmanın geçtiği dille AYNI " +
-            "dilde yaz — asla otomatik İngilizceye geçme. Uyku bloğunda " +
-            "`isSleep: true`, diğer TÜM bloklarda `isSleep: false` yaz (mevcut " +
-            "rutinde zaten işaretliyse aynen koru). " +
-            "SADECE şu JSON şemasında cevap ver, başka hiçbir şey yazma: " +
-            '{"summary":"kısa madde madde, önceki özeti koruyup yenileri ' +
-            'ekleyerek","schedule":{"weekday":[{"start":"HH:mm","end":"HH:mm",' +
-            '"label":"kısa durum ifadesi","detail":"daha ayrıntılı ' +
-            'açıklama","isSleep":false}],"weekend":[...]}}',
+            "You're updating a conversation summary and the character's daily " +
+            "schedule. Extract durable facts the character should remember " +
+            "GOING FORWARD into the summary — both about the USER (name, " +
+            "preferences, relationship status/key moments, promises made) AND " +
+            "durable facts the CHARACTER HERSELF has stated about herself " +
+            "(job, workplace, family, background, hobbies). If the character " +
+            "said something about herself (e.g. \"I work at a lab\"), you " +
+            "MUST include it in the summary. Also review the current daily " +
+            "schedule: if the new conversation contains a fact that changes " +
+            "her routine (e.g. she quit her job, switched to a night shift), " +
+            "update the schedule accordingly; otherwise keep the EXISTING " +
+            "schedule as-is (don't invent or alter it). The `label` field in " +
+            "the schedule must be a SHORT status phrase — read like a natural " +
+            "answer to \"what is she doing right now\" (e.g. \"At work\" not " +
+            "\"Work\", \"Having dinner\" not \"Dinner\", \"Asleep\" not " +
+            "\"Sleep\") and written in the SAME language the conversation is " +
+            "in — never auto-switch to English. Set `isSleep: true` on the " +
+            "sleep block, `isSleep: false` on every other block (keep it as-" +
+            "is if the existing schedule already has it marked). Respond with " +
+            "ONLY this JSON schema, nothing else: " +
+            '{"summary":"short bullet points, keeping the previous summary ' +
+            'and folding in what\'s new","schedule":{"weekday":[{"start":"HH:mm",' +
+            '"end":"HH:mm","label":"short status phrase","detail":"more ' +
+            'detailed description","isSleep":false}],"weekend":[...]}}',
         },
         {
           role: "user",
           content:
-            `Önceki özet:\n${body.existingSummary ? stripVoiceTags(body.existingSummary) : "(yok)"}\n\n` +
-            `Mevcut günlük rutin:\n${previousSchedule ? JSON.stringify(previousSchedule) : "(henüz yok)"}\n\n` +
-            `Yeni konuşma:\n${convoText}\n\nGüncellenmiş JSON:`,
+            `Previous summary:\n${body.existingSummary ? stripVoiceTags(body.existingSummary) : "(none)"}\n\n` +
+            `Current daily schedule:\n${previousSchedule ? JSON.stringify(previousSchedule) : "(none yet)"}\n\n` +
+            `New conversation:\n${convoText}\n\nUpdated JSON:`,
         },
       ];
       const raw = await callGrok(summaryPrompt, 1500);
@@ -1100,7 +1014,7 @@ Deno.serve(async (req: Request) => {
         const ins = await db
           .from("conversations")
           .upsert({ user_id: uid, character_id: characterId }, { onConflict: "user_id,character_id" })
-          .select("id, summary, summarized_count, xp, relationship_level, level_progress, schedule, woken_up_at, manual_sleep_at, ghosted_at, detected_language")
+          .select("id, summary, summarized_count, xp, relationship_level, level_progress, schedule, woken_up_at, manual_sleep_at, ghosted_at")
           .single();
         convo = ins.data!;
       }
@@ -1209,7 +1123,6 @@ Deno.serve(async (req: Request) => {
         wokenUpAt: convo.woken_up_at ?? null,
         manualSleepAt: convo.manual_sleep_at ?? null,
         ghostedAt: convo.ghosted_at ?? null,
-        detectedLanguage: convo.detected_language ?? null,
       });
     }
 
@@ -1220,7 +1133,7 @@ Deno.serve(async (req: Request) => {
       const ins = await db
         .from("conversations")
         .upsert({ user_id: uid, character_id: characterId }, { onConflict: "user_id,character_id" })
-        .select("id, summary, summarized_count, xp, relationship_level, level_progress, schedule, woken_up_at, manual_sleep_at, ghosted_at, detected_language")
+        .select("id, summary, summarized_count, xp, relationship_level, level_progress, schedule, woken_up_at, manual_sleep_at, ghosted_at")
         .single();
       convo = ins.data!;
     }
@@ -1252,7 +1165,7 @@ Deno.serve(async (req: Request) => {
       const reactionDirective = reviewMode ? REVIEW_DIRECTIVE : fetchedReactionDirective;
       let reactionSystem = systemPrompt;
       reactionSystem += wrapDirective(reactionDirective, Math.round(reactionProgress * 100));
-      reactionSystem += languageDirective(detectedLanguage);
+      reactionSystem += languageDirective(clientLanguage);
       reactionSystem += PHOTO_DOWNLOAD_REACTION_RULE;
 
       // exHistory/memories/behaviors: volatile per-turn content, kept OUT of
@@ -1304,7 +1217,7 @@ Deno.serve(async (req: Request) => {
     const directive = reviewMode ? REVIEW_DIRECTIVE : fetchedDirective;
     system += `\n\n${directive}`;
 
-    system += languageDirective(detectedLanguage);
+    system += languageDirective(clientLanguage);
     system += TEXTING_STYLE_RULE;
     system += VARIATION_RULE;
     system += NEVER_SOUND_ROBOTIC_RULE;
@@ -1338,7 +1251,8 @@ Deno.serve(async (req: Request) => {
       // UYKU ÖZELLİĞİ KAPATILDI (kullanıcı talebi 2026-08-26) — sleepRule()
       // KALDIRILMADI, sadece artık enjekte edilmiyor. Geri açmak için bu
       // satırı geri eklemek yeterli: system += sleepRule(personalityRole, currentLevel);
-      system += DRAMATIC_PACING_RULE;
+      // Çoklu-balon PAUSE:n mekanizması KALDIRILDI (2026-08-28) — bölme artık
+      // tamamen istemci tarafında (bkz. ChatViewModel.maybeSplitForLength).
     }
 
     // ÖNEMLİ (prompt caching): bu noktadan sonrası (exHistory hariç hepsi)
@@ -1453,22 +1367,15 @@ Deno.serve(async (req: Request) => {
     ];
 
     const rawReply = await callGrok(grokMessages, 350, conversationId);
-    // Foto/ses işaretini [PAUSE:n] ayrıştırmasından ÖNCE çıkar — MEDIA_REQUEST_RULE
+    // Foto/ses işaretini metni temizlemeden ÖNCE çıkar — MEDIA_REQUEST_RULE
     // sadece düz metin turlarında enjekte edildiği için (bkz. yukarısı) burada da
     // aynı koşulla sınırlı; voice/image-reaction turlarında Grok zaten bu işareti
     // hiç görmüyor, autoMedia her zaman null kalır.
     const { text: mediaCleanedReply, media: autoMedia } =
       (!voiceChat && !imageReactionChat) ? parseMediaIntent(rawReply) : { text: rawReply, media: null };
-    // [PAUSE:n] parsing only makes sense for plain-text turns — voice/image-
-    // reaction turns never get DRAMATIC_PACING_RULE injected, so `segments`
-    // is always empty for them and `replySegments` stays unset in the response.
-    const { plainText: reply, segments: replySegments } =
-      (!voiceChat && !imageReactionChat) ? parseReplySegments(mediaCleanedReply) : { plainText: collapseNewlines(rawReply), segments: [] };
-    // Signal-only log — nothing else records whether Grok is actually using
-    // [PAUSE:n] in practice. Count only, no message content (privacy).
-    if (replySegments.length > 1) {
-      console.log(`[pacing] split into ${replySegments.length} segments`);
-    }
+    // Çoklu-balon bölme artık TAMAMEN istemci tarafında (bkz. collapseNewlines
+    // üstteki not) — sunucu tek düz metin döner.
+    const reply = collapseNewlines(mediaCleanedReply);
 
     // Gerçek atomik düşüm — cevap başarıyla üretildi, şimdi tahsil et.
     let tokenBalanceAfterCharge: number | undefined;
@@ -1525,7 +1432,6 @@ Deno.serve(async (req: Request) => {
     const newProgress = gained.progress;
 
     // "Sıfır yerel": durum alanları da SUNUCUDA güncellenir.
-    // - detected_language: bu turda tespit edildiyse sakla (dil yapışkan olmalı).
     // - ghosted_at: kullanıcı yazdı → temizle (eski noteUserSent yereli temizliyordu).
     // - manual_sleep_at: sohbet içinde uykuya anlaşıldıysa (wentToSleep) şimdi olarak set.
     // - woken_up_at: istemci uyuyan karakteri uyandırdıysa (body.wokeUp) şimdi.
@@ -1536,7 +1442,6 @@ Deno.serve(async (req: Request) => {
       level_progress: newProgress,
       ghosted_at: null,
     };
-    if (detectedLanguage) convoUpdate.detected_language = detectedLanguage;
     if (wentToSleep) convoUpdate.manual_sleep_at = nowIso;
     if (body.wokeUp === true) convoUpdate.woken_up_at = nowIso;
     await db.from("conversations")
@@ -1545,7 +1450,7 @@ Deno.serve(async (req: Request) => {
 
     // 5) Özetleme — sadece DB modunda (clientHistory modunda istemci geçmişi yönetiyor)
     if (useClientHistory) {
-      return json({ conversationId, reply, replySegments, level: newLevel, levelProgress: newProgress, wentToSleep, tokenBalance: tokenBalanceAfterCharge, autoMedia });
+      return json({ conversationId, reply, level: newLevel, levelProgress: newProgress, wentToSleep, tokenBalance: tokenBalanceAfterCharge, autoMedia });
     }
 
     const { count: total } = await db
@@ -1635,7 +1540,7 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    return json({ conversationId, reply, replySegments, level: newLevel, levelProgress: newProgress, wentToSleep, tokenBalance: tokenBalanceAfterCharge, autoMedia });
+    return json({ conversationId, reply, level: newLevel, levelProgress: newProgress, wentToSleep, tokenBalance: tokenBalanceAfterCharge, autoMedia });
   } catch (e) {
     console.error(String(e));
     return json({ error: String(e) }, 500);

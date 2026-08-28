@@ -23,13 +23,6 @@ struct PlummApp: App {
     @Environment(\.scenePhase) private var scenePhase
     @State private var notificationDelegate: NotificationDelegate?
 
-    init() {
-        // App is English-only regardless of device language — String(localized:)
-        // and NSLocalizedString read this before Text's \.locale environment
-        // override even applies, so it must be forced here, before any lookup.
-        UserDefaults.standard.set(["en"], forKey: "AppleLanguages")
-    }
-
     var body: some Scene {
         WindowGroup {
             Group {
@@ -57,7 +50,6 @@ struct PlummApp: App {
             .environment(store)
             .environment(tokenStore)
             .environment(onboarding)
-            .environment(\.locale, Locale(identifier: "en"))
             .preferredColorScheme(.dark)
             .task {
                 PurchaseService.shared.configure()

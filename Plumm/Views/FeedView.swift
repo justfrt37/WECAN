@@ -324,7 +324,7 @@ private struct FeedCard: View {
                     .foregroundStyle(.white.opacity(0.8))
                 }
 
-                if let job = character.profession {
+                if let job = character.localizedProfession {
                     Label {
                         Text(job).font(.system(size: 11, weight: .semibold))
                     } icon: {

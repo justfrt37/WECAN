@@ -198,7 +198,7 @@ private struct CharacterGridCard: View {
             if let country = character.country {
                 label("mappin.and.ellipse", country, color: .white.opacity(0.85))
             }
-            if let job = character.profession {
+            if let job = character.localizedProfession {
                 label("briefcase.fill", job, color: AppColor.pinkSoft)
             }
         }

@@ -19,6 +19,10 @@ private struct ChatRequest: Codable {
     let summarizeMessages: [WireHistoryMessage]?
     let existingSummary: String?
     let level: Int?   // istemci taraflı hesaplanan güncel seviye — sunucu sadece saklar
+    /// Uygulamanın dili ("en"/"tr" — bkz. AppLanguage.uiCode). Cevap dilinin
+    /// varsayılanı: bot bunu konuşur, kullanıcı açıkça başka dilde yazmadıkça
+    /// (bkz. chat/index.ts languageDirective).
+    let clientLanguage: String
     // Zaman farkındalığı — epoch ms cinsinden. Sunucu bunlarla mesaj arasındaki
     // boşluğu ve günün saatini hesaplayıp bota doğal bir zaman bağlamı verir.
     let lastMessageAt: Double?
@@ -666,6 +670,7 @@ struct ChatService {
             summarizeMessages: summarizeMessages,
             existingSummary: existingSummary,
             level: level,
+            clientLanguage: AppLanguage.uiCode,
             lastMessageAt: lastMessageAt.map { $0.timeIntervalSince1970 * 1000 },
             clientNow: Date().timeIntervalSince1970 * 1000,
             tzOffsetMinutes: TimeZone.current.secondsFromGMT() / 60,

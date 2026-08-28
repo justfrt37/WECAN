@@ -14,7 +14,7 @@ const corsHeaders = {
 
 const XAI_API_KEY = Deno.env.get("XAI_API_KEY") ?? "";
 const XAI_URL = "https://api.x.ai/v1/chat/completions";
-const MODEL = "grok-4-1-fast-non-reasoning";
+const MODEL = "grok-4.3";
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
