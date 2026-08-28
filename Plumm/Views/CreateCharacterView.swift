@@ -1160,7 +1160,6 @@ struct CreateCharacterView: View {
             Spacer()
         }
         .padding(.horizontal, 40)
-        .task { await generatePhoto() }
     }
 
     // MARK: - Photo preview (confirm, then continue to history — no regenerate,
