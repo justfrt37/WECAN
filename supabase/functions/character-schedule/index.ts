@@ -39,70 +39,70 @@ function userIdFromJWT(authHeader: string | null): string | null {
   } catch { return null; }
 }
 
-// Modelin kendi haline bırakılınca çoğu karakter aynı ortalama saatlere
-// (ör. 18:00-19:00 akşam yemeği) yığılıyor — birden fazla bot aynı anda
-// "having dinner" gösteriyor. Her üretimde RASTGELE bir "kronotip" seçip
-// promptun ZORUNLU bir çıpası yapıyoruz, böylece karakterler arasında
-// gerçek yapısal çeşitlilik oluşuyor (sadece LLM sıcaklığına güvenmek yetmedi).
-// Bu bir "geç saatlere kadar sohbet" uygulaması — HİÇBİR karakter gece 01:00'den
-// ÖNCE yatmamalı (kullanıcı talebi, 2026-07). Eskiden bazı kronotipler
-// 21:30/23:00 gibi erken uyku saatleri veriyordu, bu yüzden aktif sohbet
-// sırasında bile botlar "ben yatıyorum" diyordu. Tüm uyku saatleri 01:00
-// sonrasına çekildi; uyanma saatleri gerçekçilik için aynı kaldı (bkz.
-// buildScheduleInstructions'daki ek sabit taban çizgisi de).
+// Left to its own devices, the model piles most characters onto the same
+// average times (e.g. dinner 18:00-19:00) — multiple bots show "having
+// dinner" at once. Each generation RANDOMLY picks a "chronotype" and makes
+// it a MANDATORY anchor in the prompt, so real structural variety emerges
+// across characters (relying on LLM temperature alone wasn't enough).
+// This is a "chat until late" app — NO character should go to bed before
+// 01:00 (user request, 2026-07). Some chronotypes used to give early sleep
+// times like 21:30/23:00, so bots would say "I'm going to bed" even during
+// an active chat. All sleep times were pushed past 01:00; wake times stayed
+// the same for realism (see the extra hardcoded baseline in
+// buildScheduleInstructions too).
 const CHRONOTYPES = [
-  "Sabahçı ama geç yatan tip: 05:30-06:30 arası uyanır, akşam yemeğini erken " +
-  "(17:30-18:30 arası) yer, gece 01:00-01:30 arası uyur.",
-  "Standart mesai tipi: 07:00-07:30 arası uyanır, akşam yemeğini 19:00-20:00 " +
-  "arası yer, gece 01:30-02:00 arası uyur.",
-  "Gece kuşu tip: 09:30-10:30 arası uyanır, akşam yemeğini geç (20:30-21:30 " +
-  "arası) yer, gece 02:30-03:30 arası uyur.",
-  "Serbest/düzensiz çalışan tipi: gün gün değişen, kalıba uymayan yemek " +
-  "saatleri var; geleneksel öğün saatlerini atlayıp ara sıra atıştırabilir, " +
-  "uyku saati HİÇBİR ZAMAN 01:00'den önce olmaz, genelde 02:00-04:00 arası " +
-  "değişken.",
-  "Vardiyalı/alışılmadık saatler tipi: akşam ya da gece çalışır, ana " +
-  "öğününü 15:00 veya 22:00 gibi sıra dışı bir saatte yer, uyku saati " +
-  "HİÇBİR ZAMAN 01:00'den önce olmaz, iş bitimine göre 03:00-05:00 arası " +
-  "da olabilir.",
+  "Early riser but late sleeper: wakes 05:30-06:30, eats dinner early " +
+  "(17:30-18:30), sleeps 01:00-01:30.",
+  "Standard 9-to-5 type: wakes 07:00-07:30, eats dinner 19:00-20:00, " +
+  "sleeps 01:30-02:00.",
+  "Night owl: wakes 09:30-10:30, eats dinner late (20:30-21:30), sleeps " +
+  "02:30-03:30.",
+  "Freelance/irregular worker: meal times shift day to day and don't " +
+  "follow a fixed pattern; may skip traditional meal times and snack " +
+  "instead. Sleep time is NEVER before 01:00, usually varies 02:00-04:00.",
+  "Shift worker / unusual hours: works evenings or nights, eats their " +
+  "main meal at an unusual time like 15:00 or 22:00. Sleep time is NEVER " +
+  "before 01:00, can be 03:00-05:00 depending on when work ends.",
 ];
 
 function buildScheduleInstructions(interests: string[]): string {
   const chronotype = CHRONOTYPES[Math.floor(Math.random() * CHRONOTYPES.length)];
   const interestsNote = interests.length > 0
-    ? `Karakterin ilgi alanları: ${interests.join(", ")}. Uygun düşen boş ` +
-      `zaman/hafta sonu bloklarını bunlarla renklendir (ör. bir outdoor hobi ` +
-      "varsa hafta sonu bloklarından biri o olsun, bir gaming/ev hobisi varsa " +
-      "akşam boş zaman bloklarından biri o olsun) — ama HER blok değil, " +
-      "sadece mantıklı düşenler; işle/uykuyla çelişen bir ilgi alanını o " +
-      "bloğa zorlama. "
+    ? `Character's interests: ${interests.join(", ")}. Color in fitting ` +
+      "free-time/weekend blocks with these (e.g. if there's an outdoor " +
+      "hobby, make one weekend block that; if there's a gaming/home hobby, " +
+      "make one evening free-time block that) — but NOT every block, only " +
+      "where it makes sense; don't force an interest into a block it " +
+      "conflicts with (work/sleep). "
     : "";
   return (
-    "Bu karakter için gerçekçi bir günlük rutin (hafta içi + hafta sonu) " +
-    "üret. Kişiliğine ve mesleğine uygun, somut zaman blokları yaz — uyku " +
-    "dahil GÜNÜN TAMAMINI boşluksuz kapla. Hafta sonu hafta içinden FARKLI " +
-    "olmalı (çoğu meslek 7 gün çalışmaz). " + interestsNote +
-    `UYANMA/YEMEK/UYKU SAATLERİNİ ŞU KALIBA GÖRE BELİRLE: ${chronotype} ` +
-    "Bu kalıp karakterin gerçek mesleğiyle AÇIKÇA çelişmedikçe (ör. gece " +
-    "vardiyasında çalışan biri sabahçı olamaz) uygula; çelişirse kalıbın " +
-    "RUHUNU (ör. düzensiz/sıra dışı saatler) mesleğe uyarlayarak koru. " +
-    "SERT KURAL: uyku bloğu (isSleep:true) HİÇBİR ZAMAN gece 01:00'den ÖNCE " +
-    "başlayamaz — bu geç saatlere kadar sohbet edilen bir uygulama, hiçbir " +
-    "karakter 01:00'den önce yatmaz, kalıpta ne yazarsa yazsın bu kuralı " +
-    "asla ihlal etme. " +
-    "`label` alanı KISA bir DURUM ifadesi olmalı — \"şu an ne yapıyor\" " +
-    "sorusuna doğal bir cevap gibi oku (ör. \"Work\" değil \"At work\", " +
-    "\"Dinner\" değil \"Having dinner\", \"Commute\" değil \"Commuting home\", " +
-    "\"Sleep\" değil \"Asleep\"). " +
-    "Her zaman karakterin kendi konuştuğu dilde yaz (bkz. sistem promptundaki " +
-    "dil kuralı) — karakter Türkçe konuşuyorsa label/detail de Türkçe olsun, " +
-    "asla otomatik İngilizceye geçme. " +
-    "Karakterin UYUDUĞU blok(lar)da `isSleep` alanını `true` yap, diğer TÜM " +
-    "bloklarda `false` yap — her gün için genelde tek bir uyku bloğu olur. " +
-    "SADECE şu JSON şemasında cevap ver, başka hiçbir şey yazma (markdown " +
-    "kod bloğu da yok):\n" +
-    '{"weekday":[{"start":"HH:mm","end":"HH:mm","label":"kısa durum ' +
-    'ifadesi","detail":"daha ayrıntılı açıklama","isSleep":false}],' +
+    "Generate a realistic daily routine (weekday + weekend) for this " +
+    "character. Write concrete time blocks fitting their personality and " +
+    "profession — cover the ENTIRE day with no gaps, sleep included. " +
+    "Weekend should be DIFFERENT from weekday (most professions aren't " +
+    "7 days a week). " + interestsNote +
+    `DETERMINE WAKE/MEAL/SLEEP TIMES USING THIS PATTERN: ${chronotype} ` +
+    "Apply it unless it CLEARLY conflicts with the character's actual " +
+    "profession (e.g. someone working night shift can't be an early " +
+    "riser); if it conflicts, keep the pattern's SPIRIT (e.g. " +
+    "irregular/unusual hours) adapted to the profession instead. " +
+    "HARD RULE: the sleep block (isSleep:true) can NEVER start before " +
+    "01:00 — this is an app people chat in until late, no character goes " +
+    "to bed before 01:00, no matter what the pattern above says. Never " +
+    "break this rule. " +
+    "The `label` field should be a SHORT status phrase — read like a " +
+    "natural answer to \"what are they doing right now\" (e.g. \"At work\" " +
+    "not \"Work\", \"Having dinner\" not \"Dinner\", \"Commuting home\" not " +
+    "\"Commute\", \"Asleep\" not \"Sleep\"). " +
+    "Always write in the character's own reply language (see the language " +
+    "rule in the system prompt) — if the character speaks Turkish, " +
+    "label/detail should be Turkish too, never auto-switch to English. " +
+    "Set `isSleep` to `true` on the block(s) where the character is " +
+    "ASLEEP, `false` on all others — usually one sleep block per day. " +
+    "Respond with ONLY this JSON schema, nothing else (no markdown code " +
+    "block either):\n" +
+    '{"weekday":[{"start":"HH:mm","end":"HH:mm","label":"short status ' +
+    'phrase","detail":"more detailed description","isSleep":false}],' +
     '"weekend":[...]}'
   );
 }

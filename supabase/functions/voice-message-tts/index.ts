@@ -77,8 +77,7 @@ Deno.serve(async (req) => {
     const vibe: string | undefined = body.vibe;
     const lang: string | undefined = body.lang;
     const useElevenLabs: boolean = body.useElevenLabs === true;
-    // Per-character override (characters.voice_id, set by DEV-curated
-    // character creation — see dev-create-character). Null/absent keeps the
+    // Per-character override (characters.voice_id). Null/absent keeps the
     // existing role+vibe auto-map below (elevenVoiceIdFor).
     const voiceIdOverride: string | undefined = typeof body.voiceId === "string" && body.voiceId.trim() ? body.voiceId.trim() : undefined;
 
@@ -138,13 +137,21 @@ Deno.serve(async (req) => {
         );
       }
       const bytes = new Uint8Array(await elevenResp.arrayBuffer());
+      // Charge başarısız olursa sesi TESLİM ETME — eskiden charge sonucu
+      // yoksayılıp ses her durumda 200 ile dönüyordu (bkz. chat-image'daki
+      // aynı düzeltme, aynı bug sınıfı).
       const charge = await chargeOrReject(uid, 12, "voice");
-      const voiceUrl = charge.ok ? await uploadVoice(bytes, uid) : null;
+      if (!charge.ok) {
+        return new Response(JSON.stringify({ error: "insufficient_tokens" }), {
+          status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      const voiceUrl = await uploadVoice(bytes, uid);
       return new Response(bytes, {
         status: 200,
         headers: {
           ...corsHeaders, "Content-Type": "audio/mpeg",
-          "X-Token-Balance": charge.ok ? String(charge.balance) : "",
+          "X-Token-Balance": String(charge.balance),
           "X-Voice-Url": voiceUrl ?? "",
         },
       });
@@ -182,12 +189,17 @@ Deno.serve(async (req) => {
     const bytes = Uint8Array.from(atob(audioContent), (c) => c.charCodeAt(0));
 
     const charge = await chargeOrReject(uid, 12, "voice");
-    const voiceUrl = charge.ok ? await uploadVoice(bytes, uid) : null;
+    if (!charge.ok) {
+      return new Response(JSON.stringify({ error: "insufficient_tokens" }), {
+        status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    const voiceUrl = await uploadVoice(bytes, uid);
     return new Response(bytes, {
       status: 200,
       headers: {
         ...corsHeaders, "Content-Type": "audio/mpeg",
-        "X-Token-Balance": charge.ok ? String(charge.balance) : "",
+        "X-Token-Balance": String(charge.balance),
         "X-Voice-Url": voiceUrl ?? "",
       },
     });

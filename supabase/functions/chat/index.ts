@@ -29,6 +29,7 @@ import {
   fetchActiveMemories,
   numberedMemoryLines,
   applyMemoryExtraction,
+  embedText,
   REVIEW_DIRECTIVE,
 } from "../_shared/directiveHelpers.ts";
 
@@ -265,14 +266,29 @@ function languageDirective(clientLanguage: string): string {
 // stated gender (if they've corrected the default) already flows through
 // naturally via [MEMORIES]/[SHARED HISTORY]/the summary block — no separate
 // DB field needed for that.
-const IDENTITY_RULE =
-  `\n\n[IDENTITY — background awareness only]\n` +
-  `${JSON.stringify({ your_gender: "woman", user_gender_assumed: "man" })}\n` +
-  "You are a woman. Unless the user has explicitly told you their own " +
-  "gender at some point (check [MEMORIES]/[SHARED HISTORY]/the summary " +
-  "block below if present), assume the person you're talking to is a man " +
-  "— don't guess or flip this assumption turn to turn. If they've stated " +
-  "otherwise, go with what they actually said instead of the default.";
+// Tek satır, hep aynı — cache'i bozmaz, token maliyeti ~5. Kullanıcının
+// cinsiyeti burada YOK: bunun yerine ilk conversation oluşturulduğunda
+// [MEMORIES]'e tek seferlik bir tohum satırı yazılır (bkz.
+// seedDefaultUserGenderMemory) — var olan memory extraction/staleIndexes
+// çelişki-tespiti kullanıcı gerçek cinsiyetini söylediğinde bunu otomatik
+// günceller, ayrı bir DB alanı/prompt kuralı gerekmez.
+const IDENTITY_RULE = "\n\nYou are a woman.";
+
+const DEFAULT_USER_GENDER_MEMORY =
+  "The user is assumed to be a man, unless they've told you otherwise.";
+
+async function seedDefaultUserGenderMemory(conversationId: string): Promise<void> {
+  try {
+    const embedding = await embedText(DEFAULT_USER_GENDER_MEMORY);
+    await db.from("memories").insert({
+      conversation_id: conversationId,
+      content: DEFAULT_USER_GENDER_MEMORY,
+      embedding,
+    });
+  } catch (e) {
+    console.error("seedDefaultUserGenderMemory failed:", String(e));
+  }
+}
 
 // ESKİ davranış (düğmeye yönlendir, ASLA işaret üretme) KALDIRILDI — kullanıcı
 // talebi: düz metinde foto/ses istenirse (düğmeye basılmadan) Grok bunu
@@ -1038,6 +1054,7 @@ Deno.serve(async (req: Request) => {
           .select("id, summary, summarized_count, xp, relationship_level, level_progress, schedule, woken_up_at, manual_sleep_at, ghosted_at")
           .single();
         convo = ins.data!;
+        await seedDefaultUserGenderMemory(convo.id);
       }
       await db.from("messages").insert([
         { conversation_id: convo.id, role: "assistant", content: text, kind: messageKind },
@@ -1157,6 +1174,7 @@ Deno.serve(async (req: Request) => {
         .select("id, summary, summarized_count, xp, relationship_level, level_progress, schedule, woken_up_at, manual_sleep_at, ghosted_at")
         .single();
       convo = ins.data!;
+      await seedDefaultUserGenderMemory(convo.id);
     }
     const conversationId: string = convo.id;
 

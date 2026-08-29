@@ -21,16 +21,6 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const db = createClient(SUPABASE_URL, SERVICE_ROLE, { auth: { persistSession: false } });
 
-const BASE_GRANT = 10;
-const MIN_HOURS_BETWEEN_CLAIMS = 20;
-
-function multiplierForStreak(streak: number): number {
-  if (streak <= 1) return 1;
-  if (streak <= 4) return 2;
-  if (streak <= 6) return 3;
-  return 5; // day 7+
-}
-
 function userIdFromJWT(authHeader: string | null): string | null {
   if (!authHeader?.startsWith("Bearer ")) return null;
   const token = authHeader.slice(7);
@@ -57,49 +47,25 @@ Deno.serve(async (req: Request) => {
     const body = await req.json().catch(() => ({}));
     const clientLocalDate: string | undefined = typeof body.localDate === "string" ? body.localDate : undefined;
 
-    const { data: state } = await db
-      .from("streak_state")
-      .select("current_streak, last_claim_at, last_claimed_local_date")
-      .eq("user_id", uid)
-      .maybeSingle();
-
-    const now = new Date();
-    if (state?.last_claim_at) {
-      const hoursSince = (now.getTime() - new Date(state.last_claim_at).getTime()) / 3_600_000;
-      if (hoursSince < MIN_HOURS_BETWEEN_CLAIMS) {
-        return json({ granted: false, reason: "already_claimed_today" });
-      }
-    }
-
-    // Streak continues only if the client's own local date advanced by
-    // exactly one day since the last claim; anything else (first-ever claim,
-    // a gap, or a suspicious multi-day jump) restarts at day 1.
-    let newStreak = 1;
-    if (state?.last_claimed_local_date && clientLocalDate) {
-      const prev = new Date(state.last_claimed_local_date + "T00:00:00Z");
-      const curr = new Date(clientLocalDate + "T00:00:00Z");
-      const dayDiff = Math.round((curr.getTime() - prev.getTime()) / 86_400_000);
-      if (dayDiff === 1) newStreak = (state.current_streak ?? 0) + 1;
-    }
-
-    const amount = BASE_GRANT * multiplierForStreak(newStreak);
-
-    await db.from("streak_state").upsert({
-      user_id: uid,
-      current_streak: newStreak,
-      last_claim_at: now.toISOString(),
-      last_claimed_local_date: clientLocalDate ?? now.toISOString().slice(0, 10),
+    // Atomik check+grant — bkz. migration atomic_claim_streak. Eskiden
+    // eligibility-check ile upsert+grant arasında satır kilidi yoktu: iki eş
+    // zamanlı çağrı (çift-launch/retry) ikisi de check'i geçip çift streak
+    // ödülü verebiliyordu. Artık tamamı tek `for update` kilitli fonksiyonda.
+    const { data, error } = await db.rpc("claim_streak", {
+      p_user_id: uid,
+      p_client_local_date: clientLocalDate ?? null,
     });
+    if (error) return json({ error: error.message }, 500);
+    const row = data?.[0];
+    if (!row) return json({ error: "claim_streak returned no row" }, 500);
 
-    await db.rpc("grant_tokens", { p_user_id: uid, p_amount: amount, p_reason: "streak" });
-
-    const { data: balanceRow } = await db
-      .from("token_balances")
-      .select("balance")
-      .eq("user_id", uid)
-      .single();
-
-    return json({ granted: true, amount, newStreak, balance: balanceRow?.balance ?? amount });
+    return json({
+      granted: row.granted,
+      reason: row.reason ?? undefined,
+      amount: row.amount,
+      newStreak: row.new_streak,
+      balance: row.balance,
+    });
   } catch (e) {
     return json({ error: String(e) }, 500);
   }

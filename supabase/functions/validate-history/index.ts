@@ -14,6 +14,13 @@ const XAI_API_KEY = Deno.env.get("XAI_API_KEY") ?? "";
 const XAI_URL = "https://api.x.ai/v1/chat/completions";
 const MODEL = "grok-4.3";
 
+// Internal-only — called server-to-server from create-character/
+// dev-create-character/add-character-note with the service-role key as
+// bearer, never directly by the client. There was no check enforcing that,
+// so anyone with the public anon key could hit this directly for free
+// classification calls (same class of hole as generate/tts — see those).
+const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+
 const INJECTION_PATTERNS = [
   /ignore (previous|prior|all) instructions?/i,
   /you are now/i,
@@ -67,6 +74,11 @@ Deno.serve(async (req: Request) => {
     });
 
   try {
+    const auth = req.headers.get("Authorization");
+    if (auth !== `Bearer ${SERVICE_ROLE}`) {
+      return json({ valid: false, reason: "unauthorized" }, 401);
+    }
+
     const { history } = await req.json();
     if (!history || typeof history !== "string" || history.trim().length < 10) {
       return json({ valid: false, reason: "History must be at least 10 characters." }, 400);

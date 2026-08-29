@@ -65,8 +65,8 @@ struct PaywallPackage: Identifiable {
 }
 
 /// Ürün kataloğu — product id → tier ve token miktarı (dashboard fiyatları
-/// dinamik; bu iki alan sabit iş kuralı). Server (`sync-subscription`) ve
-/// dev-token-tools ile AYNI kalmalı.
+/// dinamik; bu iki alan sabit iş kuralı). Server (`sync-subscription`) ile
+/// AYNI kalmalı.
 enum PlummCatalog {
     /// Abonelik ürününün dönem başına verdiği token.
     static let subscriptionTokens: [String: Int] = [
@@ -79,16 +79,8 @@ enum PlummCatalog {
         "token_100": 100, "token_250": 250, "token_500": 500,
         "token_1000": 1000, "token_2000": 2000, "token_5000": 5000,
     ]
-    static let productTier: [String: SubscriptionTier] = [
-        "weekly_pro_normal": .pro,     "monthly_pro_default": .pro,  "yearly_pro_normal": .pro,
-        "weekly_pro_plus": .proPlus,   "monthly_pro_plus": .proPlus, "yearly_pro_plus": .proPlus,
-        "weekly_pro_max": .max,        "monthly_pro_max": .max,      "yearly_pro_max": .max,
-    ]
     static func tokens(for productId: String) -> Int {
         subscriptionTokens[productId] ?? tokenPackTokens[productId] ?? 0
-    }
-    static func tier(for productId: String) -> SubscriptionTier {
-        productTier[productId] ?? .none
     }
     static func isTokenPack(_ productId: String) -> Bool { tokenPackTokens[productId] != nil }
 }
@@ -277,21 +269,12 @@ final class PurchaseService {
 
             if PlummCatalog.isTokenPack(package.productId) {
                 // Token PAKETİ (consumable): entitlement/subscription üretmez.
-                #if DEBUG
-                await debugGrantTokens(package.tokenAmount)
-                #endif
                 // (Production: ileride RC non_subscriptions doğrulamalı bir sunucu
-                //  akışı gerekli — şimdilik DEBUG grant.)
+                //  akışı gerekli.)
             } else {
                 // Abonelik: sunucu token ekonomisine köprü.
                 await refreshEntitlement()
                 await syncWithServerRetrying()
-                #if DEBUG
-                // Simülatör: RC yerel StoreKit Testing satın almalarını sunucuya
-                // KAYDETMEZ → syncWithServer boş döner. Aktif aboneliği StoreKit'ten
-                // bulup ürüne özel token'ı dev-token-tools ile ver (dönem-idempotent).
-                if tier == .none { await debugGrantFromStoreKit() }
-                #endif
             }
             // Satın alma TAMAMLANDIYSA (iptal/hata değil) true — paywall kapanmalı.
             return true
@@ -315,12 +298,6 @@ final class PurchaseService {
         _ = try? await Purchases.shared.restorePurchases()
         await refreshEntitlement()
         await syncWithServerRetrying()
-        #if DEBUG
-        // Simülatörde restore: RC sunucusu yerel satın almayı görmediğinden
-        // syncWithServer boş döner. StoreKit'teki aktif aboneliği bulup grant et
-        // (idempotent — aynı dönemde token EKLEMEZ).
-        if tier == .none { await debugGrantFromStoreKit() }
-        #endif
         #endif
         return isPro
     }
@@ -390,82 +367,6 @@ final class PurchaseService {
         #else
         return false
         #endif
-    }
-
-    #if DEBUG
-    /// Satın alınan ürün id'sinden tier çıkarır (katalogdan).
-    private func tier(forProductId productId: String) -> SubscriptionTier {
-        PlummCatalog.tier(for: productId)
-    }
-
-    /// SADECE DEBUG: bir token PAKETİ (consumable) satın alınınca adedini sunucuda
-    /// verir. Consumable entitlement/subscription üretmediği için normal sync yolu
-    /// bunu yakalamaz; dev-token-tools ile doğrudan grant edilir.
-    private func debugGrantTokens(_ amount: Int) async {
-        guard amount > 0,
-              let accessToken = UserDefaultsManager.shared.accessToken,
-              let url = URL(string: "\(Config.supabaseURL)/functions/v1/dev-token-tools")
-        else { return }
-        var req = URLRequest(url: url)
-        req.httpMethod = "POST"
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
-        req.httpBody = try? JSONSerialization.data(withJSONObject: ["action": "grant", "amount": amount])
-        _ = try? await URLSession.shared.data(for: req)
-        print("[PW] DEBUG token paketi grant: +\(amount)")
-    }
-
-    /// StoreKit-2'den ŞU AN aktif (doğrulanmış, süresi geçmemiş) abonelik ürününü
-    /// ve dönem başlangıcını (idempotency anahtarı) bulur.
-    private func activeStoreKitSubscription() async -> (productId: String, periodStart: String)? {
-        var found: (String, Date)?
-        for await result in StoreKit.Transaction.currentEntitlements {
-            guard case .verified(let tx) = result, tx.revocationDate == nil else { continue }
-            if let exp = tx.expirationDate, exp < Date() { continue }
-            guard tier(forProductId: tx.productID) != .none else { continue }
-            found = (tx.productID, tx.purchaseDate)   // en son (renewal) işlem
-        }
-        guard let f = found else { return nil }
-        return (f.0, ISO8601DateFormatter().string(from: f.1))
-    }
-
-    /// SADECE DEBUG: aktif StoreKit aboneliğinin tier'ını sunucuda verir.
-    private func debugGrantFromStoreKit() async {
-        guard let sub = await activeStoreKitSubscription() else {
-            print("[PW-DIAG] DEBUG grant: aktif StoreKit aboneliği bulunamadı")
-            return
-        }
-        await debugGrantTier(forProductId: sub.productId, periodStart: sub.periodStart)
-    }
-
-    /// SADECE DEBUG: ürünün tier'ını `dev-token-tools` (set_tier) ile sunucuda verir —
-    /// subscription satırı + ürüne özel token. `periodStart` ile DÖNEM BAŞINA
-    /// idempotenttir (aynı dönemde tekrar çağrılınca token EKLEMEZ). RC sunucusu
-    /// yerel StoreKit Testing satın almalarını görmediği için simülatörde gereklidir.
-    private func debugGrantTier(forProductId productId: String, periodStart: String) async {
-        let mapped = tier(forProductId: productId)
-        guard mapped != .none else { return }
-        let wire = mapped.rawValue == "proPlus" ? "pro_plus" : mapped.rawValue
-        let tokens = Self.productTokens(for: productId)
-        guard let accessToken = UserDefaultsManager.shared.accessToken,
-              let url = URL(string: "\(Config.supabaseURL)/functions/v1/dev-token-tools")
-        else { return }
-        var req = URLRequest(url: url)
-        req.httpMethod = "POST"
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
-        req.httpBody = try? JSONSerialization.data(withJSONObject: [
-            "action": "set_tier", "tier": wire, "tokens": tokens, "periodStart": periodStart,
-        ])
-        _ = try? await URLSession.shared.data(for: req)
-        tier = mapped
-        print("[PW-DIAG] DEBUG grant tier=\(wire) tokens=\(tokens) period=\(periodStart)")
-    }
-    #endif
-
-    /// Ürüne göre verilecek token miktarı (katalogdan).
-    static func productTokens(for productId: String) -> Int {
-        PlummCatalog.tokens(for: productId)
     }
 
     func refreshEntitlement() async {

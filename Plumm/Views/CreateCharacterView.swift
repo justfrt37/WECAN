@@ -7,8 +7,6 @@
 
 import SwiftUI
 import UIKit
-import PhotosUI
-import AVFoundation
 
 // MARK: - Role definitions
 
@@ -116,50 +114,13 @@ private let professionOptions: [ProfessionOption] = [
 // MARK: - View
 
 struct CreateCharacterView: View {
-    /// DEV-only extension of this SAME wizard (bkz. ProfileView, gated by
-    /// DevAccess.isDev) — nil for every normal user, so nothing below
-    /// changes for them. `.create` appends 4 extra dev-only steps (real
-    /// device photo uploads for profile/gallery/in-chat + an ElevenLabs
-    /// voice pick) and submits via dev-create-character (created_by = NULL,
-    /// catalog row, no weekly limit) instead of create-character. `.edit`
-    /// does the same but prefills every field from an existing character
-    /// and submits via dev-update-character, overwriting it in place.
-    enum DevWizardMode {
-        case create
-        case edit(DevCharacterFull)
-    }
-
-    let devMode: DevWizardMode?
-
     @Environment(\.dismiss) private var dismiss
     @Environment(CharacterStore.self) private var store
     @Environment(TokenStore.self) private var tokenStore
 
-    init(devMode: DevWizardMode? = nil) {
-        self.devMode = devMode
-    }
-
     // ── Step state ──
     @State private var stepIndex = 0
     @State private var phase: Phase = .steps
-
-    // ── DEV-only steps (bkz. devMode) — real device photo uploads +
-    // ElevenLabs voice pick, layered onto the exact same wizard chrome. ──
-    @State private var devProfileItem: PhotosPickerItem?
-    @State private var devProfileSource: DevPhotoSource?
-    @State private var devGalleryPickerItems: [PhotosPickerItem] = []
-    @State private var devGalleryDrafts: [DevGalleryPhotoDraft] = []
-    @State private var devChatPhotoPickerItems: [PhotosPickerItem] = []
-    @State private var devChatPhotoDrafts: [DevChatPhotoDraft] = []
-    @State private var devBioOverride = ""
-    @State private var devVoices: [DevVoice] = []
-    @State private var devSelectedVoiceId: String?
-    @State private var devIsLoadingVoices = false
-    @State private var devVoicesError: String?
-    @State private var devVoicePlayer: AVPlayer?
-    @State private var devIsLoadingExisting = false
-    @State private var devLoadExistingError: String?
-    @State private var devSaveError: String?
 
     // ── Selections ──
     @State private var characterName = ""
@@ -230,11 +191,8 @@ struct CreateCharacterView: View {
     // Sıra: 0=kategori 1=isim 2=etnik köken 3=yaş 4=tarz(vibe) 5=meslek
     //       6=ilgi alanları 7=saç stili 8=saç rengi 9=göz rengi 10=ten tonu 11=anı(geçmiş)
     // Fotoğraf ("kız kısmı") TÜM adımlar bittikten SONRA üretilir.
-    // DEV mode adds 4 more (13-16): profile picture, gallery photos, in-chat
-    // photos, voice — see stepBody/stepTitle below.
-    private var totalSteps: Int { devMode == nil ? 13 : 17 }
+    private var totalSteps: Int { 13 }
     private var isLastStep: Bool { stepIndex == totalSteps - 1 }
-    private var isEditingExisting: Bool { if case .edit = devMode { return true } else { return false } }
 
     var body: some View {
         NavigationStack {
@@ -267,16 +225,12 @@ struct CreateCharacterView: View {
         }) {
             TokenStoreView(tokenStore: tokenStore)
         }
-        .task { await prefillIfEditingDevCharacter() }
         .onDisappear {
             // Sağ üstteki çarpı (dismiss) / sihirbaz kapanınca: sürmekte olan
             // reveal görevini İPTAL et — yoksa kapatılsa bile createCharacter()
             // biter, store'a eklenir, proaktif mesaj enjekte edilir ve sunucu
             // coin tahsil eder (bkz. reveal / createCharacter Task.isCancelled).
             revealTask?.cancel()
-            // DEV ses önizlemesi: aktifleştirilen AVAudioSession'ı kapat +
-            // player'ı bırak (DEV-only yol, bkz. playDevVoicePreview).
-            if devMode != nil { teardownDevVoicePreview() }
         }
     }
 
@@ -376,11 +330,7 @@ struct CreateCharacterView: View {
         case 9: eyeColorStep
         case 10: appearanceOptionGrid(options: AppearanceOptions.skinTones, feature: .skinTone, binding: $selectedSkinTone, imageKey: "skin")
         case 11: optionGrid(options: AppearanceOptions.bodyTypes, binding: $selectedBodyType, imageKey: "bodytype")     // Vücut tipi
-        case 12: exHistoryStep                                                                    // Anı ekle
-        case 13: devProfilePictureStep                                                            // DEV only
-        case 14: devGalleryPhotosStep                                                             // DEV only
-        case 15: devChatPhotosStep                                                                // DEV only
-        default: devVoiceStep                                                                     // DEV only (16)
+        default: exHistoryStep                                                                    // Anı ekle
         }
     }
 
@@ -848,243 +798,6 @@ struct CreateCharacterView: View {
         .padding(.top, 4)
     }
 
-    // MARK: - DEV-only steps (bkz. devMode) — same wizard chrome, different
-    // content: real device photo uploads instead of preset option cards,
-    // since there's nothing to "pick from a grid" for an actual photo.
-
-    @ViewBuilder
-    private func devPhotoThumbnail(_ source: DevPhotoSource?, height: CGFloat, width: CGFloat? = nil) -> some View {
-        Group {
-            switch source {
-            case .new(let data):
-                if let uiImage = UIImage(data: data) {
-                    Image(uiImage: uiImage).resizable().scaledToFill()
-                } else {
-                    AppColor.card
-                }
-            case .existing(let url):
-                CachedImage(url: url) { img in
-                    img.resizable().scaledToFill()
-                } placeholder: { AppColor.card }
-            case nil:
-                AppColor.card.overlay {
-                    Image(systemName: "photo.badge.plus")
-                        .font(.system(size: 28))
-                        .foregroundStyle(.white.opacity(0.3))
-                }
-            }
-        }
-        .frame(width: width, height: height)
-        .frame(maxWidth: width == nil ? .infinity : nil)
-        .clipShape(RoundedRectangle(cornerRadius: width == nil ? 18 : 12, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: width == nil ? 18 : 12).strokeBorder(.white.opacity(0.12), lineWidth: 1))
-    }
-
-    private func devRemoveButton(action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: "xmark.circle.fill")
-                .foregroundStyle(.white, .black.opacity(0.6))
-                .font(.system(size: 20))
-        }
-        .buttonStyle(.plain)
-        .padding(6)
-    }
-
-    // MARK: Step 13 (DEV) — Profile picture
-
-    private var devProfilePictureStep: some View {
-        VStack(spacing: 16) {
-            Text("Optional — upload a real photo instead of AI-generating one. Leave empty and the normal photo generation runs like any other character.")
-                .font(.system(size: 13))
-                .foregroundStyle(.white.opacity(0.6))
-                .multilineTextAlignment(.center)
-
-            devPhotoThumbnail(devProfileSource, height: 260)
-
-            PhotosPicker(devProfileSource == nil ? "Choose profile picture" : "Change profile picture",
-                         selection: $devProfileItem, matching: .images)
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(AppColor.pinkSoft)
-                .onChange(of: devProfileItem) { _, item in
-                    Task {
-                        if let data = try? await item?.loadTransferable(type: Data.self) {
-                            devProfileSource = .new(data)
-                        }
-                    }
-                }
-
-            if devProfileSource != nil {
-                Button("Remove — auto-generate instead") {
-                    devProfileSource = nil
-                    devProfileItem = nil
-                }
-                .font(.system(size: 13))
-                .foregroundStyle(.white.opacity(0.5))
-            }
-        }
-        .padding(.top, 8)
-    }
-
-    // MARK: Step 14 (DEV) — Gallery photos (shown on profile to all users)
-
-    private var devGalleryPhotosStep: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Shown on this character's profile to every user. Optional.")
-                .font(.system(size: 13))
-                .foregroundStyle(.white.opacity(0.6))
-
-            if !devGalleryDrafts.isEmpty {
-                LazyVGrid(columns: columns3, spacing: 10) {
-                    ForEach(devGalleryDrafts) { draft in
-                        devPhotoThumbnail(draft.source, height: 100, width: 100)
-                            .overlay(alignment: .topTrailing) {
-                                devRemoveButton { devGalleryDrafts.removeAll { $0.id == draft.id } }
-                            }
-                    }
-                }
-            }
-
-            PhotosPicker("Add gallery photos", selection: $devGalleryPickerItems, maxSelectionCount: 20, matching: .images)
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(AppColor.pinkSoft)
-                .onChange(of: devGalleryPickerItems) { _, items in
-                    Task {
-                        for item in items {
-                            guard let data = try? await item.loadTransferable(type: Data.self) else { continue }
-                            devGalleryDrafts.append(DevGalleryPhotoDraft(source: .new(data)))
-                        }
-                        devGalleryPickerItems = []
-                    }
-                }
-        }
-        .padding(.top, 4)
-    }
-
-    // MARK: Step 15 (DEV) — In-chat photos (sent when a user asks for a photo)
-
-    private var devChatPhotosStep: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Add a short description per photo — chat-image matches a user's photo request against these before generating anything new. Optional; with none, photos are always generated like a normal character.")
-                .font(.system(size: 13))
-                .foregroundStyle(.white.opacity(0.6))
-
-            ForEach($devChatPhotoDrafts) { $draft in
-                HStack(alignment: .top, spacing: 10) {
-                    devPhotoThumbnail(draft.source, height: 64, width: 64)
-                    VStack(alignment: .leading, spacing: 6) {
-                        TextField("", text: $draft.description,
-                                  prompt: Text("Description (e.g. \"selfie in bed, cozy hoodie\")").foregroundColor(.white.opacity(0.3)))
-                            .foregroundStyle(.white)
-                        TextField("", text: $draft.mood, prompt: Text("Mood (optional)").foregroundColor(.white.opacity(0.3)))
-                            .font(.system(size: 12))
-                            .foregroundStyle(.white.opacity(0.8))
-                    }
-                    Spacer()
-                    devRemoveButton { devChatPhotoDrafts.removeAll { $0.id == draft.id } }
-                }
-                .padding(10)
-                .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 12))
-            }
-
-            PhotosPicker("Add in-chat photos", selection: $devChatPhotoPickerItems, maxSelectionCount: 20, matching: .images)
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(AppColor.pinkSoft)
-                .onChange(of: devChatPhotoPickerItems) { _, items in
-                    Task {
-                        for item in items {
-                            guard let data = try? await item.loadTransferable(type: Data.self) else { continue }
-                            devChatPhotoDrafts.append(DevChatPhotoDraft(source: .new(data)))
-                        }
-                        devChatPhotoPickerItems = []
-                    }
-                }
-        }
-        .padding(.top, 4)
-    }
-
-    // MARK: Step 16 (DEV) — Voice (ElevenLabs)
-
-    private var devVoiceStep: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Optional — pin an exact ElevenLabs voice. Leave unpicked to keep the normal role+vibe auto-mapping.")
-                .font(.system(size: 13))
-                .foregroundStyle(.white.opacity(0.6))
-
-            if devIsLoadingVoices {
-                HStack { ProgressView().tint(AppColor.pink); Text("Loading your ElevenLabs library…").foregroundStyle(.white.opacity(0.7)) }
-            } else if let devVoicesError {
-                Text(devVoicesError).font(.system(size: 12)).foregroundStyle(.red)
-                Button("Retry") { Task { await loadDevVoices(force: true) } }
-                    .foregroundStyle(AppColor.pinkSoft)
-            } else if devVoices.isEmpty {
-                Button("Load voices") { Task { await loadDevVoices(force: true) } }
-                    .foregroundStyle(AppColor.pinkSoft)
-            } else {
-                ForEach(devVoices) { voice in
-                    HStack {
-                        Button {
-                            devSelectedVoiceId = (devSelectedVoiceId == voice.voiceId) ? nil : voice.voiceId
-                        } label: {
-                            HStack {
-                                Image(systemName: devSelectedVoiceId == voice.voiceId ? "checkmark.circle.fill" : "circle")
-                                    .foregroundStyle(devSelectedVoiceId == voice.voiceId ? AppColor.pink : .white.opacity(0.4))
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(voice.name).foregroundStyle(.white).font(.system(size: 14, weight: .semibold))
-                                    if let category = voice.category {
-                                        Text(category).font(.system(size: 11)).foregroundStyle(.white.opacity(0.5))
-                                    }
-                                }
-                            }
-                        }
-                        .buttonStyle(.plain)
-                        Spacer()
-                        if voice.previewURL != nil {
-                            Button { playDevVoicePreview(voice) } label: {
-                                Image(systemName: "play.circle").foregroundStyle(AppColor.pinkSoft)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                    .padding(.vertical, 6)
-                }
-            }
-        }
-        .padding(.top, 4)
-    }
-
-    /// Without an explicit `.playback` session (same requirement as
-    /// VoicePlayer.swift), AVPlayer plays into the default ambient session,
-    /// which stays SILENT whenever the device's mute switch is on / the
-    /// ringer is off — the preview button appeared to do nothing.
-    private func playDevVoicePreview(_ voice: DevVoice) {
-        guard let url = voice.previewURL else { return }
-        try? AVAudioSession.sharedInstance().setCategory(.playback, options: .duckOthers)
-        try? AVAudioSession.sharedInstance().setActive(true)
-        devVoicePlayer = AVPlayer(url: url)
-        devVoicePlayer?.play()
-    }
-
-    /// DEV ses önizlemesini durdurur, player'ı bırakır ve aktifleştirilmiş
-    /// AVAudioSession'ı kapatır — playDevVoicePreview session'ı açık bırakıyordu
-    /// (bkz. .onDisappear). Player yoksa/oturum açılmamışsa zararsız (no-op).
-    private func teardownDevVoicePreview() {
-        devVoicePlayer?.pause()
-        devVoicePlayer = nil
-        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
-    }
-
-    private func loadDevVoices(force: Bool = false) async {
-        guard force || devVoices.isEmpty else { return }
-        devIsLoadingVoices = true
-        devVoicesError = nil
-        defer { devIsLoadingVoices = false }
-        do {
-            devVoices = try await DevCharacterService.listVoices()
-        } catch {
-            devVoicesError = "Failed to load voices: \(error)"
-        }
-    }
-
     // MARK: - Top bar
 
     private var topBar: some View {
@@ -1124,7 +837,7 @@ struct CreateCharacterView: View {
         return Button { advance() } label: {
             Group {
                 if isLastStep {
-                    Text(devMode == nil ? "Create Character" : (isEditingExisting ? "Save Changes" : "Create Curated Character"))
+                    Text("Create Character")
                 } else {
                     Text("Continue")
                 }
@@ -1242,16 +955,13 @@ struct CreateCharacterView: View {
                     // Bulanık foto üstünde maliyet + dokunma göstergesi — chat'teki
                     // kilitli foto balonuyla AYNI görsel dil (beyaz kare içinde
                     // "50 ♥" + metin, bkz. PendingImageBubble / kullanıcı talebi).
-                    // DEV modda ücret yok (bkz. reveal) → maliyet gösterilmez.
                     if !photoRevealed && !generating {
                         VStack(spacing: 6) {
-                            if devMode == nil {
-                                HStack(spacing: 4) {
-                                    Text("\(CreateCharacterView.creationCost)")
-                                        .font(.system(size: 13, weight: .heavy))
-                                        .foregroundStyle(.black)
-                                    CoinIcon(size: 14)
-                                }
+                            HStack(spacing: 4) {
+                                Text("\(CreateCharacterView.creationCost)")
+                                    .font(.system(size: 13, weight: .heavy))
+                                    .foregroundStyle(.black)
+                                CoinIcon(size: 14)
                             }
                             Text("Tap to see")
                                 .font(.system(size: 14, weight: .bold))
@@ -1457,11 +1167,7 @@ struct CreateCharacterView: View {
         case 9: return String(localized: "Eye color")
         case 10: return String(localized: "Skin tone")
         case 11: return String(localized: "Body type")
-        case 12: return String(localized: "History & Memories")
-        case 13: return "DEV: Profile Picture"
-        case 14: return "DEV: Gallery Photos"
-        case 15: return "DEV: In-Chat Photos"
-        default: return "DEV: Voice"
+        default: return String(localized: "History & Memories")
         }
     }
 
@@ -1521,17 +1227,13 @@ struct CreateCharacterView: View {
     private func reveal() {
         guard !generating && created == nil else { return }
         didAttemptReveal = true   // artık sağ üstte "kapat" çarpısı görünür
-        // DEV curated characters bypass the PRO gate entirely — this is an
-        // internal tool, not a user-facing purchase flow.
-        if devMode == nil {
-            // 1) PRO değilse önce PRO paywall.
-            guard PurchaseService.shared.tier != .none else { showPaywall = true; return }
-            // 2) PRO ama coin (50) yetmiyorsa COIN mağazası (bkz. kullanıcı talebi).
-            //    Kesin/atomik tahsil sunucuda; bu erken kontrol UX için (boşuna
-            //    foto üretme + anında paywall). Sunucu yine 402 dönerse de yakalanır.
-            guard tokenStore.balance >= CreateCharacterView.creationCost else {
-                showTokenStore = true; return
-            }
+        // 1) PRO değilse önce PRO paywall.
+        guard PurchaseService.shared.tier != .none else { showPaywall = true; return }
+        // 2) PRO ama coin (50) yetmiyorsa COIN mağazası (bkz. kullanıcı talebi).
+        //    Kesin/atomik tahsil sunucuda; bu erken kontrol UX için (boşuna
+        //    foto üretme + anında paywall). Sunucu yine 402 dönerse de yakalanır.
+        guard tokenStore.balance >= CreateCharacterView.creationCost else {
+            showTokenStore = true; return
         }
         generating = true
         photoGenError = nil
@@ -1539,28 +1241,14 @@ struct CreateCharacterView: View {
         // state değişimi UI'ı bozuyordu — "buga giriyor" sebebi buydu).
         // Görev bir handle'da tutulur → kapatınca (.onDisappear) iptal edilir.
         revealTask = Task { @MainActor in
-            if devMode != nil, let source = devProfileSource {
-                // A real device photo was uploaded (or kept from an existing
-                // character, edit mode) — use it as-is instead of the AI
-                // generation call every normal character goes through.
-                do {
-                    generatedPhotoURL = try await resolveDevPhotoURL(source, kind: "profile").absoluteString
-                } catch {
-                    photoGenError = "Couldn't upload profile picture: \(error)"
-                    generating = false
-                    return
-                }
-            } else {
-                await generatePhoto()               // en iyi çaba (istek atılır)
-            }
+            await generatePhoto()                   // en iyi çaba (istek atılır)
             if Task.isCancelled { return }          // kapatıldı → hiçbir şey oluşturma
             // Üretim başarısızsa (generatedPhotoURL nil) karakteri OLUŞTURMA —
             // eskiden burada "her durumda karakteri oluştur" ile devam edilirdi,
             // bu da photo_url/avatar_url NULL bir karakteri (dummy vibe fotosu
             // arkasında gizli) 50 coin karşılığında yaratıyordu (bkz. Astra
             // vakası — üretim başarısız oldu ama karakter yine de oluştu).
-            // devMode zaten kendi hata yolunda erken return ediyor (yukarıda).
-            if devMode == nil, generatedPhotoURL == nil {
+            if generatedPhotoURL == nil {
                 generating = false
                 photoGenError = photoGenError ?? String(localized: "Couldn't generate your character's photo. Please try again.")
                 return
@@ -1628,129 +1316,8 @@ struct CreateCharacterView: View {
         }
     }
 
-    /// Resolves a DEV photo pick to a final Storage URL — uploads it if it's
-    /// a brand-new local pick, or reuses the existing URL untouched otherwise
-    /// (so re-saving an unedited character doesn't re-upload everything).
-    private func resolveDevPhotoURL(_ source: DevPhotoSource, kind: String) async throws -> URL {
-        switch source {
-        case .existing(let url): return url
-        case .new(let data): return try await DevCharacterService.uploadImage(data, kind: kind)
-        }
-    }
-
-    /// DEV-only equivalent of createCharacter() below — same wizard
-    /// selections, but submits via dev-create-character/dev-update-character
-    /// (created_by = NULL, no weekly limit) instead of create-character, and
-    /// additionally uploads the gallery/in-chat photos + voice pick.
-    @MainActor
-    private func createDevCharacter(_ mode: DevWizardMode) async {
-        guard let profileURLString = generatedPhotoURL, let profileURL = URL(string: profileURLString) else {
-            photoGenError = String(localized: "Missing profile picture.")
-            return
-        }
-        do {
-            var galleryURLs: [URL] = []
-            for draft in devGalleryDrafts {
-                galleryURLs.append(try await resolveDevPhotoURL(draft.source, kind: "gallery"))
-            }
-            var chatPhotos: [(url: URL, description: String, mood: String?)] = []
-            for draft in devChatPhotoDrafts {
-                let url = try await resolveDevPhotoURL(draft.source, kind: "chat")
-                chatPhotos.append((url: url, description: draft.description, mood: draft.mood.isEmpty ? nil : draft.mood))
-            }
-
-            let payload = DevCharacterService.CharacterPayload(
-                name: capitalizedName(characterName),
-                category: selectedCategory,
-                profession: selectedProfession,
-                vibe: selectedVibe,
-                personalityRole: selectedRole,
-                ageRange: selectedAgeRange,
-                ethnicity: selectedEthnicity,
-                hairstyle: selectedHairstyle,
-                hairColor: selectedHairColor,
-                eyeShape: selectedEyeShape,
-                eyeColor: selectedEyeColor,
-                noseShape: selectedNoseShape,
-                skinTone: selectedSkinTone,
-                bodyType: selectedBodyType,
-                interests: Array(selectedInterests),
-                exHistory: exHistory.isEmpty ? nil : exHistory,
-                bio: devBioOverride.isEmpty ? nil : devBioOverride,
-                profileURL: profileURL,
-                galleryURLs: galleryURLs,
-                chatPhotos: chatPhotos,
-                voiceId: devSelectedVoiceId
-            )
-
-            let c: Character
-            switch mode {
-            case .create:
-                c = try await DevCharacterService.createCurated(payload)
-                store.characters.append(c)
-            case .edit(let existing):
-                c = try await DevCharacterService.updateCurated(characterId: existing.id, payload)
-                if let idx = store.characters.firstIndex(where: { $0.id == c.id }) {
-                    store.characters[idx] = c
-                }
-            }
-            withAnimation { created = c }
-        } catch {
-            photoGenError = "Save failed: \(error)"
-        }
-    }
-
-    /// Edit mode only — loads the existing character's full row + its
-    /// character_photos pool and seeds every @State selection so the wizard
-    /// opens already filled in, exactly like the user asked ("fill the
-    /// existing info they have in there").
-    private func prefillIfEditingDevCharacter() async {
-        guard case .edit(let existing) = devMode else { return }
-        devIsLoadingExisting = true
-        defer { devIsLoadingExisting = false }
-
-        characterName = existing.name
-        devBioOverride = existing.tagline ?? ""
-        selectedCategory = existing.category ?? selectedCategory
-        selectedProfession = existing.profession ?? selectedProfession
-        exHistory = existing.exHistory ?? ""
-        if !existing.interests.isEmpty { selectedInterests = Set(existing.interests) }
-        devSelectedVoiceId = existing.voiceId
-        if let photoURL = existing.photoURL {
-            devProfileSource = .existing(photoURL)
-            generatedPhotoURL = photoURL.absoluteString
-        }
-        devGalleryDrafts = existing.galleryURLs.map { DevGalleryPhotoDraft(source: .existing($0)) }
-
-        if let bs = existing.builderSelections {
-            selectedVibe = bs.vibe ?? selectedVibe
-            selectedRole = bs.personalityRole ?? selectedRole
-            selectedAgeRange = bs.ageRange ?? selectedAgeRange
-            selectedHairstyle = bs.hairstyle ?? selectedHairstyle
-            selectedHairColor = bs.hairColor ?? selectedHairColor
-            selectedEyeShape = bs.eyeShape ?? selectedEyeShape
-            selectedEyeColor = bs.eyeColor ?? selectedEyeColor
-            selectedNoseShape = bs.noseShape ?? selectedNoseShape
-            selectedSkinTone = bs.skinTone ?? selectedSkinTone
-            selectedBodyType = bs.bodyType ?? selectedBodyType
-        }
-
-        do {
-            let photos = try await DevCharacterService.fetchCharacterPhotos(existing.id)
-            devChatPhotoDrafts = photos.map {
-                DevChatPhotoDraft(source: .existing($0.url), description: $0.description ?? "", mood: $0.mood ?? "")
-            }
-        } catch {
-            devLoadExistingError = "Couldn't load existing in-chat photos: \(error)"
-        }
-    }
-
     @MainActor
     private func createCharacter() async {
-        if let devMode {
-            await createDevCharacter(devMode)
-            return
-        }
         let service = CharacterCreateService()
         let photo = generatedPhotoURL ?? ""
         let history = exHistory.trimmingCharacters(in: .whitespaces)

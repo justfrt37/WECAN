@@ -32,9 +32,9 @@ struct Character: Identifiable, Codable, Hashable {
     var personalityRole: String  // flirty | distant | shy | playful | devoted | crazy | ex
     var vibe: String             // Sweet | Mysterious | Energetic | Elegant — builder_selections.vibe
     var createdBy: String?       // kullanıcı tarafından oluşturulmuşsa kullanıcı ID'si
-    /// DEV-curated karakterlerde açıkça seçilmiş ElevenLabs sesi (bkz.
-    /// dev-create-character) — nil ise voice-message-tts eskisi gibi
-    /// role+vibe eşlemesine (elevenVoiceMap.ts) düşer.
+    /// Kurulum sırasında açıkça seçilmiş ElevenLabs sesi — nil ise
+    /// voice-message-tts eskisi gibi role+vibe eşlemesine
+    /// (elevenVoiceMap.ts) düşer.
     var voiceId: String?
 
     var isUserCreated: Bool { createdBy != nil }

@@ -629,9 +629,9 @@ Deno.serve(async (req: Request) => {
     // IMAGE_REDIRECT_RULE) — never just silently swap the photo.
     let redirected = false;
 
-    // DEV-curated characters (see dev-create-character) get a pre-uploaded
-    // in-chat photo pool (character_photos) — try that FIRST, only fall
-    // through to actual generation if nothing close enough exists. Every
+    // Curated characters get a pre-uploaded in-chat photo pool
+    // (character_photos) — try that FIRST, only fall through to actual
+    // generation if nothing close enough exists. Every
     // other (virtual/user-created) character has zero rows here and this is
     // a no-op, so existing behavior is unchanged for them.
     // Kullanıcının bu karakterle GERÇEK ilişki seviyesi (foto seviye-kilidi) —
@@ -673,7 +673,8 @@ Deno.serve(async (req: Request) => {
     // Gizlilik bilgisi foto satırında (küratör ayarladı) → classifyPrivacy GEREKMEZ.
     isPrivate = curatedMatch.is_private === true;
 
-    // Konuşmayı bul ya da oluştur (chat/add-character-note ile aynı desen).
+    // Konuşmayı bul ya da oluştur. upsert, not insert — conversations(user_id,
+    // character_id) UNIQUE (bkz. chat/index.ts'deki aynı düzeltme).
     let { data: convo } = await db
       .from("conversations")
       .select("id")
@@ -683,11 +684,20 @@ Deno.serve(async (req: Request) => {
     if (!convo) {
       const ins = await db
         .from("conversations")
-        .insert({ user_id: uid, character_id: characterId })
+        .upsert({ user_id: uid, character_id: characterId }, { onConflict: "user_id,character_id" })
         .select("id")
         .single();
       convo = ins.data!;
     }
+
+    // Charge ÖNCE — pre-check ile buradaki gerçek atomik düşüm arasında bakiye
+    // tükenmiş olabilir (yarış durumu). Başarısız olursa foto teslim ETME:
+    // eskiden charge sonucu yoksayılıp her durumda url döndürülüyordu — bu,
+    // charge_tokens başarısız olduğunda kullanıcının ücretsiz foto almasına
+    // (ve tokenBalance undefined dönmesine rağmen url'in geçerli kalmasına)
+    // izin veren bir bug'dı.
+    const charge = await chargeOrReject(uid, 25, "photo");
+    if (!charge.ok) return json({ error: "insufficient_tokens" }, 402);
 
     // `generated_photos` was dropped (014_drop_generated_photos.sql) — per-user
     // delivery record now lives as its own `character_photos` row (user_id set,
@@ -701,8 +711,7 @@ Deno.serve(async (req: Request) => {
     });
     if (insErr) console.error("character_photos insert failed:", insErr.message);
 
-    const charge = await chargeOrReject(uid, 25, "photo");
-    return json({ url: photoUrl, redirected, tokenBalance: charge.ok ? charge.balance : undefined });
+    return json({ url: photoUrl, redirected, tokenBalance: charge.balance });
   } catch (e) {
     console.error(String(e));
     return json({ error: String(e) }, 500);

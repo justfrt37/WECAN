@@ -211,9 +211,9 @@ extension TTSService {
         var payload: [String: Any] = [
             "text": text, "role": role, "vibe": vibe, "lang": lang, "useElevenLabs": useElevenLabs,
         ]
-        // DEV-curated characters (see dev-create-character) pin an exact
-        // ElevenLabs voice — server uses it directly when present, else
-        // falls back to the role+vibe map (bkz. voice-message-tts/index.ts).
+        // Characters with an explicitly pinned ElevenLabs voice — server
+        // uses it directly when present, else falls back to the role+vibe
+        // map (bkz. voice-message-tts/index.ts).
         if let voiceId, !voiceId.isEmpty { payload["voiceId"] = voiceId }
         guard let body = try? JSONSerialization.data(withJSONObject: payload) else { return .failure }
         var req = URLRequest(url: Config.voiceMessageTTSFunctionURL)

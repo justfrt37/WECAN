@@ -233,7 +233,11 @@ Deno.serve(async (req: Request) => {
       .limit(1);
     let convo = convoRows?.[0];
     if (!convo) {
-      const ins = await db.from("conversations").insert({ user_id: uid, character_id: characterId }).select("id").single();
+      // upsert, not insert — conversations(user_id, character_id) UNIQUE
+      // (bkz. chat/index.ts'deki aynı düzeltme).
+      const ins = await db.from("conversations")
+        .upsert({ user_id: uid, character_id: characterId }, { onConflict: "user_id,character_id" })
+        .select("id").single();
       convo = ins.data!;
     }
     const conversationId: string = convo.id;

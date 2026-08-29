@@ -193,7 +193,7 @@ Deno.serve(async (req: Request) => {
       }
       try {
         const prompt = buildImagePrompt({
-          gender: b.gender ?? "Kadın",
+          gender: b.gender ?? "Woman",
           age: pickAgeFromRange(b.age_range ?? "22-25"),
           category: b.category ?? "Realistic",
           vibe: b.vibe ?? "warm",
@@ -223,7 +223,7 @@ Deno.serve(async (req: Request) => {
 
     const interests: string[] = Array.isArray(b.interests) ? b.interests : [];
     const personality = b.personality ?? "romantic";
-    const gender = b.gender ?? "Kadın";
+    const gender = b.gender ?? "Woman";
     const scenario = b.scenario ?? "";
     const category = b.category ?? "Realistic";
     const personalityRole: string = b.personality_role ?? "flirty";
@@ -397,7 +397,7 @@ Deno.serve(async (req: Request) => {
       if (photoErr) console.error("character_photos insert failed:", photoErr.message);
     }
 
-    // 100 coin ATOMİK tahsil (charge_tokens). Yetmezse oluşturulan karakteri
+    // CREATION_COST coin ATOMİK tahsil (charge_tokens). Yetmezse oluşturulan karakteri
     // geri al (delete) ve coin paywall için 402 + kalan bakiye dön.
     const { data: charged } = await db.rpc("charge_tokens", {
       p_user_id: uid,

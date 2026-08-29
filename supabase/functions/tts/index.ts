@@ -15,10 +15,33 @@ const corsHeaders = {
 
 const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY") ?? "";
 
+// JWT doğrulaması YOKTU — anon key'i bilen HERKES (uygulama bundle'ında
+// zaten public) sınırsız metin gönderip OpenAI TTS kredisini tüketebiliyordu
+// (bkz. generate/index.ts'deki aynı bug). Diğer tüm fonksiyonlar gibi gerçek
+// oturum JWT'si zorunlu — client (TTSService.swift) zaten accessToken
+// varsa onu gönderiyordu, sadece sunucu hiç kontrol etmiyordu.
+function userIdFromJWT(authHeader: string | null): string | null {
+  if (!authHeader) return null;
+  const jwt = authHeader.replace("Bearer ", "").trim();
+  const parts = jwt.split(".");
+  if (parts.length < 2) return null;
+  try {
+    let b64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+    while (b64.length % 4) b64 += "=";
+    return JSON.parse(atob(b64)).sub ?? null;
+  } catch { return null; }
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
   try {
+    const uid = userIdFromJWT(req.headers.get("Authorization"));
+    if (!uid) {
+      return new Response(JSON.stringify({ error: "unauthorized" }), {
+        status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
     if (!OPENAI_API_KEY) {
       return new Response(JSON.stringify({ error: "no_tts_key" }), {
         status: 500,
