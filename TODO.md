@@ -7,7 +7,16 @@
 > kuralı uygular: önce ne bittiğini kontrol et, bitenleri buradan çıkar, sadece
 > gerçekten açık kalanları/gündeme gelip ertelenenleri bırak.
 
-Son güncelleme: 2026-08-28.
+Son güncelleme: 2026-08-29.
+
+---
+
+## 🔵 Sırada
+
+### 0. Tam UI/fonksiyon taraması
+Bütün ekranlar + özellikler tek tek gezilip olası bug'lar aranacak
+(kullanıcı talebi, 2026-08-29). Yöntem henüz seçilmedi — bkz. o oturumdaki
+"ultrareview Pro planla yapılabilir mi" tartışması.
 
 ---
 
