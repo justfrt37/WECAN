@@ -52,7 +52,13 @@ struct PlummApp: App {
             .environment(onboarding)
             .preferredColorScheme(.dark)
             .task {
+                // Satın alma sonrası sunucudan dönen bakiyeyi anında yazabilmek
+                // için (TokenStore singleton değil, environment'tan geliyor).
+                PurchaseService.shared.tokenStore = tokenStore
                 PurchaseService.shared.configure()
+                // Ürün→token eşlemesi artık sunucudan geliyor (PlummCatalog
+                // kaldırıldı) — paywall'daki sayılar için erken çekilmeli.
+                await CatalogService.shared.refresh()
                 let delegate = NotificationDelegate(store: store)
                 notificationDelegate = delegate
                 UNUserNotificationCenter.current().delegate = delegate
@@ -63,6 +69,11 @@ struct PlummApp: App {
                 // Sunucudaki abonelik tier'ını yükle → açılışta isPro DOĞRU olsun
                 // (restore'a basmadan pro görünür; Pro butonu yerine token gösterilir).
                 await PurchaseService.shared.refreshServerTier()
+                // Açılışta kullanıcının kimlik + hak durumunun tek satırlık
+                // özeti. refreshServerTier'dan SONRA çağrılıyor ki tier'ı
+                // yazan iki kaynak da (RC entitlement + sunucu satırı) çalışmış
+                // olsun, yani log NİHAİ durumu göstersin.
+                PurchaseService.shared.logEntitlementState("launch")
                 ImageCache.shared.evictIfNeeded()
             }
         }

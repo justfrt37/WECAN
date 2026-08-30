@@ -17,6 +17,7 @@
 
 import Foundation
 import Observation
+import OSLog
 import StoreKit
 #if canImport(RevenueCat)
 import RevenueCat
@@ -35,6 +36,14 @@ struct PaywallPackage: Identifiable {
     let weeklyEquivalent: String? // varsa "$0.96 / week"
     let perWeekValue: Decimal? // haftalık eşdeğer ham fiyat (tasarruf % hesabı için)
     let tokenAmount: Int      // bu ürünün verdiği token (abonelik dönem grant'ı / paket adedi)
+    /// Abonelik mi, tek seferlik paket mi. StoreKit ürününün KENDİSİNDEN
+    /// (`subscriptionPeriod`) türetiliyor — sunucudan gelen katalogdan DEĞİL.
+    /// Sebebi: katalog asenkron yükleniyor; satın alma yönlendirmesini ona
+    /// bağlamak, katalog henüz gelmemişken token paketini abonelik dalına
+    /// sokuyordu (bkz. kullanıcı raporu: "token_100 alınca 12000 ekleniyor" —
+    /// abonelik dalı kullanıcının eski sandbox aboneliğinin dönem grant'ını
+    /// veriyordu). Ürün tipi cihazda, senkron ve her zaman doğru.
+    let isSubscription: Bool
     #if canImport(RevenueCat)
     let rcPackage: Package
     #endif
@@ -64,34 +73,13 @@ struct PaywallPackage: Identifiable {
     }
 }
 
-/// Ürün kataloğu — product id → tier ve token miktarı (dashboard fiyatları
-/// dinamik; bu iki alan sabit iş kuralı). Server (`sync-subscription`) ve
-/// dev-token-tools ile AYNI kalmalı.
-enum PlummCatalog {
-    /// Abonelik ürününün dönem başına verdiği token.
-    static let subscriptionTokens: [String: Int] = [
-        "weekly_pro_normal": 250, "monthly_pro_default": 1000, "yearly_pro_normal": 12000,
-        "weekly_pro_plus": 500,   "monthly_pro_plus": 2000,    "yearly_pro_plus": 25000,
-        "weekly_pro_max": 750,    "monthly_pro_max": 3000,     "yearly_pro_max": 35000,
-    ]
-    /// Tek seferlik token paketleri.
-    static let tokenPackTokens: [String: Int] = [
-        "token_100": 100, "token_250": 250, "token_500": 500,
-        "token_1000": 1000, "token_2000": 2000, "token_5000": 5000,
-    ]
-    static let productTier: [String: SubscriptionTier] = [
-        "weekly_pro_normal": .pro,     "monthly_pro_default": .pro,  "yearly_pro_normal": .pro,
-        "weekly_pro_plus": .proPlus,   "monthly_pro_plus": .proPlus, "yearly_pro_plus": .proPlus,
-        "weekly_pro_max": .max,        "monthly_pro_max": .max,      "yearly_pro_max": .max,
-    ]
-    static func tokens(for productId: String) -> Int {
-        subscriptionTokens[productId] ?? tokenPackTokens[productId] ?? 0
-    }
-    static func tier(for productId: String) -> SubscriptionTier {
-        productTier[productId] ?? .none
-    }
-    static func isTokenPack(_ productId: String) -> Bool { tokenPackTokens[productId] != nil }
-}
+/// NOT: Eski `PlummCatalog` (ürün id -> token/tier sabit tabloları) KALDIRILDI.
+/// Para karşılığı verilen miktarın istemcide ikinci bir kopyasının durması,
+/// sunucudaki tabloyla kayması ve kullanıcının satın aldığından farklı miktar
+/// alması riskini taşıyordu. Tek kaynak artık sunucuda
+/// (supabase/functions/_shared/catalog.ts); istemci GÖSTERİM için
+/// `CatalogService.shared`den okur, grant miktarını asla belirlemez
+/// (bkz. functions/purchase-tokens).
 
 /// Üç ödemeli seviye — entitlement kimlikleri RevenueCat dashboard'daki
 /// (henüz kurulmamış) "pro"/"pro_plus"/"max" entitlement'larıyla VE
@@ -161,7 +149,48 @@ final class PurchaseService {
     /// RevenueCat dashboard → Project Settings → API Keys → Apple (public SDK key).
     private let apiKey = "appl_YzftwpUEULzIDwEgSAPOtuSddHa"
 
+    /// Bakiye deposu — satın alma sonrası sunucudan dönen bakiyeyi ANINDA
+    /// yazmak için. `ChatViewModel.tokenStore` / `CallViewModel.tokenStore` ile
+    /// aynı desen: TokenStore environment'tan geliyor, singleton değil; bağlantı
+    /// açılışta kuruluyor (bkz. PlummApp).
+    weak var tokenStore: TokenStore?
+
     private(set) var isConfigured = false
+
+    /// Tier SUNUCUDAN en az bir kez okundu mu (başarılı ya da başarısız).
+    /// Paywall gibi "PRO mu değil mi" kararına bağlı ekranlar bunu beklemeli:
+    /// açılışta tier `.none` başlıyor ve sunucu cevabı gelene kadar öyle
+    /// kalıyor, bu yüzden erken sorulduğunda PRO kullanıcı da non-PRO
+    /// görünüyordu (bkz. kullanıcı raporu: "adam pro ise paywall açılmamalı").
+    private(set) var tierResolved = false
+    private var tierWaiters: [CheckedContinuation<Void, Never>] = []
+
+    private func markTierResolved() {
+        guard !tierResolved else { return }
+        tierResolved = true
+        let waiters = tierWaiters
+        tierWaiters = []
+        waiters.forEach { $0.resume() }
+    }
+
+    /// Tier sunucudan okunana kadar bekler. `timeout` saniye içinde cevap
+    /// gelmezse yine de döner — ağ tıkalıyken kullanıcıyı süresiz bekletmek,
+    /// paywall'ı yanlış açmaktan daha kötü olurdu.
+    func ensureTierResolved(timeout: TimeInterval = 3) async {
+        if tierResolved { return }
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask { @MainActor in
+                await withCheckedContinuation { c in
+                    if self.tierResolved { c.resume() } else { self.tierWaiters.append(c) }
+                }
+            }
+            group.addTask {
+                try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+            }
+            await group.next()
+            group.cancelAll()
+        }
+    }
     // Non-PRO test için .none (bkz. kullanıcı talebi). PRO test etmek istersen
     // DEBUG'ta tekrar .pro yapabilirsin.
     var tier: SubscriptionTier = .none
@@ -207,7 +236,10 @@ final class PurchaseService {
             if let uid = UserDefaultsManager.shared.userId {
                 _ = try? await Purchases.shared.logIn(uid)
             }
-            await refreshEntitlement()
+            await refreshEntitlement()   // yalnızca tanılama logu
+            // PRO durumunun kaynağı SUNUCU. logIn'den SONRA çağrılıyor ki
+            // sorgu doğru kullanıcıya ait olsun.
+            await refreshServerTier()
             await loadOfferings()
         }
         #else
@@ -227,14 +259,59 @@ final class PurchaseService {
             proPlusPackages = Self.mapPackages(offerings.all["plus"])
             maxPackages     = Self.mapPackages(offerings.all["max"])
             tokenPackages   = Self.mapPackages(offerings.all["tokens"])
-            print("[PW] offerings yüklendi pro=\(proPackages.count) plus=\(proPlusPackages.count) max=\(maxPackages.count) tokens=\(tokenPackages.count)")
+            logOfferings(offerings)
         } catch {
-            print("[PW] offerings HATA: \(error)")
+            PurchaseService.diag.error("[PW-DIAG] offerings HATA: \(String(describing: error), privacy: .public)")
         }
         #endif
     }
 
     #if canImport(RevenueCat)
+    /// RevenueCat'ten GERÇEKTE ne geldiğini satır satır loglar.
+    ///
+    /// Neden ayrıntılı: bir offering'in "boş" gelmesiyle "hiç var olmaması"
+    /// farklı sorunlar. RC bir ürünü ancak App Store Connect'ten çekebilirse
+    /// paketin içinde döndürür — ASC'de fiyatı/metadata'sı eksikse ya da Paid
+    /// Applications Agreement aktif değilse offering döner ama paket listesi
+    /// BOŞ olur. Bu log ikisini ayırt ettiriyor: `paket=0` = ASC'den çekilemedi,
+    /// offering'in hiç listelenmemesi = RC dashboard'da yok.
+    private func logOfferings(_ offerings: Offerings) {
+        let current = offerings.current?.identifier ?? "yok"
+        PurchaseService.diag.log("""
+            [PW-DIAG] offerings yüklendi offeringSayısı=\(offerings.all.count, privacy: .public) \
+            current=\(current, privacy: .public) \
+            eşlenen: pro=\(self.proPackages.count, privacy: .public) \
+            plus=\(self.proPlusPackages.count, privacy: .public) \
+            max=\(self.maxPackages.count, privacy: .public) \
+            tokens=\(self.tokenPackages.count, privacy: .public)
+            """)
+        for (key, offering) in offerings.all.sorted(by: { $0.key < $1.key }) {
+            let pkgs = offering.availablePackages
+            PurchaseService.diag.log("[PW-DIAG]   offering '\(key, privacy: .public)' paket=\(pkgs.count, privacy: .public)")
+            for pkg in pkgs {
+                let p = pkg.storeProduct
+                PurchaseService.diag.log("""
+                    [PW-DIAG]     \(pkg.identifier, privacy: .public) -> \
+                    \(p.productIdentifier, privacy: .public) \
+                    fiyat=\(p.localizedPriceString, privacy: .public) \
+                    başlık='\(p.localizedTitle, privacy: .public)' \
+                    token=\(CatalogService.shared.tokens(for: p.productIdentifier), privacy: .public)
+                    """)
+            }
+            if pkgs.isEmpty {
+                PurchaseService.diag.log("[PW-DIAG]     (boş — ürünler App Store Connect'ten ÇEKİLEMEDİ)")
+            }
+        }
+        // Kodun beklediği ama RC'nin döndürmediği ürünler: paywall'da eksik
+        // satır olarak görünürler, sebebi burada isimle yazılı olsun.
+        let gelen = Set(offerings.all.values.flatMap { $0.availablePackages }.map { $0.storeProduct.productIdentifier })
+        let beklenen = Set(CatalogService.shared.productTier.keys).union(CatalogService.shared.tokenPacks.keys)
+        let eksik = beklenen.subtracting(gelen).sorted()
+        if !eksik.isEmpty {
+            PurchaseService.diag.log("[PW-DIAG]   EKSİK (katalogda var, RC'den gelmedi): \(eksik.joined(separator: ","), privacy: .public)")
+        }
+    }
+
     /// Bir offering'in paketlerini PaywallPackage'a çevirir, fiyata göre
     /// (ucuzdan pahalıya) sıralar. Abonelikte weekly<monthly<yearly, tokende küçük<büyük.
     private static func mapPackages(_ offering: Offering?) -> [PaywallPackage] {
@@ -251,7 +328,8 @@ final class PurchaseService {
                 periodLabel: Self.periodLabel(for: p),
                 weeklyEquivalent: Self.weeklyEquivalent(for: p),
                 perWeekValue: Self.perWeekValue(for: p),
-                tokenAmount: PlummCatalog.tokens(for: p.productIdentifier),
+                tokenAmount: CatalogService.shared.tokens(for: p.productIdentifier),
+                isSubscription: p.subscriptionPeriod != nil,
                 rcPackage: pkg
             )
         }
@@ -259,11 +337,40 @@ final class PurchaseService {
     }
     #endif
 
-    /// Seçili paketi satın alır. Başarılıysa entitlement'i tazeler; iptal/hata → false.
+    /// Satın almanın kullanıcıya GÖSTERİLEBİLİR sonucu.
+    ///
+    /// Eskiden `purchase(_:)` yalnızca `Bool` dönüyordu: iptal, ağ hatası,
+    /// mağaza reddi ve "ödeme alındı ama token yazılamadı" hepsi aynı `false`
+    /// idi ve ekranda hiçbir şey görünmüyordu. Kullanıcının parası gidip
+    /// token'ı gelmediğinde bunu FARK ETMESİ gerekiyor (bkz. kullanıcı talebi).
+    enum PurchaseOutcome {
+        /// Satın alma tamam ve sunucu `granted` kadar token yazdı.
+        /// `granted == 0` abonelikler için normaldir (token dönem grant'ıyla gelir).
+        case success(granted: Int)
+        /// Kullanıcı App Store diyaloğunu kapattı — hata DEĞİL, mesaj gösterilmez.
+        case cancelled
+        /// Mağaza reddetti ya da istek patladı.
+        case failed(String)
+        /// Ödeme alındı ama sunucu token'ı yazamadı (ağ/sunucu hatası).
+        /// En kritik durum: kullanıcıya "restore ile geri gelir" denmeli,
+        /// sessizce yutulmamalı.
+        case paidButNotGranted
+    }
+
+    /// `purchaseDetailed`in geriye-uyumlu sarmalayıcısı — mevcut paywall
+    /// çağrıları (OnboardingPaywallView, SubscriptionPaywallView) değişmeden
+    /// derlensin diye duruyor.
     @discardableResult
     func purchase(_ package: PaywallPackage) async -> Bool {
+        if case .success = await purchaseDetailed(package) { return true }
+        return false
+    }
+
+    /// Seçili paketi satın alır ve sonucu AYRINTILI döner (bkz. PurchaseOutcome).
+
+    func purchaseDetailed(_ package: PaywallPackage) async -> PurchaseOutcome {
         #if canImport(RevenueCat)
-        guard isConfigured else { return false }
+        guard isConfigured else { return .failed("Store is not ready yet.") }
         // configure()'daki logIn, uid henüz yazılmamışken (uygulama açılış
         // yarışı) sessizce atlanmış olabilir — burada, kullanıcı gerçekten bir
         // satın alma yaptığı an, uid KESİN mevcut, o yüzden tekrar deneriz.
@@ -273,17 +380,32 @@ final class PurchaseService {
         }
         do {
             let result = try await Purchases.shared.purchase(package: package.rcPackage)
-            guard !result.userCancelled else { return false }
+            guard !result.userCancelled else { return .cancelled }
 
-            if PlummCatalog.isTokenPack(package.productId) {
+            if !package.isSubscription {
                 // Token PAKETİ (consumable): entitlement/subscription üretmez.
-                #if DEBUG
-                await debugGrantTokens(package.tokenAmount)
-                #endif
-                // (Production: ileride RC non_subscriptions doğrulamalı bir sunucu
-                //  akışı gerekli — şimdilik DEBUG grant.)
+                // Grant'ı SUNUCU yapar (purchase-tokens): RC'nin
+                // non_subscriptions kaydını secret key ile doğrular, miktarı
+                // KENDİ kataloğundan okur ve mağaza işlem kimliğiyle idempotent
+                // yazar. Eskiden bu `#if DEBUG` içindeydi — yani Release/
+                // TestFlight'ta satın alma HİÇ token vermiyordu (bkz. kullanıcı
+                // raporu: "100 token alıyorum ama gelmiyor").
+                // SADECE bu satın almanın işlem kimliği gönderiliyor: sunucu
+                // yalnızca onu doğrulayıp verir. Kimlik göndermezsek sunucu
+                // RC'deki TÜM geçmiş tek-seferlik satın almaları toparlıyor —
+                // bu, bir token_100 alımında geçmişteki ödenmiş ama hiç
+                // verilmemiş paketlerin de aynı anda yüklenmesine yol açıyordu
+                // (canlı örnek: 4x100 + 2x5000 = 10.400, bkz. kullanıcı raporu).
+                let granted = await grantTokenPackFromServer(
+                    transactionId: result.transaction?.transactionIdentifier
+                )
+                guard let granted else { return .paidButNotGranted }
+                return .success(granted: granted)
             } else {
-                // Abonelik: sunucu token ekonomisine köprü.
+                // Abonelik: tier'ı SUNUCU belirler. syncWithServerRetrying →
+                // sync-subscription, RC'yi secret key ile sunucuda doğrulayıp
+                // `subscriptions` satırını yazar ve tier'ı yanıtından set eder.
+                // refreshEntitlement yalnızca tanılama logu basar.
                 await refreshEntitlement()
                 await syncWithServerRetrying()
                 #if DEBUG
@@ -293,14 +415,14 @@ final class PurchaseService {
                 if tier == .none { await debugGrantFromStoreKit() }
                 #endif
             }
-            // Satın alma TAMAMLANDIYSA (iptal/hata değil) true — paywall kapanmalı.
-            return true
+            // Abonelik: token'ı dönem grant'ı veriyor, burada 0 doğru.
+            return .success(granted: 0)
         } catch {
-            print("[PurchaseService] purchase hatası: \(error.localizedDescription)")
-            return false
+            PurchaseService.diag.error("[PW-DIAG] purchase hatası: \(error.localizedDescription, privacy: .public)")
+            return .failed(error.localizedDescription)
         }
         #else
-        return false
+        return .failed("Store is not available in this build.")
         #endif
     }
 
@@ -313,8 +435,17 @@ final class PurchaseService {
             _ = try? await Purchases.shared.logIn(uid)
         }
         _ = try? await Purchases.shared.restorePurchases()
-        await refreshEntitlement()
-        await syncWithServerRetrying()
+        await refreshEntitlement()      // yalnızca tanılama logu
+        await syncWithServerRetrying()  // tier'ı sunucu doğrular ve yazar
+        // Token PAKETLERİ için kurtarma yolu: satın alma anındaki
+        // grantTokenPackFromServer çağrısı ağ hatası ya da uygulamanın
+        // öldürülmesi yüzünden hiç tamamlanmamış olabilir — o durumda ödeme
+        // alınmış ama token verilmemiş olurdu ve başka hiçbir şey bunu
+        // telafi etmezdi (consumable entitlement üretmediği için webhook da
+        // devreye girmiyor). purchase-tokens mağaza işlem kimliğiyle
+        // idempotent olduğu için burada tekrar çağırmak zararsız: işlenmiş
+        // satın almalar için 0 token verir, atlanmış olan varsa onu verir.
+        await grantTokenPackFromServer(maxAttempts: 1)
         #if DEBUG
         // Simülatörde restore: RC sunucusu yerel satın almayı görmediğinden
         // syncWithServer boş döner. StoreKit'teki aktif aboneliği bulup grant et
@@ -332,6 +463,63 @@ final class PurchaseService {
     /// kullanıcı bekliyor) bunu telafi ediyordu (bkz. kullanıcı talebi —
     /// "satın alımda token eklenmiyor"). Kısa aralıklarla birkaç kez dener,
     /// sunucu bir tier doğrular doğrulamaz durur.
+    /// Token paketi satın alması → `purchase-tokens`. Sunucu RC'yi doğrular,
+    /// miktarı kendi kataloğundan okur, mağaza işlem kimliğiyle idempotent
+    /// yazar ve GÜNCEL BAKİYEYİ döner.
+    ///
+    /// İstemci hiçbir yerde miktar GÖNDERMİYOR ve bakiyeyi kendi HESAPLAMIYOR:
+    /// ekrandaki sayı doğrudan sunucunun döndüğü değere yazılıyor, böylece
+    /// arayüzle veritabanı ayrışamıyor ("ne eksik ne fazla").
+    ///
+    /// Satın alma RC'ye ulaşmadan biz sorarsak (dar yayılım penceresi) grant 0
+    /// döner — bu yüzden birkaç kez, aralıklı denenir; token gelir gelmez durur.
+    /// `transactionId` verilirse sunucu YALNIZCA o işlemi işler ("ne eksik ne
+    /// fazla"). `nil` ise (restore akışı) RC'deki tüm tek-seferlik satın
+    /// almaları tarar — restore'un amacı zaten ödenmiş ama verilmemiş olanı
+    /// geri getirmek.
+    /// Dönüş: sunucunun bu çağrıda verdiği token. `nil` = sunucuya hiç
+    /// ulaşılamadı (ağ/HTTP hatası) — "0 token verildi"den farklı, çünkü
+    /// ilkinde satın alma hâlâ kurtarılabilir (restore), ikincisinde işlem
+    /// zaten işlenmiştir.
+    @discardableResult
+    private func grantTokenPackFromServer(transactionId: String? = nil,
+                                          maxAttempts: Int = 4,
+                                          delaySeconds: UInt64 = 2) async -> Int? {
+        guard let accessToken = UserDefaultsManager.shared.accessToken,
+              let url = URL(string: "\(Config.supabaseURL)/functions/v1/purchase-tokens")
+        else { return nil }
+        struct GrantResponse: Decodable { let granted: Int; let balance: Int }
+        var lastGranted: Int?
+        for attempt in 1...maxAttempts {
+            var req = URLRequest(url: url)
+            req.httpMethod = "POST"
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            req.setValue(Config.supabaseAnonKey, forHTTPHeaderField: "apikey")
+            req.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+            let payload: [String: Any] = transactionId.map { ["transactionId": $0] } ?? [:]
+            req.httpBody = try? JSONSerialization.data(withJSONObject: payload)
+            guard let (data, resp) = try? await URLSession.shared.data(for: req),
+                  let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode),
+                  let decoded = try? JSONDecoder().decode(GrantResponse.self, from: data)
+            else {
+                PurchaseService.diag.log("[PW-DIAG] token grant deneme \(attempt, privacy: .public): istek başarısız")
+                if attempt < maxAttempts { try? await Task.sleep(nanoseconds: delaySeconds * 1_000_000_000) }
+                continue
+            }
+            // Bakiye her durumda sunucudan yazılır (grant 0 olsa bile) —
+            // böylece ekran her zaman veritabanıyla aynı.
+            self.tokenStore?.setBalance(decoded.balance)
+            PurchaseService.diag.log("""
+                [PW-DIAG] token grant deneme \(attempt, privacy: .public): \
+                +\(decoded.granted, privacy: .public) bakiye=\(decoded.balance, privacy: .public)
+                """)
+            if decoded.granted > 0 { return decoded.granted }
+            if attempt < maxAttempts { try? await Task.sleep(nanoseconds: delaySeconds * 1_000_000_000) }
+            lastGranted = decoded.granted
+        }
+        return lastGranted
+    }
+
     private func syncWithServerRetrying(maxAttempts: Int = 4, delaySeconds: UInt64 = 2) async {
         for attempt in 1...maxAttempts {
             if await syncWithServer() { return }
@@ -372,15 +560,13 @@ final class PurchaseService {
         guard (200..<300).contains(status),
               let decoded = try? JSONDecoder().decode(SyncResponse.self, from: data)
         else { return false }
-        // "Tier yok" yanıtı tier'ı DÜŞÜRMEZ — sync-subscription sadece token
-        // ekonomisi köprüsü, gerçek doğruluk kaynağı değil. Az önce aynı
-        // fonksiyonda çağrılan refreshEntitlement() zaten RC'den (Apple'ın
-        // kendisinden) doğrudan doğruladı; sandbox'ta RC→sunucu doğrulaması
-        // gecikebilir/webhook henüz işlenmemiş olabilir ve bu satır olmadan
-        // az önce doğrulanmış PRO durumunu yanlışlıkla .none'a çekip paywall'ı
-        // tekrar açtırıyordu (bkz. kullanıcı talebi — satın aldıktan sonra
-        // paywall'ın farklı yerlerde tekrar çıkması). `refreshServerTier()`
-        // zaten aynı ilkeyi uyguluyor ("satır yoksa dokunma").
+        // "Tier yok" yanıtı burada tier'ı DÜŞÜRMEZ — ama artık farklı bir
+        // gerekçeyle: bu çağrı satın alma/restore anındaki RETRY döngüsünün
+        // içinde (bkz. syncWithServerRetrying). RC→sunucu doğrulaması o dar
+        // pencerede henüz tamamlanmamış olabilir ve her denemede tier'ı .none'a
+        // çekmek, az önce ödeme yapmış kullanıcıya paywall'ı tekrar açtırırdı
+        // (bkz. kullanıcı talebi). Nihai söz `refreshServerTier()`'da: o,
+        // `subscriptions` tablosunu okur ve satır yoksa tier'ı .none yapar.
         switch decoded.tier {
         case "max":      tier = .max; return true
         case "pro_plus": tier = .proPlus; return true
@@ -395,24 +581,7 @@ final class PurchaseService {
     #if DEBUG
     /// Satın alınan ürün id'sinden tier çıkarır (katalogdan).
     private func tier(forProductId productId: String) -> SubscriptionTier {
-        PlummCatalog.tier(for: productId)
-    }
-
-    /// SADECE DEBUG: bir token PAKETİ (consumable) satın alınınca adedini sunucuda
-    /// verir. Consumable entitlement/subscription üretmediği için normal sync yolu
-    /// bunu yakalamaz; dev-token-tools ile doğrudan grant edilir.
-    private func debugGrantTokens(_ amount: Int) async {
-        guard amount > 0,
-              let accessToken = UserDefaultsManager.shared.accessToken,
-              let url = URL(string: "\(Config.supabaseURL)/functions/v1/dev-token-tools")
-        else { return }
-        var req = URLRequest(url: url)
-        req.httpMethod = "POST"
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
-        req.httpBody = try? JSONSerialization.data(withJSONObject: ["action": "grant", "amount": amount])
-        _ = try? await URLSession.shared.data(for: req)
-        print("[PW] DEBUG token paketi grant: +\(amount)")
+        CatalogService.shared.tier(for: productId)
     }
 
     /// StoreKit-2'den ŞU AN aktif (doğrulanmış, süresi geçmemiş) abonelik ürününü
@@ -465,17 +634,71 @@ final class PurchaseService {
 
     /// Ürüne göre verilecek token miktarı (katalogdan).
     static func productTokens(for productId: String) -> Int {
-        PlummCatalog.tokens(for: productId)
+        CatalogService.shared.tokens(for: productId)
     }
 
+    /// RC'nin ne düşündüğünü YALNIZCA LOGLAR — `tier`'a ARTIK DOKUNMAZ.
+    ///
+    /// Eskiden PRO durumunun kaynağı burasıydı (`entitlements["max"/"pro_plus"/
+    /// "pro"]`). Sorun: RC istemcinin gördüğü makbuza dayanıyor ve iptal/iade
+    /// edilmiş ya da temizlenmiş sandbox satın almalarını, kaydettiği bitiş
+    /// tarihine kadar "aktif" saymaya devam ediyor. Apple tarafında sandbox
+    /// geçmişi TEMİZLENDİKTEN sonra bile RC üç entitlement'ı aktif vermeye devam
+    /// etti ve uygulama, sunucuda hiçbir abonelik satırı olmamasına rağmen
+    /// (`body=[]`) Max göründü (bkz. kullanıcı talebi: "pro olup olmama durumunu
+    /// RC'den okuma, backend'den oku").
+    ///
+    /// Artık tek doğruluk kaynağı sunucudaki `subscriptions` tablosu
+    /// (bkz. refreshServerTier / syncWithServer). Sunucu tarafı zaten RC'yi
+    /// SECRET key ile kendi doğruluyor — istemcinin RC'ye güvenmesi hem
+    /// gereksiz hem de istemci tarafı makbuz durumuna açık.
     func refreshEntitlement() async {
         #if canImport(RevenueCat)
-        guard isConfigured, let info = try? await Purchases.shared.customerInfo() else { return }
-        if info.entitlements["max"]?.isActive == true { tier = .max }
-        else if info.entitlements["pro_plus"]?.isActive == true { tier = .proPlus }
-        else if info.entitlements["pro"]?.isActive == true { tier = .pro }
-        else { tier = .none }
+        guard isConfigured else {
+            PurchaseService.diag.log("[PW-DIAG] entitlement: RC yapılandırılmadı, tier korunuyor (\(self.tier.rawValue, privacy: .public))")
+            return
+        }
+        guard let info = try? await Purchases.shared.customerInfo() else {
+            PurchaseService.diag.log("[PW-DIAG] entitlement: customerInfo ALINAMADI, tier korunuyor (\(self.tier.rawValue, privacy: .public))")
+            return
+        }
+        // Hangi entitlement'ın AKTİF olduğu, sunucuyla UYUŞMAZLIK olduğunda
+        // teşhisi tek başına verir — RC'de kalmış eski sandbox satın almaları
+        // burada görünür (bkz. kullanıcı talebi: pro olmadığı halde pro görünmesi).
+        let active = info.entitlements.all
+            .filter { $0.value.isActive }
+            .map { "\($0.key)(\($0.value.productIdentifier))" }
+            .sorted()
+            .joined(separator: ",")
+        PurchaseService.diag.log("""
+            [PW-DIAG] entitlement kaynak=RevenueCat (SALT TANILAMA, tier yazmaz) \
+            appUserId=\(Purchases.shared.appUserID, privacy: .public) \
+            aktif=[\(active.isEmpty ? "yok" : active, privacy: .public)] \
+            mevcutTier=\(self.tier.rawValue, privacy: .public) isPro=\(self.isPro, privacy: .public)
+            """)
         #endif
+    }
+
+    /// Tanılama kanalı. `print` yerine `Logger`: print YALNIZCA Xcode'a
+    /// bağlıyken görünür, bu ise TestFlight/Release'te de Console.app'ten
+    /// (cihaz bağlı, alt sistem filtresi `com.firat.Plumm`) okunabilir —
+    /// PRO durumu asıl orada teşhis ediliyor.
+    /// Interpolasyonlar açıkça `.public`: Logger varsayılanı dinamik değerleri
+    /// `<private>` diye maskeler, o da logu işe yaramaz hale getirirdi. Burada
+    /// yalnızca kimlik/tier bilgisi basılıyor — access token, refresh token
+    /// veya makbuz ASLA loglanmıyor.
+    static let diag = Logger(subsystem: "com.firat.Plumm", category: "purchase")
+
+    /// Kullanıcının o anki hak durumunun TEK SATIRLIK özeti. Uygulamanın
+    /// herhangi bir yerinden çağrılabilir; tier'ı değiştirmez, sadece raporlar.
+    func logEntitlementState(_ context: String) {
+        var line = "[PW-DIAG] durum(\(context)) tier=\(tier.rawValue) isPro=\(isPro) canUseVoice=\(canUseVoice)"
+        line += " supabaseUid=\(UserDefaultsManager.shared.userId ?? "yok")"
+        line += " rcConfigured=\(isConfigured)"
+        #if canImport(RevenueCat)
+        if isConfigured { line += " rcAppUserId=\(Purchases.shared.appUserID)" }
+        #endif
+        PurchaseService.diag.log("\(line, privacy: .public)")
     }
 
     /// Sunucudaki `subscriptions` tablosundan tier'ı okur. Token ekonomisinin
@@ -484,24 +707,62 @@ final class PurchaseService {
     /// restore'a basmadan pro olduğunu bilir. Sunucuda satır yoksa tier düşürülmez
     /// (RC entitlement'ı geçerliyse korunur).
     func refreshServerTier() async {
+        // Hangi yoldan çıkarsak çıkalım (oturum yok / ağ hatası / başarı)
+        // bekleyenler serbest bırakılmalı, yoksa paywall süresiz beklerdi.
+        defer { markTierResolved() }
+        let uid = UserDefaultsManager.shared.userId ?? "yok"
         guard let accessToken = UserDefaultsManager.shared.accessToken,
               let url = URL(string: "\(Config.supabaseURL)/rest/v1/subscriptions?select=tier")
-        else { return }
+        else {
+            PurchaseService.diag.log("[PW-DIAG] serverTier: oturum yok, atlandı (uid=\(uid, privacy: .public))")
+            return
+        }
         var req = URLRequest(url: url)
         req.setValue(Config.supabaseAnonKey, forHTTPHeaderField: "apikey")
         req.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
         guard let (data, resp) = try? await URLSession.shared.data(for: req),
               let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode)
-        else { return }
+        else {
+            PurchaseService.diag.log("[PW-DIAG] serverTier: istek BAŞARISIZ, tier korunuyor (\(self.tier.rawValue, privacy: .public))")
+            return
+        }
+        // Ham gövde de basılıyor: boş dizi `[]` ile `[{"tier":"max"}]` arasındaki
+        // fark, "sunucuda satır yok ama uygulama PRO görünüyor" durumunu tek
+        // bakışta ayırt ettiriyor (bkz. kullanıcı talebi).
+        let body = String(data: data, encoding: .utf8) ?? "<okunamadı>"
         struct Row: Decodable { let tier: String }
-        guard let rows = try? JSONDecoder().decode([Row].self, from: data) else { return }
-        guard let t = rows.first?.tier else { return }   // satır yoksa dokunma
+        guard let rows = try? JSONDecoder().decode([Row].self, from: data) else {
+            PurchaseService.diag.log("[PW-DIAG] serverTier: gövde çözümlenemedi status=\(http.statusCode, privacy: .public) body=\(body, privacy: .public)")
+            return
+        }
+        let before = tier
+        // İSTEK BAŞARILI + SATIR YOK = kullanıcının aboneliği yok. Sunucu tek
+        // doğruluk kaynağı olduğu için burada tier DÜŞÜRÜLÜR. (Eskiden "satır
+        // yoksa dokunma" idi; RC tier'ı yazdığı için bu bir güvenlik ağıydı.
+        // Artık RC tier yazmadığından o ağ gereksiz — ve tam da o yüzden
+        // sunucuda kayıt olmadan Max görünüyordu.) Ağ/HTTP hatasında yukarıdaki
+        // guard'lar erken dönüyor, yani ÇEVRİMDIŞIYKEN tier düşmez.
+        guard let t = rows.first?.tier else {
+            tier = .none
+            PurchaseService.diag.log("""
+                [PW-DIAG] serverTier kaynak=Supabase uid=\(uid, privacy: .public) \
+                status=\(http.statusCode, privacy: .public) body=\(body, privacy: .public) \
+                satır YOK -> tier \(before.rawValue, privacy: .public)->none, isPro=false
+                """)
+            return
+        }
         switch t {
         case "max":      tier = .max
         case "pro_plus": tier = .proPlus
         case "pro":      tier = .pro
-        default:         break
+        default:         tier = .none
         }
+        PurchaseService.diag.log("""
+            [PW-DIAG] serverTier kaynak=Supabase uid=\(uid, privacy: .public) \
+            status=\(http.statusCode, privacy: .public) body=\(body, privacy: .public) \
+            tier \(before.rawValue, privacy: .public)->\(self.tier.rawValue, privacy: .public) \
+            isPro=\(self.isPro, privacy: .public)
+            """)
     }
 
     /// Paywall gösterilmesi gereken her yerden çağrılır (PRO banner, galeri CTA, rozet vb).
