@@ -26,4 +26,13 @@ enum PassedCharactersStore {
         m[characterID.uuidString] = true
         map = m
     }
+
+    /// "Nope" geçmişini siler — Discover destesi tükendiğinde baştan başlamak
+    /// için (bkz. FeedView.computeDeck). Discover'ın asla boşalmaması, hep
+    /// başa dönmesi istendiği için gerekli (bkz. kullanıcı talebi).
+    /// `BlockedCharactersStore`'a DOKUNMAZ: block bilinçli ve kalıcı bir
+    /// eylem, tur başa sarınca geri gelmemeli.
+    static func clear() {
+        UserDefaults.standard.removeObject(forKey: key)
+    }
 }
