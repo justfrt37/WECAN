@@ -161,6 +161,33 @@ final class ChatViewModel {
         NotificationScheduler.shared.cancelSleepyGoodnight(for: character.id)
     }
 
+    private static let iso8601WithFractional: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+    private static let iso8601Plain = ISO8601DateFormatter()
+
+    /// Sunucudan her cevapla dönen kıskançlık durumunu (bkz. ChatReply.jealousyStage
+    /// vb.) yerel önbelleğe yansıtır — üç gönderim yolunda da tekrarlanıyordu.
+    /// Bir sonraki tam hydrateConversations'ı beklemeden, o anda güncel kalsın
+    /// diye (özellikle eskalasyon zamanlayıcısının bir sonraki foreground'da
+    /// doğru iptal/kur kararı verebilmesi için).
+    private func applyJealousyState(from result: ChatReply, fallback stored: LocalConversationStore.Stored?) {
+        guard let stage = result.jealousyStage else { return }
+        var updated = LocalConversationStore.shared.load(for: character.id) ?? stored
+        updated?.jealousyStage = stage
+        updated?.jealousyMoodTurnsLeft = result.jealousyMoodTurnsLeft ?? 0
+        if let sentAtString = result.jealousySentAt {
+            updated?.jealousySentAt = Self.iso8601WithFractional.date(from: sentAtString)
+                ?? Self.iso8601Plain.date(from: sentAtString)
+        }
+        if let updated { LocalConversationStore.shared.save(updated, for: character.id) }
+        if stage != 1 {
+            NotificationScheduler.shared.cancelJealousyEscalation(for: character.id)
+        }
+    }
+
     init(character: Character) {
         self.character = character
         // Seviye/ilerleme İLK KARE'de doğru olsun diye burada okunur: `loadHistory`
@@ -435,6 +462,7 @@ final class ChatViewModel {
                                       serverLevel: result.level, serverProgress: result.levelProgress)
 
                 if result.wentToSleep { applyWentToSleep(fallback: stored) }
+                applyJealousyState(from: result, fallback: stored)
             } catch {
                 handleSendFailure(error, messageID: userMsg.id, refundsBadge: true)
             }
@@ -640,6 +668,7 @@ final class ChatViewModel {
                                       serverLevel: result.level, serverProgress: result.levelProgress)
 
                 if result.wentToSleep { applyWentToSleep(fallback: stored) }
+                applyJealousyState(from: result, fallback: stored)
             } catch {
                 handleSendFailure(error, messageID: userMsg.id, refundsBadge: true)
             }
@@ -698,6 +727,7 @@ final class ChatViewModel {
                                       serverLevel: result.level, serverProgress: result.levelProgress)
 
                 if result.wentToSleep { applyWentToSleep(fallback: stored) }
+                applyJealousyState(from: result, fallback: stored)
             } catch {
                 // Foto yolunda rozet önden düşürülmüyor → düzeltme de gerekmez.
                 handleSendFailure(error, messageID: userMsg.id, refundsBadge: false)

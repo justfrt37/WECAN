@@ -126,6 +126,12 @@ private struct ChatResponse: Codable {
     let tokenBalance: Int?
     /// bkz. WireAutoMedia — yalnızca düz metin turlarında dolu gelir.
     let autoMedia: WireAutoMedia?
+    // Kıskançlık durum makinesi (bkz. chat/index.ts JEALOUS_MOOD_RULE,
+    // NotificationScheduler jealousy bölümü) — sunucu tek doğru kaynak,
+    // her cevapla birlikte gelir.
+    let jealousyStage: Int?
+    let jealousySentAt: String?
+    let jealousyMoodTurnsLeft: Int?
 }
 
 struct ChatHistory {
@@ -152,6 +158,10 @@ struct ChatReply {
     /// bkz. ChatResponse.autoMedia — `sendWithLocalHistory` (düz metin) dışında
     /// hep nil.
     let autoMedia: WireAutoMedia?
+    /// bkz. ChatResponse.jealousyStage/jealousySentAt/jealousyMoodTurnsLeft.
+    let jealousyStage: Int?
+    let jealousySentAt: String?
+    let jealousyMoodTurnsLeft: Int?
 }
 
 enum ChatServiceError: Error, LocalizedError {
@@ -205,7 +215,10 @@ struct ChatService {
             photoURL: resp.photoUrl.flatMap(URL.init(string:)),
             wentToSleep: resp.wentToSleep ?? false,
             tokenBalance: resp.tokenBalance,
-            autoMedia: resp.autoMedia
+            autoMedia: resp.autoMedia,
+            jealousyStage: resp.jealousyStage,
+            jealousySentAt: resp.jealousySentAt,
+            jealousyMoodTurnsLeft: resp.jealousyMoodTurnsLeft
         )
     }
 

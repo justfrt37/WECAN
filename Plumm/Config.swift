@@ -48,6 +48,13 @@ enum Config {
         URL(string: "\(supabaseURL)/functions/v1/character-schedule")!
     }
 
+    /// Genel amaçlı kısa metin üretimi (prompt-in/text-out) — kıskançlık
+    /// eskalasyon satırı bunu kullanır (bkz. NotificationScheduler
+    /// rescheduleJealousyEscalation).
+    static var generateFunctionURL: URL {
+        URL(string: "\(supabaseURL)/functions/v1/generate")!
+    }
+
     // MARK: Real-time voice call (bkz. CallService, CallViewModel)
 
     static var voiceCallStartFunctionURL: URL {

@@ -244,7 +244,10 @@ final class CharacterStore {
                 schedule: state.schedule ?? existing?.schedule,
                 wokenUpAt: parseDate(state.wokenUpAt) ?? existing?.wokenUpAt,
                 manualSleepAt: parseDate(state.manualSleepAt) ?? existing?.manualSleepAt,
-                ghostedAt: parseDate(state.ghostedAt)
+                ghostedAt: parseDate(state.ghostedAt),
+                jealousyStage: state.jealousyStage ?? 0,
+                jealousySentAt: parseDate(state.jealousySentAt),
+                jealousyMoodTurnsLeft: state.jealousyMoodTurnsLeft ?? 0
             )
             LocalConversationStore.shared.save(stored, for: state.characterID)
         }

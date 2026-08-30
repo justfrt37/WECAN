@@ -77,6 +77,9 @@ struct ConversationState: Codable {
     let ghostedAt: String?
     let detectedLanguage: String?
     let updatedAt: String?
+    let jealousyStage: Int?
+    let jealousySentAt: String?
+    let jealousyMoodTurnsLeft: Int?
 
     private enum CodingKeys: String, CodingKey {
         case id
@@ -91,6 +94,9 @@ struct ConversationState: Codable {
         case ghostedAt = "ghosted_at"
         case detectedLanguage = "detected_language"
         case updatedAt = "updated_at"
+        case jealousyStage = "jealousy_stage"
+        case jealousySentAt = "jealousy_sent_at"
+        case jealousyMoodTurnsLeft = "jealousy_mood_turns_left"
     }
 }
 
@@ -104,7 +110,7 @@ struct ConversationsService {
     /// Tüm konuşma DURUMLARI (seviye/ilerleme/özet/rutin/uyku/dil) — bellek-içi
     /// önbelleği sunucudan tazelemek için (bkz. CharacterStore.hydrateConversations).
     func fetchConversationStates() async -> [ConversationState] {
-        let url = "\(Config.supabaseURL)/rest/v1/conversations?select=id,character_id,relationship_level,level_progress,summary,summarized_count,schedule,woken_up_at,manual_sleep_at,ghosted_at,detected_language,updated_at&order=updated_at.desc"
+        let url = "\(Config.supabaseURL)/rest/v1/conversations?select=id,character_id,relationship_level,level_progress,summary,summarized_count,schedule,woken_up_at,manual_sleep_at,ghosted_at,detected_language,updated_at,jealousy_stage,jealousy_sent_at,jealousy_mood_turns_left&order=updated_at.desc"
         return await get(url) ?? []
     }
 

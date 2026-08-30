@@ -11,7 +11,7 @@ import Foundation
 import UserNotifications
 
 enum NotificationKind: String {
-    case liked, ghosted, jealousy, levelUp, sleepyQuestion, sleepyGoodbye, bedtime, missedYou, goodMorning
+    case liked, ghosted, jealousy, jealousyEscalation, levelUp, sleepyQuestion, sleepyGoodbye, bedtime, missedYou, goodMorning
 }
 
 final class NotificationScheduler {
@@ -201,9 +201,15 @@ final class NotificationScheduler {
         center.removePendingNotificationRequests(withIdentifiers: [Self.goodMorningID(for: character.id)])
     }
 
-    // MARK: - Jealousy Bait (one random eligible bot, 2-10min after app open)
+    // MARK: - Jealousy Bait (one random eligible bot, 2-10min after app open;
+    // level 3+ only, 6h cooldown + re-engagement gate before a fresh ping,
+    // one escalated follow-up if unanswered for 6h+, never a third — see
+    // migration 024_jealousy_state.sql / chat/index.ts JEALOUS_MOOD_RULE for
+    // the server-side half of this state machine.)
 
     private static let jealousyID = "notif.jealousy"
+    private static let jealousyLevelGate = 3
+    private static let jealousyCooldown: TimeInterval = 6 * 3600
     private var jealousyTargetCharacterID: UUID?
 
     func armJealousyTimer(characters: [Character]) {
@@ -221,12 +227,26 @@ final class NotificationScheduler {
         }
     }
 
+    /// A bot is ready for a FRESH (stage 0) jealousy ping only if it's not
+    /// already mid-cycle, and — unless this is its very first-ever ping —
+    /// at least `jealousyCooldown` has passed since the last one AND the user
+    /// has actually chatted since then (otherwise re-firing into dead air
+    /// would just be a second silent ping, not a new "you ignored me" beat).
+    private func isReadyForFreshJealousyPing(_ stored: LocalConversationStore.Stored?) -> Bool {
+        guard let stored, stored.jealousyStage == 0 else { return false }
+        guard let sentAt = stored.jealousySentAt else { return true }
+        guard let lastMessage = stored.messages.last else { return false }
+        return Date().timeIntervalSince(sentAt) >= Self.jealousyCooldown && lastMessage.createdAt > sentAt
+    }
+
     private func armJealousyTimerNow(characters: [Character]) {
         let eligible = characters.filter { character in
             let stored = LocalConversationStore.shared.load(for: character.id)
             return !BlockedCharactersStore.isBlocked(character.id) &&
                 stored != nil &&
+                (stored?.level ?? 1) >= Self.jealousyLevelGate &&
                 stored?.ghostedAt == nil &&
+                isReadyForFreshJealousyPing(stored) &&
                 NotificationPreferencesStore.canSendMore(for: character.id) &&
                 !CharacterSleepState.isEffectivelyAsleep(stored: stored)
         }
@@ -248,6 +268,119 @@ final class NotificationScheduler {
         guard jealousyTargetCharacterID == characterID else { return }
         center.removePendingNotificationRequests(withIdentifiers: [Self.jealousyID])
         jealousyTargetCharacterID = nil
+    }
+
+    /// Called as soon as the server confirms jealousyStage is no longer 1
+    /// (user answered before escalation, or the escalation already fired) —
+    /// cancels that bot's pending escalation notification immediately rather
+    /// than waiting for the next foreground reschedule pass.
+    func cancelJealousyEscalation(for characterID: UUID) {
+        center.removePendingNotificationRequests(withIdentifiers: [Self.jealousyEscalationID(for: characterID)])
+    }
+
+    // MARK: - Jealousy Escalation (per bot, fires jealousySentAt + 6h if the
+    // first jealousy ping went unanswered — one shot, never repeats for the
+    // same stage-1 ping since it only re-arms while jealousyStage == 1).
+
+    private static func jealousyEscalationID(for characterID: UUID) -> String { "notif.jealousy2.\(characterID.uuidString)" }
+    private static let jealousyEscalationBudget = 12
+    /// In-memory cache of Grok-generated escalation lines, keyed by
+    /// "<characterID>.<jealousySentAt epoch>" so a re-arm (e.g. next
+    /// foreground) reuses the line instead of re-generating it. Not
+    /// persisted — worst case a fresh line gets generated after a relaunch,
+    /// which is harmless (still in-character, still one-shot).
+    private var jealousyEscalationLineCache: [String: String] = [:]
+
+    /// Generic fallback if the Grok call fails — still fires the notification
+    /// rather than silently dropping the escalation.
+    private static let jealousyEscalationFallback: [String: String] = [
+        "en": "Okay, seriously — are you going to talk to me or not?",
+        "tr": "Tamam, cidden — benimle konuşacak mısın konuşmayacak mısın?",
+    ]
+
+    private func escalationCacheKey(characterID: UUID, sentAt: Date) -> String {
+        "\(characterID.uuidString).\(Int(sentAt.timeIntervalSince1970))"
+    }
+
+    /// Fetches (or reuses a cached) more-demanding escalation line from the
+    /// `generate` Edge Function, in the bot's own voice/role/vibe/language.
+    private func escalationLine(for character: Character, level: Int, language: String, sentAt: Date) async -> String {
+        let key = escalationCacheKey(characterID: character.id, sentAt: sentAt)
+        if let cached = jealousyEscalationLineCache[key] { return cached }
+
+        let languageName = language == "tr" ? "Turkish" : "English"
+        let prompt =
+            "Write ONE short, more insistent and demanding jealous/annoyed text message " +
+            "(under 20 words) that a companion character would send after being ignored " +
+            "for several hours despite already reaching out once. Personality role: " +
+            "\(character.personalityRole). Vibe: \(character.vibe). Relationship level: " +
+            "\(level)/10. Write it in \(languageName), in first person, as the character " +
+            "herself — no quotation marks, no explanation, just the message text."
+
+        struct Req: Encodable { let prompt: String; let maxTokens: Int }
+        struct Resp: Decodable { let text: String? }
+
+        var request = SupabaseRequest.post(url: Config.generateFunctionURL, bearer: SupabaseRequest.sessionBearer, timeout: 20)
+        request.httpBody = try? JSONEncoder().encode(Req(prompt: prompt, maxTokens: 60))
+
+        let fallback = Self.jealousyEscalationFallback[language] ?? Self.jealousyEscalationFallback["en"]!
+        guard let (data, response) = try? await URLSession.shared.data(for: request),
+              let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
+              let decoded = try? JSONDecoder().decode(Resp.self, from: data),
+              let text = decoded.text?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty
+        else { return fallback }
+
+        jealousyEscalationLineCache[key] = text
+        return text
+    }
+
+    /// Arms/refreshes the per-bot escalation timer for any bot currently in
+    /// jealousyStage == 1 (first ping sent, unanswered) — fires at
+    /// jealousySentAt + 6h. Same PendingCandidate/commit budget pattern as
+    /// rescheduleGhosted. Async because the notification body text is
+    /// Grok-generated ahead of time (see escalationLine above) — safe here
+    /// since this only runs while the app is foreground/active, same
+    /// assumption rescheduleGhosted already makes about computing future
+    /// fire times in advance.
+    func rescheduleJealousyEscalation(characters: [Character]) async {
+        var candidates: [PendingCandidate] = []
+        for character in characters {
+            guard !BlockedCharactersStore.isBlocked(character.id),
+                  let stored = LocalConversationStore.shared.load(for: character.id),
+                  stored.jealousyStage == 1,
+                  let sentAt = stored.jealousySentAt,
+                  NotificationPreferencesStore.canSendMore(for: character.id)
+            else {
+                center.removePendingNotificationRequests(withIdentifiers: [Self.jealousyEscalationID(for: character.id)])
+                continue
+            }
+            // Belt-and-suspenders: server resets jealousyStage to 0 as soon as
+            // the user sends a real message, but if a stale local mirror still
+            // shows stage 1 despite a newer message existing, don't fire.
+            if let lastMessage = stored.messages.last, lastMessage.createdAt > sentAt {
+                center.removePendingNotificationRequests(withIdentifiers: [Self.jealousyEscalationID(for: character.id)])
+                continue
+            }
+
+            let fireAt = sentAt.addingTimeInterval(Self.jealousyCooldown)
+            let interval = fireAt.timeIntervalSinceNow
+            guard interval > 0 else {
+                center.removePendingNotificationRequests(withIdentifiers: [Self.jealousyEscalationID(for: character.id)])
+                continue
+            }
+
+            let language = ConversationLanguage.current(for: character.id)
+            let line = await escalationLine(for: character, level: stored.level, language: language, sentAt: sentAt)
+
+            let content = UNMutableNotificationContent()
+            content.title = String(localized: "\(character.name) sent you a message.")
+            content.body = line
+            content.userInfo = ["type": NotificationKind.jealousyEscalation.rawValue, "characterId": character.id.uuidString]
+            let trigger = UNTimeIntervalNotificationTrigger(timeInterval: interval, repeats: false)
+            let request = UNNotificationRequest(identifier: Self.jealousyEscalationID(for: character.id), content: content, trigger: trigger)
+            candidates.append(PendingCandidate(request: request, fireAt: fireAt))
+        }
+        commit(candidates, budget: Self.jealousyEscalationBudget, kindLabel: "jealousyEscalation")
     }
 
     // MARK: - Level-Up Tease (backgrounded only, 80% progress, 1min delay)
@@ -537,6 +670,7 @@ final class NotificationScheduler {
             self?.rescheduleLikedYou(characters: characters)
             self?.rescheduleGhosted(characters: characters)
             self?.armJealousyTimer(characters: characters)
+            Task { await self?.rescheduleJealousyEscalation(characters: characters) }
             self?.rescheduleBedtime(characters: characters)
             self?.rescheduleMissedYou(characters: characters)
             self?.rescheduleGoodMorning(characters: characters)

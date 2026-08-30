@@ -54,17 +54,31 @@ final class LocalConversationStore {
         /// level-up) — kullanıcı tekrar yazana kadar sessiz kalır (bkz.
         /// NotificationScheduler.noteUserSent, orada `nil`lenir).
         var ghostedAt: Date?
+        /// Kıskançlık durum makinesi (bkz. NotificationScheduler jealousy
+        /// bölümü, chat/index.ts JEALOUS_MOOD_RULE) — sunucu tek doğru kaynak,
+        /// her hydrateConversations'ta tazelenir (ghostedAt gibi, existing'e
+        /// düşmez). `jealousyStage`: 0 boşta/çözüldü, 1 ilk mesaj cevapsız
+        /// (eskalasyon bekliyor), 2 eskalasyon cevapsız. `jealousySentAt`: en
+        /// son kıskançlık bildiriminin (hangi aşama olursa olsun) zamanı —
+        /// hem eskalasyonun ne zaman ateşleneceğini hem de yeni bir döngü için
+        /// 6 saatlik bekleme süresini hesaplamakta kullanılır. `jealousyMoodTurnsLeft`:
+        /// eskalasyona cevap verildikten sonra kalan "hâlâ biraz kıskanç" tur sayısı.
+        var jealousyStage: Int = 0
+        var jealousySentAt: Date?
+        var jealousyMoodTurnsLeft: Int = 0
 
         enum CodingKeys: String, CodingKey {
             case messages, xp, level, summary, summarizedCount, msgCounter, levelProgress,
-                 detectedLanguage, schedule, wokenUpAt, manualSleepAt, ghostedAt
+                 detectedLanguage, schedule, wokenUpAt, manualSleepAt, ghostedAt,
+                 jealousyStage, jealousySentAt, jealousyMoodTurnsLeft
         }
 
         init(
             messages: [Message], xp: Int, level: Int, summary: String, summarizedCount: Int,
             msgCounter: Int = 0, levelProgress: Double = 0, detectedLanguage: String? = nil,
             schedule: CharacterSchedule? = nil, wokenUpAt: Date? = nil, manualSleepAt: Date? = nil,
-            ghostedAt: Date? = nil
+            ghostedAt: Date? = nil, jealousyStage: Int = 0, jealousySentAt: Date? = nil,
+            jealousyMoodTurnsLeft: Int = 0
         ) {
             self.messages = messages
             self.xp = xp
@@ -78,6 +92,9 @@ final class LocalConversationStore {
             self.wokenUpAt = wokenUpAt
             self.manualSleepAt = manualSleepAt
             self.ghostedAt = ghostedAt
+            self.jealousyStage = jealousyStage
+            self.jealousySentAt = jealousySentAt
+            self.jealousyMoodTurnsLeft = jealousyMoodTurnsLeft
         }
 
         init(from decoder: Decoder) throws {
@@ -95,6 +112,9 @@ final class LocalConversationStore {
             wokenUpAt = try? c.decodeIfPresent(Date.self, forKey: .wokenUpAt)
             manualSleepAt = try? c.decodeIfPresent(Date.self, forKey: .manualSleepAt)
             ghostedAt = try? c.decodeIfPresent(Date.self, forKey: .ghostedAt)
+            jealousyStage = (try? c.decode(Int.self, forKey: .jealousyStage)) ?? 0
+            jealousySentAt = try? c.decodeIfPresent(Date.self, forKey: .jealousySentAt)
+            jealousyMoodTurnsLeft = (try? c.decode(Int.self, forKey: .jealousyMoodTurnsLeft)) ?? 0
         }
 
         func encode(to encoder: Encoder) throws {
@@ -111,6 +131,9 @@ final class LocalConversationStore {
             try c.encodeIfPresent(wokenUpAt, forKey: .wokenUpAt)
             try c.encodeIfPresent(ghostedAt, forKey: .ghostedAt)
             try c.encodeIfPresent(manualSleepAt, forKey: .manualSleepAt)
+            try c.encode(jealousyStage, forKey: .jealousyStage)
+            try c.encodeIfPresent(jealousySentAt, forKey: .jealousySentAt)
+            try c.encode(jealousyMoodTurnsLeft, forKey: .jealousyMoodTurnsLeft)
         }
     }
 

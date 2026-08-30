@@ -336,6 +336,21 @@ const PHOTO_DOWNLOAD_REACTION_RULE =
   "fixed template line, and never sound robotic or like a canned response. " +
   "Output ONLY the reaction line itself, nothing else.";
 
+// Active while jealousy_stage/jealousy_mood_turns_left indicate the user just
+// answered (or is still within a couple of turns of answering) the escalated
+// "more demanding" jealousy notification — see chat/index.ts's main-turn
+// reset/decay logic and NotificationScheduler's jealousy state machine.
+const JEALOUS_MOOD_RULE =
+  "\n\n[LINGERING JEALOUSY] You were feeling a little jealous/hurt about being " +
+  "ignored earlier, and the user is only now getting back to you. Let a touch " +
+  "of that color this reply naturally — a bit of playful pouting, light " +
+  "teasing about them finally showing up, maybe a beat of genuine relief " +
+  "underneath it — whatever fits your personality. Don't be cold, harsh, or " +
+  "actually upset; this is a light, passing mood, not a grudge. Let it " +
+  "visibly soften with each message and be fully gone within a couple of " +
+  "turns — never re-litigate it once it's faded, and never name or explain " +
+  "the mood out loud (no 'I was jealous', no 'lingering jealousy').";
+
 // Level/role are stable per-character (safe in the static system prompt, same
 // treatment as humorDirective) — the actual near-bedtime BOOLEAN goes in
 // turnContext instead (it changes constantly as bedtime approaches, and
@@ -913,7 +928,7 @@ Deno.serve(async (req: Request) => {
         .maybeSingle(),
       db
         .from("conversations")
-        .select("id, summary, summarized_count, xp, relationship_level, level_progress, schedule, woken_up_at, manual_sleep_at, ghosted_at")
+        .select("id, summary, summarized_count, xp, relationship_level, level_progress, schedule, woken_up_at, manual_sleep_at, ghosted_at, jealousy_sent_at, jealousy_stage, jealousy_mood_turns_left")
         .eq("user_id", uid)
         .eq("character_id", characterId)
         .order("updated_at", { ascending: false })
@@ -1052,7 +1067,7 @@ Deno.serve(async (req: Request) => {
         const ins = await db
           .from("conversations")
           .upsert({ user_id: uid, character_id: characterId }, { onConflict: "user_id,character_id" })
-          .select("id, summary, summarized_count, xp, relationship_level, level_progress, schedule, woken_up_at, manual_sleep_at, ghosted_at")
+          .select("id, summary, summarized_count, xp, relationship_level, level_progress, schedule, woken_up_at, manual_sleep_at, ghosted_at, jealousy_sent_at, jealousy_stage, jealousy_mood_turns_left")
           .single();
         convo = ins.data!;
         await seedDefaultUserGenderMemory(convo.id);
@@ -1065,6 +1080,17 @@ Deno.serve(async (req: Request) => {
       if (kind === "ghosted") proactiveUpdate.ghosted_at = new Date().toISOString();
       // sleepyGoodbye → uyandırma override'ını temizle (karakter gerçekten uyur).
       if (kind === "sleepyGoodbye") proactiveUpdate.woken_up_at = null;
+      // jealousy/jealousyEscalation → kıskançlık durum makinesi (bkz.
+      // NotificationScheduler.armJealousyTimerNow/rescheduleJealousyEscalation
+      // eligibility ve chat/index.ts'nin ana tur bloğundaki reset/decay mantığı).
+      if (kind === "jealousy") {
+        proactiveUpdate.jealousy_stage = 1;
+        proactiveUpdate.jealousy_sent_at = new Date().toISOString();
+      }
+      if (kind === "jealousyEscalation") {
+        proactiveUpdate.jealousy_stage = 2;
+        proactiveUpdate.jealousy_sent_at = new Date().toISOString();
+      }
       await db.from("conversations").update(proactiveUpdate).eq("id", convo.id);
       return json({ injected: true, conversationId: convo.id });
     }
@@ -1162,6 +1188,9 @@ Deno.serve(async (req: Request) => {
         wokenUpAt: convo.woken_up_at ?? null,
         manualSleepAt: convo.manual_sleep_at ?? null,
         ghostedAt: convo.ghosted_at ?? null,
+        jealousyStage: convo.jealousy_stage ?? 0,
+        jealousySentAt: convo.jealousy_sent_at ?? null,
+        jealousyMoodTurnsLeft: convo.jealousy_mood_turns_left ?? 0,
       });
     }
 
@@ -1172,7 +1201,7 @@ Deno.serve(async (req: Request) => {
       const ins = await db
         .from("conversations")
         .upsert({ user_id: uid, character_id: characterId }, { onConflict: "user_id,character_id" })
-        .select("id, summary, summarized_count, xp, relationship_level, level_progress, schedule, woken_up_at, manual_sleep_at, ghosted_at")
+        .select("id, summary, summarized_count, xp, relationship_level, level_progress, schedule, woken_up_at, manual_sleep_at, ghosted_at, jealousy_sent_at, jealousy_stage, jealousy_mood_turns_left")
         .single();
       convo = ins.data!;
       await seedDefaultUserGenderMemory(convo.id);
@@ -1317,6 +1346,13 @@ Deno.serve(async (req: Request) => {
     }
     turnContext += memoriesBlock(memoryRows);
     turnContext += behaviorsBlock(behaviorRows);
+    // stage===2 → this turn IS the user's answer to the unanswered escalation
+    // (reset happens further down, after the reply is generated) — the mood
+    // rule applies to THIS reply too, not just the turns after it.
+    const jealousMoodActive = convo.jealousy_stage === 2 || (convo.jealousy_mood_turns_left ?? 0) > 0;
+    if (jealousMoodActive) {
+      turnContext += JEALOUS_MOOD_RULE;
+    }
     if (useClientHistory && localSummary && localSummary.trim() !== "") {
       turnContext += `\n\n[Önceki konuşmalarınızın özeti]\n${stripVoiceTags(localSummary)}`;
     }
@@ -1478,11 +1514,33 @@ Deno.serve(async (req: Request) => {
     // - manual_sleep_at: sohbet içinde uykuya anlaşıldıysa (wentToSleep) şimdi olarak set.
     // - woken_up_at: istemci uyuyan karakteri uyandırdıysa (body.wokeUp) şimdi.
     const nowIso = new Date().toISOString();
+    // Jealousy state machine (bkz. JEALOUS_MOOD_RULE üstteki not, migration
+    // 024_jealousy_state.sql, NotificationScheduler'daki eş taraf):
+    // stage 1 (ilk kıskançlık mesajı cevapsız) → kullanıcı yazdı, sessizce 0'a
+    // dön (bekleyen eskalasyon bir sonraki reschedule'da iptal olur).
+    // stage 2 (eskalasyon cevapsız) → kullanıcı YANIT VERDİ: 0'a dön, kısa bir
+    // "hâlâ biraz kıskanç" evresi başlat (bu tur zaten turnContext'teki
+    // jealousMoodActive ile kapsandı, kalan 2 tur için sayaç kur).
+    // Aksi halde: sayaç varsa bir azalt.
+    const jealousyStageAtStart: number = convo.jealousy_stage ?? 0;
+    let newJealousyStage = jealousyStageAtStart;
+    let newJealousyMoodTurnsLeft: number = convo.jealousy_mood_turns_left ?? 0;
+    if (jealousyStageAtStart === 1) {
+      newJealousyStage = 0;
+    } else if (jealousyStageAtStart === 2) {
+      newJealousyStage = 0;
+      newJealousyMoodTurnsLeft = 2;
+    } else if (newJealousyMoodTurnsLeft > 0) {
+      newJealousyMoodTurnsLeft -= 1;
+    }
+
     const convoUpdate: Record<string, unknown> = {
       updated_at: nowIso,
       relationship_level: newLevel,
       level_progress: newProgress,
       ghosted_at: null,
+      jealousy_stage: newJealousyStage,
+      jealousy_mood_turns_left: newJealousyMoodTurnsLeft,
     };
     if (wentToSleep) convoUpdate.manual_sleep_at = nowIso;
     if (body.wokeUp === true) convoUpdate.woken_up_at = nowIso;
@@ -1490,9 +1548,15 @@ Deno.serve(async (req: Request) => {
       .update(convoUpdate)
       .eq("id", conversationId);
 
+    const jealousyState = {
+      jealousyStage: newJealousyStage,
+      jealousySentAt: convo.jealousy_sent_at ?? null,
+      jealousyMoodTurnsLeft: newJealousyMoodTurnsLeft,
+    };
+
     // 5) Özetleme — sadece DB modunda (clientHistory modunda istemci geçmişi yönetiyor)
     if (useClientHistory) {
-      return json({ conversationId, reply, level: newLevel, levelProgress: newProgress, wentToSleep, tokenBalance: tokenBalanceAfterCharge, autoMedia });
+      return json({ conversationId, reply, level: newLevel, levelProgress: newProgress, wentToSleep, tokenBalance: tokenBalanceAfterCharge, autoMedia, ...jealousyState });
     }
 
     const { count: total } = await db
@@ -1594,7 +1658,7 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    return json({ conversationId, reply, level: newLevel, levelProgress: newProgress, wentToSleep, tokenBalance: tokenBalanceAfterCharge, autoMedia });
+    return json({ conversationId, reply, level: newLevel, levelProgress: newProgress, wentToSleep, tokenBalance: tokenBalanceAfterCharge, autoMedia, ...jealousyState });
   } catch (e) {
     console.error(String(e));
     return json({ error: String(e) }, 500);
