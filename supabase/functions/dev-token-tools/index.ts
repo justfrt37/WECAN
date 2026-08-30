@@ -21,6 +21,17 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const db = createClient(SUPABASE_URL, SERVICE_ROLE, { auth: { persistSession: false } });
 
+// Diğer dev-* fonksiyonlarındakiyle (dev-create-character, dev-upload-image,
+// dev-list-voices) AYNI allowlist — istemcideki karşılığı DevAccess.devUserIDs.
+// DevAccess'in yorumu bu kontrolün burada da yapıldığını söylüyordu ama
+// gerçekte YOKTU: geçerli bir JWT'si olan herkes add_tokens ile kendine
+// istediği kadar 1000'lik token basabiliyordu. Panelin istemcide gizli olması
+// uç noktayı korumaz.
+const DEV_UIDS = new Set([
+  "81565166-be1e-48f6-a580-3f8b78e378e2",
+  "9bd6b9c6-a498-42dd-a337-33a70100117f",
+]);
+
 const WEEKLY_TOKENS: Record<string, number> = {
   pro: 1000,
   pro_plus: 2500,
@@ -54,6 +65,7 @@ Deno.serve(async (req: Request) => {
   try {
     const uid = userIdFromJWT(req.headers.get("Authorization"));
     if (!uid) return json({ error: "unauthorized" }, 401);
+    if (!DEV_UIDS.has(uid)) return json({ error: "forbidden" }, 403);
 
     const body = await req.json();
     const action: string = body.action;
@@ -68,13 +80,12 @@ Deno.serve(async (req: Request) => {
       return json({ balance });
     }
 
-    // Özel miktar grant (token PAKETİ satın alması — consumable). Her çağrıda ekler.
-    if (action === "grant") {
-      const amount = typeof body.amount === "number" ? Math.trunc(body.amount) : 0;
-      if (amount <= 0) return json({ error: "invalid_amount" }, 400);
-      await db.rpc("grant_tokens", { p_user_id: uid, p_amount: amount, p_reason: "purchase" });
-      return json({ balance: await currentBalance(uid) });
-    }
+    // KALDIRILDI — action === "grant": istemcinin gövdede söylediği kadar
+    // token veriyordu. Token paketleri gerçek satın alma akışına bağlanınca
+    // (functions/purchase-tokens: miktarı SUNUCU kataloğundan okur, RC'yi
+    // secret key ile doğrular, mağaza işlem kimliğiyle idempotent yazar) bu
+    // uç noktanın tek çağıranı kalmadı; geride durması, geçerli bir JWT'si
+    // olan herkesin kendine sınırsız token basabilmesi demekti.
 
     if (action === "set_tier") {
       const tier: string = body.tier;

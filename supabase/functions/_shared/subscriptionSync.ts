@@ -6,6 +6,7 @@
 // tier — those are just triggers to go re-check.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { PRODUCT_TIER, SUBSCRIPTION_TOKENS, WEEKLY_TOKENS } from "./catalog.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -15,20 +16,9 @@ export const db = createClient(SUPABASE_URL, SERVICE_ROLE, { auth: { persistSess
 
 // Entitlement identifier → tier. Highest wins if several are active.
 const TIER_PRIORITY = ["max", "pro_plus", "pro"];
-const WEEKLY_TOKENS: Record<string, number> = { pro: 1000, pro_plus: 2500, max: 6000 };
-// Entitlement dashboard'da yapılandırılmamış olabilir — o durumda aktif
-// SUBSCRIPTION ürününü doğrudan tier'a eşle (entitlement'tan bağımsız).
-const PRODUCT_TIER: Record<string, string> = {
-  weekly_pro_normal: "pro", monthly_pro_default: "pro", yearly_pro_normal: "pro",
-  weekly_pro_plus: "pro_plus", monthly_pro_plus: "pro_plus", yearly_pro_plus: "pro_plus",
-  weekly_pro_max: "max", monthly_pro_max: "max", yearly_pro_max: "max",
-};
-// Ürüne özel token miktarı (dönem başına).
-const PRODUCT_TOKENS: Record<string, number> = {
-  weekly_pro_normal: 250, monthly_pro_default: 1000, yearly_pro_normal: 12000,
-  weekly_pro_plus: 500, monthly_pro_plus: 2000, yearly_pro_plus: 25000,
-  weekly_pro_max: 750, monthly_pro_max: 3000, yearly_pro_max: 35000,
-};
+// Ürün→token/tier eşlemeleri artık _shared/catalog.ts'te (TEK kaynak) —
+// buradaki yerel kopyalar kaldırıldı, istemcideki kopya da (PlummCatalog) öyle.
+const PRODUCT_TOKENS = SUBSCRIPTION_TOKENS;
 
 export async function currentBalance(uid: string): Promise<number> {
   const { data } = await db.from("token_balances").select("balance").eq("user_id", uid).maybeSingle();
@@ -92,27 +82,72 @@ export async function syncSubscriptionForUser(uid: string): Promise<SyncResult> 
   }
 
   if (!activeTier || !ent) {
-    await db.from("subscriptions").delete().eq("user_id", uid);
+    // Satırı SİLMİYORUZ. Silmek idempotency anahtarını (current_period_start)
+    // yok ediyordu: bir sonraki sync aynı dönemi "yeni" sanıp aynı grant'ı
+    // TEKRAR veriyordu (canlı defterde aynı dönem için 9 kez +12000 —
+    // bkz. kullanıcı raporu). Tier'ı none'a çekmek yeterli; dönem anahtarı
+    // yerinde kalır. `subscriptions.tier` check constraint'i 'none' kabul
+    // etmediği için satır varsa güncellenir, yoksa hiç oluşturulmaz.
+    await db.from("subscriptions")
+      .update({ current_period_end: new Date(now).toISOString(), updated_at: new Date().toISOString() })
+      .eq("user_id", uid);
     return { tier: "none", balance: await currentBalance(uid), debug };
   }
 
   const periodStart = ent.purchase_date ?? new Date().toISOString();
   const periodEnd = ent.expires_date ?? new Date(now + 365 * 86_400_000).toISOString();
 
-  const { data: existing } = await db
-    .from("subscriptions")
-    .select("current_period_start")
-    .eq("user_id", uid)
-    .maybeSingle();
-  const isNewPeriod = existing?.current_period_start !== periodStart;
-
-  await db.from("subscriptions").upsert({
+  // ATOMİK dönem talebi. Eskiden bu bir "oku → yaz → ver" dizisiydi ve arada
+  // kilit yoktu: eşzamanlı iki çağrı (syncWithServerRetrying 4 kez deniyor,
+  // ayrıca purchase()/restore() ve webhook aynı anda tetikleyebiliyor) ikisi
+  // de `existing`i güncellenmeden okuyup ikisi de "yeni dönem" sanıyor ve
+  // ikisi de grant veriyordu — canlı defterde 1 saniye arayla iki +12000
+  // (bkz. kullanıcı raporu, 9 kez tekrarlanan grant).
+  //
+  // Şimdi kararı VERİTABANI veriyor: dönem anahtarını yalnızca FARKLIYSA
+  // güncelleyen koşullu bir UPDATE ve satır yoksa çakışmada sessizce düşen
+  // bir INSERT. İkisinden de dönen satır sayısı 1 ise bu çağrı dönemi ilk kez
+  // talep etmiştir; eşzamanlı diğer çağrı 0 satır alır ve grant vermez.
+  const row = {
     user_id: uid,
     tier: activeTier,
     current_period_start: periodStart,
     current_period_end: periodEnd,
     updated_at: new Date().toISOString(),
-  });
+  };
+
+  const { data: updated } = await db.from("subscriptions")
+    .update(row)
+    .eq("user_id", uid)
+    .neq("current_period_start", periodStart)
+    .select("user_id");
+
+  let isNewPeriod = (updated?.length ?? 0) > 0;
+
+  if (!isNewPeriod) {
+    // Ya satır hiç yok (ilk abonelik) ya da dönem zaten bizimki (grant verilmiş).
+    // İlkini ayırt etmek için çakışmayı yok sayan bir INSERT deniyoruz:
+    // satır zaten varsa 0 satır döner ve grant verilmez.
+    const { data: inserted } = await db.from("subscriptions")
+      .upsert(row, { onConflict: "user_id", ignoreDuplicates: true })
+      .select("user_id");
+    isNewPeriod = (inserted?.length ?? 0) > 0;
+
+    if (!isNewPeriod) {
+      // Satır var ve dönem aynı → grant verilmeyecek. AMA tier değişmiş
+      // olabilir: kullanıcı aynı dönem içinde Pro'dan Pro+'a yükseltirse
+      // yukarıdaki koşullu UPDATE (`.neq(current_period_start, ...)`)
+      // hiç çalışmıyor ve satır `pro` olarak kalıyordu — kullanıcı parayı
+      // ödüyor, sunucu hâlâ eski tier'ı görüyordu (bkz. kullanıcı raporu:
+      // "satın alımı yaptığımda backend'deki üyeliğim pro'da kalıyor").
+      //
+      // Tier ile GRANT'ı ayırmak gerekiyordu: tier gerçeğin aynası, her
+      // zaman yazılmalı; token grant'ı ise dönem başına bir kez.
+      await db.from("subscriptions")
+        .update({ tier: activeTier, current_period_end: periodEnd, updated_at: new Date().toISOString() })
+        .eq("user_id", uid);
+    }
+  }
 
   if (isNewPeriod) {
     const amount = (activeProductId && PRODUCT_TOKENS[activeProductId]) ?? WEEKLY_TOKENS[activeTier];
