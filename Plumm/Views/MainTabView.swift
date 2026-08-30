@@ -23,7 +23,11 @@ enum MainTab: Int, CaseIterable, Identifiable {
         case .chat: return "Chat"
         case .explore: return "See All"
         case .likes: return "Likes"
-        case .profile: return "Profile"
+        // Sekme "Profile" değil "Settings": sayfada gerçek profil verisi yok
+        // (anonim giriş), içeriği tamamen ayarlar (bkz. kullanıcı talebi).
+        // Enum case adı `.profile` bırakıldı — 20+ çağrı yerini yeniden
+        // adlandırmak davranışı değiştirmeden gürültü yaratırdı.
+        case .profile: return "Settings"
         }
     }
 
@@ -34,7 +38,8 @@ enum MainTab: Int, CaseIterable, Identifiable {
         case .chat: return "bubble.left"
         case .explore: return "square.grid.2x2"
         case .likes: return "heart"
-        case .profile: return "person"
+        // Sekme artık "Settings" — kişi ikonu yerine dişli (bkz. titleKey).
+        case .profile: return "gearshape"
         }
     }
 }
@@ -94,6 +99,19 @@ struct MainTabView: View {
     /// AÇIKSA hiç açılmaz, Pro olsa da olmasa da (bkz. kullanıcı talebi).
     /// Onboarding'i YENİ bitiren kullanıcıda tetiklenmez — paywall'ı zaten
     /// ONB6'da gördü (bkz. openPendingOnboardingChat).
+    /// Tier SUNUCUDAN gelene kadar bekleyip öyle karar verir.
+    ///
+    /// Doğrudan `maybeShowPaywall()` çağırmak açılışta yanlış sonuç veriyordu:
+    /// `tier` `.none` başlıyor ve sunucu cevabı ancak birkaç yüz ms sonra
+    /// geliyor, o aralıkta PRO kullanıcı da non-PRO görünüp paywall'ı yiyordu
+    /// (bkz. kullanıcı raporu: "adam pro ise paywall açılmamalı ilk girişte").
+    private func maybeShowPaywallAfterTierResolves() {
+        Task {
+            await PurchaseService.shared.ensureTierResolved()
+            maybeShowPaywall()
+        }
+    }
+
     private func maybeShowPaywall() {
         // `skipPaywallDueToOnboarding` BİLEREK burada tüketilmiyor (onAppear
         // VE hemen ardından gelen scenePhase→.active patlaması aynı açılışta
@@ -176,12 +194,12 @@ struct MainTabView: View {
                 openPendingOnboardingChat()
                 if !didCheckPaywallOnLaunch {
                     didCheckPaywallOnLaunch = true
-                    maybeShowPaywall()
+                    maybeShowPaywallAfterTierResolves()
                 }
             }
             .onChange(of: scenePhase) { _, phase in
                 switch phase {
-                case .active: maybeShowPaywall()
+                case .active: maybeShowPaywallAfterTierResolves()
                 // Gerçekten arka plana gitti — bir SONRAKİ .active artık
                 // GERÇEK bir yeniden-giriş, onboarding'den gelen tek seferlik
                 // muafiyet burada biter.
@@ -195,15 +213,18 @@ struct MainTabView: View {
         // böylece ChatView push edilince (kök yerini alınca) rozet KAYBOLMAZ,
         // her zaman en üstte kalır (bkz. tasarım: "chat içinde de görünmeli").
         .overlay(alignment: .topTrailing) {
-            // Yalnızca sekme KÖKLERİNDE (path boş). PRO rozeti/butonu artık
-            // SADECE Profile sekmesinde görünür — eskiden HER sekmede (Discover/
-            // Chat/Explore/Likes de dahil) nagging gibi görünüyordu (bkz.
-            // kullanıcı talebi: "pro logosu sadece profilde görünmeli"). Token
-            // rozeti (coin sayısı) PRO olsun olmasın her sekmede kalır — bakiye
-            // her yerde faydalı bilgi, PRO'nun aksine bir "satış" değil.
+            // Yalnızca sekme KÖKLERİNDE (path boş). PRO OLMAYAN kullanıcı HER
+            // sekmede PRO butonunu görür, token rozetini görmez; PRO kullanıcı
+            // her sekmede token rozetini görür (bkz. kullanıcı talebi: "Pro
+            // değilse jeton sayısı görünmesin, pro butonu görünsün").
+            //
+            // Bu, "PRO butonu sadece Profile'da görünsün + token rozeti herkeste
+            // kalsın" şeklindeki önceki düzeni değiştirir: token bakiyesi artık
+            // yalnızca satın alınabilir bir şeyi OLAN (PRO) kullanıcıya
+            // gösteriliyor, PRO olmayana ise dönüşüm yolu.
             if path.isEmpty {
                 Group {
-                    if !PurchaseService.shared.isPro && selection == .profile {
+                    if !PurchaseService.shared.isPro {
                         proButton
                     } else {
                         TokenBadge(tokenStore: tokenStore) { showTokenStore = true }

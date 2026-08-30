@@ -72,12 +72,12 @@ struct SubscriptionPaywallView: View {
                                 }
                             }
 
-                            Text("— or buy tokens outright, no subscription —")
-                                .font(.system(size: 11))
-                                .foregroundStyle(.white.opacity(0.45))
-                                .padding(.top, 6)
-
-                            tokenPackGrid
+                            // Token paketi ızgarası ve "— or buy tokens
+                            // outright —" başlığı KALDIRILDI: bu ekran bir
+                            // özelliğin kilidini açmak için ABONELİK YÜKSELTME
+                            // ekranı; token satın alma alternatifi sunmak asıl
+                            // eylemden uzaklaştırıyordu (bkz. kullanıcı talebi).
+                            // Token satın alma yeri Store (TokenStoreView).
 
                             Button { restore() } label: {
                                 Text("Restore Purchases")
@@ -180,30 +180,6 @@ struct SubscriptionPaywallView: View {
         .buttonStyle(.plain)
     }
 
-    // MARK: Token paketleri (tokens offering)
-
-    private var tokenPackGrid: some View {
-        let cols = [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)]
-        return LazyVGrid(columns: cols, spacing: 8) {
-            ForEach(purchases.tokenPackages) { pack in
-                VStack(spacing: 6) {
-                    CoinIcon(size: 16)
-                    Text("\(pack.tokenAmount.formatted())").font(.system(size: 13, weight: .heavy)).foregroundStyle(.white)
-                    Text(pack.localizedPrice).font(.system(size: 11, weight: .bold)).foregroundStyle(AppColor.amber)
-                    Button { buyTokenPack(pack) } label: {
-                        Text("Buy").font(.system(size: 10, weight: .bold)).foregroundStyle(.white)
-                            .frame(maxWidth: .infinity).padding(.vertical, 6)
-                            .background(AppColor.pink, in: RoundedRectangle(cornerRadius: 8))
-                    }
-                    .buttonStyle(.plain)
-                }
-                .padding(10)
-                .frame(maxWidth: .infinity)
-                .background(AppColor.card, in: RoundedRectangle(cornerRadius: 14))
-            }
-        }
-    }
-
     private var stickyFooter: some View {
         VStack(spacing: 0) {
             Divider().overlay(Color.white.opacity(0.08))
@@ -239,14 +215,6 @@ struct SubscriptionPaywallView: View {
         }
     }
 
-    private func buyTokenPack(_ pack: PaywallPackage) {
-        Task {
-            isPurchasing = true
-            let ok = await purchases.purchase(pack)
-            if ok { await tokenStore.refresh() }
-            isPurchasing = false
-        }
-    }
 
     private func restore() {
         Task {
