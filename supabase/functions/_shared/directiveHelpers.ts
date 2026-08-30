@@ -94,7 +94,11 @@ async function fetchRelevantMemories(db: DB, conversationId: string, queryText: 
     p_conversation_id: conversationId,
     p_query_embedding: embedding,
     p_match_count: 5,
-    p_similarity_threshold: 0.75,
+    // Raised from 0.75 (2026-08-30) — 0.75 was pulling in loosely-related
+    // memories into the prompt too often. Only affects what gets INJECTED
+    // into a turn's system prompt; unrelated to the insert-time dedup check
+    // below, which intentionally stays at 0.75 (see applyMemoryExtraction).
+    p_similarity_threshold: 0.8,
   });
   if (error) {
     console.error("match_memories failed:", error.message);
@@ -103,31 +107,84 @@ async function fetchRelevantMemories(db: DB, conversationId: string, queryText: 
   return (data ?? []) as { content: string }[];
 }
 
+export interface ActiveMemory {
+  id: string;
+  content: string;
+  created_at: string;
+  last_mentioned_at: string;
+  mention_count: number;
+}
+
 // Full active (non-superseded) memory list for a conversation — used ONLY
 // by extraction call sites (chat/index.ts summarization, voice-call-end),
 // which need to see everything to dedupe/detect contradictions against,
 // unlike fetchRelevantMemories which is deliberately top-k-filtered for
 // prompt injection.
-export async function fetchActiveMemories(db: DB, conversationId: string): Promise<{ id: string; content: string }[]> {
+export async function fetchActiveMemories(db: DB, conversationId: string): Promise<ActiveMemory[]> {
   const { data } = await db.from("memories")
-    .select("id, content")
+    .select("id, content, created_at, last_mentioned_at, mention_count")
     .eq("conversation_id", conversationId)
     .is("superseded_at", null)
     .order("created_at", { ascending: true });
-  return (data ?? []) as { id: string; content: string }[];
+  return (data ?? []) as ActiveMemory[];
 }
 
-export function numberedMemoryLines(memories: { content: string }[]): string {
+// Dated so the extraction prompt can recognize a restated fact as a
+// RECURRENCE of an existing memory (and merge them) instead of just a
+// same-topic duplicate — see the extraction prompts in chat/index.ts and
+// voice-call-end/index.ts.
+export function numberedMemoryLines(memories: { content: string; created_at?: string; last_mentioned_at?: string; mention_count?: number }[]): string {
   if (memories.length === 0) return "(none yet)";
-  return memories.map((m, i) => `${i}: ${m.content}`).join("\n");
+  return memories.map((m, i) => {
+    const first = m.created_at ? m.created_at.slice(0, 10) : null;
+    const last = m.last_mentioned_at ? m.last_mentioned_at.slice(0, 10) : null;
+    if (!first) return `${i}: ${m.content}`;
+    const seenTag = last && last !== first
+      ? `first noted ${first}, last noted ${last}${(m.mention_count ?? 1) > 1 ? `, mentioned ${m.mention_count}x` : ""}`
+      : `noted ${first}`;
+    return `${i}: [${seenTag}] ${m.content}`;
+  }).join("\n");
+}
+
+// Insert-time embedding-similarity safety net: catches a near-duplicate the
+// extraction LLM's own numbered-list judgment missed (common when the same
+// fact is reworded across turns). Threshold intentionally lower than
+// fetchRelevantMemories' injection threshold (0.75 vs 0.8) — a false match
+// here just bumps a recurrence counter, a false miss just re-inserts text,
+// so the cost of a slightly loose match is low and dropping true dupes
+// matters more.
+async function findNearDuplicateMemory(
+  db: DB,
+  conversationId: string,
+  content: string,
+): Promise<{ id: string; mention_count: number } | null> {
+  let embedding: number[];
+  try {
+    embedding = await embedText(content);
+  } catch (e) {
+    console.error("embedText failed for dedup check:", String(e));
+    return null;
+  }
+  const { data, error } = await db.rpc("match_memories", {
+    p_conversation_id: conversationId,
+    p_query_embedding: embedding,
+    p_match_count: 1,
+    p_similarity_threshold: 0.75,
+  });
+  if (error || !data || data.length === 0) return null;
+  const row = data[0] as { id: string; mention_count: number };
+  return { id: row.id, mention_count: row.mention_count ?? 1 };
 }
 
 // Applies one extraction pass's results: marks contradicted facts
 // superseded (by index into the SAME array passed to the extraction
-// prompt via numberedMemoryLines — indexes must line up), embeds and
-// inserts new facts. Embedding failures fall back to a null-embedding
-// insert (the fact is still saved, just invisible to future similarity
-// retrieval until re-extracted or fixed) rather than losing the memory.
+// prompt via numberedMemoryLines — indexes must line up), then for each
+// proposed new fact either bumps an existing near-duplicate's recurrence
+// (mention_count/last_mentioned_at, no new row — the embedding safety net
+// above) or embeds and inserts it as a genuinely new memory. Embedding
+// failures fall back to a null-embedding insert (the fact is still saved,
+// just invisible to future similarity retrieval until re-extracted or
+// fixed) rather than losing the memory.
 export async function applyMemoryExtraction(
   db: DB,
   conversationId: string,
@@ -141,20 +198,109 @@ export async function applyMemoryExtraction(
   if (staleIds.length > 0) {
     await db.from("memories").update({ superseded_at: new Date().toISOString() }).in("id", staleIds);
   }
-  if (newMemories.length > 0) {
+  if (newMemories.length === 0) return;
+
+  const toInsert: { content: string }[] = [];
+  for (const content of newMemories) {
+    const dup = await findNearDuplicateMemory(db, conversationId, content);
+    if (dup) {
+      await db.from("memories").update({
+        last_mentioned_at: new Date().toISOString(),
+        mention_count: dup.mention_count + 1,
+      }).eq("id", dup.id);
+      continue;
+    }
+    toInsert.push({ content });
+  }
+  if (toInsert.length === 0) return;
+
+  const embeddings = await Promise.all(
+    toInsert.map(async ({ content }) => {
+      try {
+        return await embedText(content);
+      } catch (e) {
+        console.error("embedText failed for new memory:", String(e));
+        return null;
+      }
+    }),
+  );
+  await db.from("memories").insert(
+    toInsert.map(({ content }, i) => ({ conversation_id: conversationId, content, embedding: embeddings[i] })),
+  );
+}
+
+// Long-term cap: once a conversation accrues MEMORY_CAP active memories,
+// consolidate the oldest PRUNE_BATCH of them into a smaller, denser set via
+// one LLM call — keeps long-running conversations from growing an
+// unbounded (and increasingly redundant/stale) memory list. Runs after
+// applyMemoryExtraction at every call site that inserts memories.
+export const MEMORY_CAP = 75;
+const PRUNE_BATCH = 40;
+
+export async function pruneMemoriesIfOverCap(
+  db: DB,
+  conversationId: string,
+  callGrok: (messages: { role: string; content: string }[], maxTokens: number) => Promise<string>,
+): Promise<void> {
+  const { count } = await db.from("memories")
+    .select("id", { count: "exact", head: true })
+    .eq("conversation_id", conversationId)
+    .is("superseded_at", null);
+  if (!count || count <= MEMORY_CAP) return;
+
+  const { data: oldest } = await db.from("memories")
+    .select("id, content")
+    .eq("conversation_id", conversationId)
+    .is("superseded_at", null)
+    .order("created_at", { ascending: true })
+    .limit(PRUNE_BATCH);
+  if (!oldest || oldest.length === 0) return;
+
+  const listText = oldest.map((m, i) => `${i}: ${m.content}`).join("\n");
+  try {
+    const raw = await callGrok([
+      {
+        role: "system",
+        content:
+          "You consolidate an AI companion's long-term memory list. You'll get a numbered list of " +
+          "older facts about the user and/or the character. Merge, condense, and prune them down to " +
+          "the 10 to 15 MOST important and durable ones — keep identity, preferences, relationship " +
+          "history, and clearly recurring patterns; drop anything trivial, outdated, contradicted, or " +
+          "redundant with another entry. When merging related entries, keep the useful detail from " +
+          "both rather than just picking one. " +
+          'Respond with ONLY this JSON shape, nothing else: {"memories":["fact one","fact two"]} — ' +
+          "10 to 15 entries.",
+      },
+      {
+        role: "user",
+        content: `Old memories to consolidate:\n${listText}\n\nConsolidated JSON:`,
+      },
+    ], 600);
+    const match = raw.match(/\{[\s\S]*\}/);
+    const parsed = match ? JSON.parse(match[0]) : null;
+    const consolidated: string[] = Array.isArray(parsed?.memories)
+      ? parsed.memories.filter((m: unknown): m is string => typeof m === "string" && m.trim().length > 0).map((m: string) => m.trim())
+      : [];
+    if (consolidated.length === 0) return;
+
+    await db.from("memories").update({ superseded_at: new Date().toISOString() }).in("id", oldest.map((m) => m.id));
     const embeddings = await Promise.all(
-      newMemories.map(async (content) => {
+      consolidated.map(async (content) => {
         try {
           return await embedText(content);
         } catch (e) {
-          console.error("embedText failed for new memory:", String(e));
+          console.error("embedText failed for consolidated memory:", String(e));
           return null;
         }
       }),
     );
     await db.from("memories").insert(
-      newMemories.map((content, i) => ({ conversation_id: conversationId, content, embedding: embeddings[i] })),
+      consolidated.map((content, i) => ({ conversation_id: conversationId, content, embedding: embeddings[i] })),
     );
+  } catch (e) {
+    // Consolidation failing just means the list stays over-cap until the
+    // next extraction pass tries again — never lose memories over this.
+    console.error("pruneMemoriesIfOverCap failed:", String(e));
   }
 }
 

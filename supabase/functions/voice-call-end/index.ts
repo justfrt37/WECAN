@@ -8,7 +8,7 @@
 // "newMemories" summarization block).
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { fetchActiveMemories, numberedMemoryLines, applyMemoryExtraction } from "../_shared/directiveHelpers.ts";
+import { fetchActiveMemories, numberedMemoryLines, applyMemoryExtraction, pruneMemoriesIfOverCap } from "../_shared/directiveHelpers.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -70,14 +70,23 @@ async function extractAndStoreMemories(conversationId: string, callSessionId: st
     {
       role: "system",
       content:
-        "Extract NEW durable atomic facts worth permanently remembering from this voice call transcript, " +
-        "that are NOT already covered by the existing memories list you'll be given (numbered, one per " +
-        "line) — do not repeat anything already in that list, even reworded. If there's nothing new, " +
-        "return an empty array. Include BOTH sides:\n" +
-        "- USER facts: name, preferences, promises, key relationship moments.\n" +
+        "Extract NEW durable facts worth permanently remembering from this voice call transcript, that are " +
+        "NOT already covered by the existing memories list you'll be given (numbered, one per line, each " +
+        "tagged with when it was first/last noted). Favor identity, personality, and life facts — who " +
+        "someone IS (job, living situation, relationships, values, recurring habits, how they tend to feel " +
+        "or act) — over one-off day-to-day small talk that has no lasting relevance. This isn't a strict " +
+        "filter: a passing detail is still worth keeping if it's the kind of thing that should color how " +
+        "the character responds days later. If there's nothing worth keeping, return an empty array. " +
+        "Include BOTH sides:\n" +
+        "- USER facts: name, preferences, promises, key relationship moments, recurring patterns.\n" +
         "- CHARACTER facts: things the character herself established/committed to on this call — a pet " +
         "name she used, a boundary she set, a backstory detail she improvised that should stay consistent, " +
         "a promise she made. These matter just as much as the user's.\n\n" +
+        "RECURRENCE: if the new content restates or reinforces something an existing memory already says " +
+        "(even worded differently), do NOT add it as a separate new memory. Instead put a single MERGED " +
+        "replacement fact in newMemories that folds in the recurrence as an observed pattern (naming both " +
+        "dates), and put that existing memory's number in staleIndexes so the old single-instance version " +
+        "gets replaced by the merged one.\n\n" +
         "ALSO identify any existing memories (by their number) that this transcript now CONTRADICTS — e.g. " +
         "the user previously said they're a barista and now say they just started a nursing job. Return " +
         "those numbers in staleIndexes. If nothing is contradicted, return an empty array.\n\n" +
@@ -97,6 +106,7 @@ async function extractAndStoreMemories(conversationId: string, callSessionId: st
     ? parsed.staleIndexes.filter((i: unknown): i is number => typeof i === "number" && Number.isInteger(i))
     : [];
   await applyMemoryExtraction(db, conversationId, activeMemories, newMemories, staleIndexes);
+  await pruneMemoriesIfOverCap(db, conversationId, callGrok);
 }
 
 Deno.serve(async (req: Request) => {

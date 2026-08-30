@@ -29,6 +29,7 @@ import {
   fetchActiveMemories,
   numberedMemoryLines,
   applyMemoryExtraction,
+  pruneMemoriesIfOverCap,
   embedText,
   REVIEW_DIRECTIVE,
 } from "../_shared/directiveHelpers.ts";
@@ -1535,16 +1536,27 @@ Deno.serve(async (req: Request) => {
               "character has already been behaving, not just generic persona instructions.\n\n" +
               "Short bullet points under each heading. Keep prior summary content, fold in what's new, drop " +
               "anything superseded or no longer relevant.\n\n" +
-              "SEPARATELY, also extract any NEW durable atomic facts worth permanently remembering that are " +
-              "NOT already covered by the existing memories list you'll be given (numbered, one per line) — " +
-              "do not repeat anything already in that list, even reworded. If there's nothing new, return an " +
+              "SEPARATELY, also extract any NEW durable facts worth permanently remembering that are NOT " +
+              "already covered by the existing memories list you'll be given (numbered, one per line, each " +
+              "tagged with when it was first/last noted). Favor identity, personality, and life facts — who " +
+              "someone IS (job, living situation, relationships, values, recurring habits, how they tend to " +
+              "feel or act) — over one-off day-to-day small talk that has no lasting relevance. This isn't a " +
+              "strict filter: a passing detail is still worth keeping if it's the kind of thing that should " +
+              "color how the character responds days later. If there's nothing worth keeping, return an " +
               "empty array. Include BOTH sides:\n" +
-              "- USER facts: name, preferences, promises, key relationship moments.\n" +
+              "- USER facts: name, preferences, promises, key relationship moments, recurring patterns.\n" +
               "- CHARACTER facts: things the character herself has established/committed to in this " +
               "conversation — a pet name she's adopted for the user, a boundary she's set, a backstory " +
               "detail she's improvised (job, hobby, living situation, etc.) that should stay consistent, a " +
               "promise she made. These matter just as much — a character who forgets her own established " +
               "details reads as inconsistent, not just one who forgets the user's.\n\n" +
+              "RECURRENCE: if the new content restates or reinforces something an existing memory already " +
+              "says (even worded differently, e.g. \"tired again today\" vs. a prior \"was tired today\"), do " +
+              "NOT add it as a separate new memory. Instead put a single MERGED replacement fact in " +
+              "newMemories that folds in the recurrence as an observed pattern (e.g. \"User has mentioned " +
+              "feeling tired more than once (first 2026-08-28, again 2026-09-01) — seems to run low on energy " +
+              "often\"), and put that existing memory's number in staleIndexes so the old single-instance " +
+              "version gets replaced by the merged one.\n\n" +
               "ALSO identify any existing memories (by their number) that this new content now CONTRADICTS " +
               "— e.g. the user previously said they're a barista and now say they just started a nursing " +
               "job. Return those numbers in staleIndexes. If nothing is contradicted, return an empty array.\n\n" +
@@ -1574,6 +1586,7 @@ Deno.serve(async (req: Request) => {
             ? parsed.staleIndexes.filter((i: unknown): i is number => typeof i === "number" && Number.isInteger(i))
             : [];
           await applyMemoryExtraction(db, conversationId, activeMemories, newMemories.map((m) => m.trim()), staleIndexes);
+          await pruneMemoriesIfOverCap(db, conversationId, callGrok);
         } catch (e) {
           // Özetleme başarısız olsa bile sohbet bozulmaz; sadece logla.
           console.error("ozetleme hatasi:", String(e));

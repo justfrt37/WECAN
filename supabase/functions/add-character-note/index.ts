@@ -9,7 +9,22 @@
 //   Cevap:  { ok: true }
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { embedText } from "../_shared/directiveHelpers.ts";
+import { embedText, pruneMemoriesIfOverCap } from "../_shared/directiveHelpers.ts";
+
+const XAI_API_KEY = Deno.env.get("XAI_API_KEY") ?? "";
+const XAI_URL = "https://api.x.ai/v1/chat/completions";
+const MODEL = "grok-4.3";
+
+async function callGrok(messages: { role: string; content: string }[], maxTokens: number): Promise<string> {
+  const resp = await fetch(XAI_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${XAI_API_KEY}` },
+    body: JSON.stringify({ model: MODEL, messages, temperature: 0.7, max_tokens: maxTokens }),
+  });
+  if (!resp.ok) throw new Error(`LLM ${resp.status}: ${await resp.text()}`);
+  const data = await resp.json();
+  return data?.choices?.[0]?.message?.content ?? "";
+}
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -126,6 +141,7 @@ Deno.serve(async (req: Request) => {
       try { embedding = await embedText(content); } catch (e) { console.error("embedText failed:", String(e)); }
       const { error: insErr } = await db.from("memories").insert({ conversation_id: conversationId, content, embedding });
       if (insErr) return json({ error: insErr.message }, 500);
+      await pruneMemoriesIfOverCap(db, conversationId, callGrok);
     } else {
       const { error: insErr } = await db.from("conversation_behaviors").insert({ conversation_id: conversationId, content });
       if (insErr) return json({ error: insErr.message }, 500);
