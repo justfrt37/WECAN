@@ -92,6 +92,18 @@ enum PlummCatalog {
 enum SubscriptionTier: String {
     case none, pro, proPlus, max
 
+    /// Sunucunun `subscriptions.tier` değeri ("pro"/"pro_plus"/"max") → tier.
+    /// Tanınmayan/eksik değerde nil — çağıran mevcut tier'a DOKUNMAZ (bkz.
+    /// syncWithServer ve refreshServerTier; ikisi de aynı switch'i yazıyordu).
+    init?(serverValue: String?) {
+        switch serverValue {
+        case "max":      self = .max
+        case "pro_plus": self = .proPlus
+        case "pro":      self = .pro
+        default:         return nil
+        }
+    }
+
     /// Sıralama: none < pro < proPlus < max. Paywall'da zaten aboneliği olan
     /// kullanıcıya sadece DAHA YÜKSEK tier'ları göstermek için (bkz. kullanıcı
     /// talebi — kendi sahip olduğu ya da daha düşük bir planı tekrar görmesin).
@@ -358,12 +370,9 @@ final class PurchaseService {
         // tekrar açtırıyordu (bkz. kullanıcı talebi — satın aldıktan sonra
         // paywall'ın farklı yerlerde tekrar çıkması). `refreshServerTier()`
         // zaten aynı ilkeyi uyguluyor ("satır yoksa dokunma").
-        switch decoded.tier {
-        case "max":      tier = .max; return true
-        case "pro_plus": tier = .proPlus; return true
-        case "pro":      tier = .pro; return true
-        default:         return false
-        }
+        guard let synced = SubscriptionTier(serverValue: decoded.tier) else { return false }
+        tier = synced
+        return true
         #else
         return false
         #endif
@@ -388,29 +397,15 @@ final class PurchaseService {
         guard let accessToken = UserDefaultsManager.shared.accessToken,
               let url = URL(string: "\(Config.supabaseURL)/rest/v1/subscriptions?select=tier")
         else { return }
-        var req = URLRequest(url: url)
-        req.setValue(Config.supabaseAnonKey, forHTTPHeaderField: "apikey")
-        req.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        let req = SupabaseRequest.authorized(url: url, bearer: accessToken)
         guard let (data, resp) = try? await URLSession.shared.data(for: req),
               let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode)
         else { return }
         struct Row: Decodable { let tier: String }
         guard let rows = try? JSONDecoder().decode([Row].self, from: data) else { return }
-        guard let t = rows.first?.tier else { return }   // satır yoksa dokunma
-        switch t {
-        case "max":      tier = .max
-        case "pro_plus": tier = .proPlus
-        case "pro":      tier = .pro
-        default:         break
-        }
-    }
-
-    /// Paywall gösterilmesi gereken her yerden çağrılır (PRO banner, galeri CTA, rozet vb).
-    func presentPaywall() {
-        guard isConfigured else {
-            print("[PurchaseService] Paywall istendi ama RevenueCat henüz yapılandırılmadı.")
-            return
-        }
+        // Satır yoksa ya da tanınmayan bir tier geldiyse mevcut tier'a dokunma.
+        guard let serverTier = SubscriptionTier(serverValue: rows.first?.tier) else { return }
+        tier = serverTier
     }
 
     #if canImport(RevenueCat)

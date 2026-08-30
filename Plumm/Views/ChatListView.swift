@@ -6,7 +6,9 @@
 
 import SwiftUI
 
-private struct ChatItem: Identifiable, Codable {
+/// Salt bellek-içi satır modeli — "sıfır yerel" geçişinden beri hiçbir yere
+/// serileştirilmiyor (bkz. `load()`), o yüzden `Codable` da gerekmiyor.
+private struct ChatItem: Identifiable {
     let character: Character
     let conversationID: UUID
     let last: LastMessage?

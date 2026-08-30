@@ -14,6 +14,34 @@ enum SupabaseAuth {
         struct User: Decodable { let id: String }
     }
 
+    /// Supabase auth uçları için ortak POST kurucusu (anon-key başlıkları + JSON
+    /// gövde). Üç çağrı yeri de aynı altı satırı tekrarlıyordu.
+    private static func authRequest(url: URL, body: [String: Any]) -> URLRequest {
+        // Bearer BİLEREK anon key: oturum jetonu yenilenirken/açılırken henüz
+        // geçerli bir jeton yok (bkz. SupabaseRequest.sessionBearer kullanılmaz).
+        var r = SupabaseRequest.post(url: url, bearer: Config.supabaseAnonKey, timeout: 20)
+        r.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        return r
+    }
+
+    /// refresh_token grant isteği — saklı refresh token yoksa nil.
+    /// `refresh()` ve `attemptRefresh()` birebir aynı isteği kuruyordu.
+    private static func refreshRequest() -> URLRequest? {
+        guard let refreshToken = UserDefaultsManager.shared.refreshToken,
+              let url = URL(string: "\(Config.supabaseURL)/auth/v1/token?grant_type=refresh_token")
+        else { return nil }
+        return authRequest(url: url, body: ["refresh_token": refreshToken])
+    }
+
+    /// Başarılı bir oturum cevabını saklar; zorunlu alanlar eksikse false döner.
+    private static func storeSession(_ session: Session) -> Bool {
+        guard let uid = session.user?.id, let token = session.access_token else { return false }
+        UserDefaultsManager.shared.userId = uid
+        UserDefaultsManager.shared.accessToken = token
+        UserDefaultsManager.shared.refreshToken = session.refresh_token
+        return true
+    }
+
     /// Yeni anonim oturum açar, token'ları saklar.
     /// DOĞRUDAN /auth/v1/signup DEĞİL — captcha korumasını (Attack Protection)
     /// proje genelinde KAPATMADAN sadece anonim girişi bypass eden
@@ -24,30 +52,14 @@ enum SupabaseAuth {
     @discardableResult
     static func signInAnonymously() async -> Bool {
         guard let url = URL(string: "\(Config.supabaseURL)/functions/v1/anon-signin") else { return false }
-        var r = URLRequest(url: url)
-        r.timeoutInterval = 20
-        r.httpMethod = "POST"
-        r.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        r.setValue(Config.supabaseAnonKey, forHTTPHeaderField: "apikey")
-        r.setValue("Bearer \(Config.supabaseAnonKey)", forHTTPHeaderField: "Authorization")
-        r.httpBody = "{}".data(using: .utf8)
-        return await perform(r, label: "anonim giriş")
+        return await perform(authRequest(url: url, body: [:]), label: "anonim giriş")
     }
 
     /// Saklı refresh_token ile yeni access_token alır.
     @discardableResult
     static func refresh() async -> Bool {
-        guard let rt = UserDefaultsManager.shared.refreshToken,
-              let url = URL(string: "\(Config.supabaseURL)/auth/v1/token?grant_type=refresh_token")
-        else { return false }
-        var r = URLRequest(url: url)
-        r.timeoutInterval = 20
-        r.httpMethod = "POST"
-        r.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        r.setValue(Config.supabaseAnonKey, forHTTPHeaderField: "apikey")
-        r.setValue("Bearer \(Config.supabaseAnonKey)", forHTTPHeaderField: "Authorization")
-        r.httpBody = try? JSONSerialization.data(withJSONObject: ["refresh_token": rt])
-        return await perform(r, label: "token yenileme")
+        guard let request = refreshRequest() else { return false }
+        return await perform(request, label: "token yenileme")
     }
 
     /// 401 sonrası kurtarma: önce refresh (birkaç kez — tek seferlik ağ
@@ -114,28 +126,16 @@ enum SupabaseAuth {
     /// kesin reddetmesi (.rejected, HTTP 400/401) ile geçici ağ/sunucu hatasını
     /// (.networkError) ayırır — böylece geçici hatada anonim kimliğe düşülmez.
     private static func attemptRefresh() async -> RefreshOutcome {
-        guard let rt = UserDefaultsManager.shared.refreshToken,
-              let url = URL(string: "\(Config.supabaseURL)/auth/v1/token?grant_type=refresh_token")
-        else { return .noToken }
-        var r = URLRequest(url: url)
-        r.timeoutInterval = 20
-        r.httpMethod = "POST"
-        r.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        r.setValue(Config.supabaseAnonKey, forHTTPHeaderField: "apikey")
-        r.setValue("Bearer \(Config.supabaseAnonKey)", forHTTPHeaderField: "Authorization")
-        r.httpBody = try? JSONSerialization.data(withJSONObject: ["refresh_token": rt])
+        guard let request = refreshRequest() else { return .noToken }
         do {
-            let (data, resp) = try await URLSession.shared.data(for: r)
+            let (data, resp) = try await URLSession.shared.data(for: request)
             let code = (resp as? HTTPURLResponse)?.statusCode ?? -1
             if (200..<300).contains(code) {
-                guard let s = try? JSONDecoder().decode(Session.self, from: data),
-                      let uid = s.user?.id, let token = s.access_token else {
+                guard let session = try? JSONDecoder().decode(Session.self, from: data),
+                      storeSession(session) else {
                     // 2xx ama veri eksik/bozuk — geçici say, tekrar dene.
                     return .networkError
                 }
-                UserDefaultsManager.shared.userId = uid
-                UserDefaultsManager.shared.accessToken = token
-                UserDefaultsManager.shared.refreshToken = s.refresh_token
                 return .success
             }
             // 400/401 = sunucu refresh token'ı reddetti (süresi dolmuş/iptal) →
@@ -156,14 +156,11 @@ enum SupabaseAuth {
                 print("Supabase \(label) başarısız (HTTP \(code)): \(body)")
                 return false
             }
-            let s = try JSONDecoder().decode(Session.self, from: data)
-            guard let uid = s.user?.id, let token = s.access_token else {
+            let session = try JSONDecoder().decode(Session.self, from: data)
+            guard storeSession(session) else {
                 print("Supabase \(label): veri eksik")
                 return false
             }
-            UserDefaultsManager.shared.userId = uid
-            UserDefaultsManager.shared.accessToken = token
-            UserDefaultsManager.shared.refreshToken = s.refresh_token
             return true
         } catch {
             print("Supabase \(label) ağ hatası: \(error.localizedDescription)")

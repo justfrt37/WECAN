@@ -116,11 +116,7 @@ struct ConversationsService {
 
     private func get<T: Decodable>(_ endpoint: String, retrying: Bool = true) async -> T? {
         guard let url = URL(string: endpoint) else { return nil }
-        var request = URLRequest(url: url)
-        request.timeoutInterval = 20
-        let bearer = UserDefaultsManager.shared.accessToken ?? Config.supabaseAnonKey
-        request.setValue(Config.supabaseAnonKey, forHTTPHeaderField: "apikey")
-        request.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
+        let request = SupabaseRequest.authorized(url: url, bearer: SupabaseRequest.sessionBearer, timeout: 20)
         guard let (data, response) = try? await URLSession.shared.data(for: request),
               let http = response as? HTTPURLResponse
         else { return nil }

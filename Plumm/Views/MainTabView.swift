@@ -280,30 +280,6 @@ struct CustomTabBar: View {
     }
 }
 
-/// Henüz içeriği olmayan sekmeler için boş yer tutucu.
-struct PlaceholderTab: View {
-    let tab: MainTab
-
-    var body: some View {
-        ZStack {
-            LinearGradient(colors: [AppColor.bg, AppColor.bg2, AppColor.bg],
-                           startPoint: .top, endPoint: .bottom)
-                .ignoresSafeArea()
-            VStack(spacing: 14) {
-                Image(systemName: tab.icon)
-                    .font(.system(size: 44))
-                    .foregroundStyle(AppColor.pink.opacity(0.8))
-                Text(tab.titleKey)
-                    .font(.title2.bold())
-                    .foregroundStyle(.white)
-                Text("Soon")
-                    .font(.subheadline)
-                    .foregroundStyle(.white.opacity(0.5))
-            }
-        }
-    }
-}
-
 #Preview {
     MainTabView()
         .environment(CharacterStore())

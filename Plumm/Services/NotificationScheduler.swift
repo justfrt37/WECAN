@@ -68,14 +68,16 @@ final class NotificationScheduler {
 
     // MARK: - Liked You (once daily, untalked catalog bots, persisted in LikedByStore)
 
-    private static let likedYouIDPrefix = "notif.liked."
+    /// Tek slot var (günde bir beğeni) — string, eski sürümlerde çizelgelenmiş
+    /// bekleyen isteklerin de iptal edilebilmesi için birebir korunuyor.
+    private static let likedYouID = "notif.liked.0"
 
     /// Günde bir kere çağrılır (bkz. LikedByStore.isEligibleForPick) — seçilen
     /// bot LikedByStore'a kalıcı olarak eklenir (bkz. LikesView), bir daha asla
     /// tekrar seçilmez. Zaten seçilmiş botlar `eligible`den hariç tutulur.
     func rescheduleLikedYou(characters: [Character]) {
         guard LikedByStore.isEligibleForPick() else { return }
-        center.removePendingNotificationRequests(withIdentifiers: [Self.likedYouIDPrefix + "0"])
+        center.removePendingNotificationRequests(withIdentifiers: [Self.likedYouID])
         let alreadyLiked = LikedByStore.likedCharacterIDs()
         // Saat aralığının ALT sınırını şu anki saate çek — aksi halde çekilen saat
         // şu andan erkense iOS bildirimi YARINA atar ve günlük kilitle
@@ -85,23 +87,12 @@ final class NotificationScheduler {
         let lower = max(currentHour, 9)
         guard lower <= 22 else { return }
         let hour = Int.random(in: lower...22)
+        // Katalog botları arasından HİÇ konuşulmamış olanlar (yerel kaydı olmayan)
+        // — yerel kayıt yoksa rutin/uyku bloğu da yok, bakılacak bir şey kalmıyor.
         let eligible = characters.filter { character in
-            guard character.createdBy == nil,
-                  LocalConversationStore.shared.load(for: character.id) == nil,
-                  !alreadyLiked.contains(character.id)
-            else { return false }
-            // Untalked bots have no LocalConversationStore entry, so no schedule
-            // either — nothing to check here in practice today, but if a future
-            // change ever attaches a schedule to untalked catalog bots, this stays
-            // correct rather than silently ignoring it.
-            if let schedule = LocalConversationStore.shared.load(for: character.id)?.schedule,
-               let block = ScheduleLookup.currentBlock(schedule: schedule, date: Calendar.current.date(
-                   bySettingHour: hour, minute: 0, second: 0, of: Date()
-               ) ?? Date()),
-               block.isSleep {
-                return false
-            }
-            return true
+            character.createdBy == nil &&
+                LocalConversationStore.shared.load(for: character.id) == nil &&
+                !alreadyLiked.contains(character.id)
         }
         guard let bot = eligible.randomElement() else { return }
         // Sonraki seçim YARININ penceresine (09:00) ötelenir — bu ekranın
@@ -109,7 +100,7 @@ final class NotificationScheduler {
         // günlük kilit). LikedByStore API'si serbest bir gecikme aldığı için
         // günlük kilidi burada süreyi vererek kuruyoruz.
         LikedByStore.recordLike(bot.id, nextPickDelay: Self.secondsUntilTomorrowWindow())
-        scheduleLikedYou(bot: bot, slotIndex: 0, hour: hour)
+        scheduleLikedYou(bot: bot, hour: hour)
     }
 
     /// Yarının "beğenildin" penceresinin (09:00) başlangıcına kalan süre.
@@ -122,7 +113,7 @@ final class NotificationScheduler {
         return max(0, window.timeIntervalSinceNow)
     }
 
-    private func scheduleLikedYou(bot: Character, slotIndex: Int, hour: Int) {
+    private func scheduleLikedYou(bot: Character, hour: Int) {
         let content = UNMutableNotificationContent()
         content.title = String(localized: "One girl liked you 👀")
         content.userInfo = ["type": NotificationKind.liked.rawValue, "characterId": bot.id.uuidString]
@@ -138,10 +129,7 @@ final class NotificationScheduler {
             fireDate = now.addingTimeInterval(60)
         }
         let trigger = UNTimeIntervalNotificationTrigger(timeInterval: max(1, fireDate.timeIntervalSince(now)), repeats: false)
-        let request = UNNotificationRequest(
-            identifier: Self.likedYouIDPrefix + "\(slotIndex)", content: content, trigger: trigger
-        )
-        center.add(request)
+        center.add(UNNotificationRequest(identifier: Self.likedYouID, content: content, trigger: trigger))
     }
 
     // MARK: - Ghosted (per active conversation, role-interval timer)
@@ -406,11 +394,9 @@ final class NotificationScheduler {
         guard !hasPickedMissedYouToday else { return }
         let eligible = characters.filter { character in
             guard !BlockedCharactersStore.isBlocked(character.id),
-                  let stored = LocalConversationStore.shared.load(for: character.id),
-                  stored.ghostedAt == nil,
-                  NotificationPreferencesStore.canSendMore(for: character.id)
+                  let stored = LocalConversationStore.shared.load(for: character.id)
             else { return false }
-            return true
+            return stored.ghostedAt == nil && NotificationPreferencesStore.canSendMore(for: character.id)
         }
         guard !eligible.isEmpty else { return }
 

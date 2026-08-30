@@ -32,7 +32,7 @@ final class LocalConversationStore {
         var summary: String           // özetlenmiş eski mesajlar
         var summarizedCount: Int      // kaç mesaj özetlendi
         var msgCounter: Int = 0       // terfi eşiği için mesaj sayacı (istemci taraflı)
-        var levelProgress: Double = 0 // güncel seviyenin ne kadarı tamamlandı (0...1), bkz. RelationshipXP
+        var levelProgress: Double = 0 // güncel seviyenin ne kadarı tamamlandı (0...1), sunucudan gelir
         /// Sohbetin GERÇEKTE hangi dilde geçtiğine dair son tahmin ("tr"/"en") —
         /// bildirim içeriği (JealousyContent vb.) bunu kullanır. Bkz. ConversationLanguage.
         var detectedLanguage: String?
@@ -194,20 +194,6 @@ final class LocalConversationStore {
         let key = userKey()
         guard let idx = mem[key]?[characterId]?.messages.firstIndex(where: { $0.id == id }) else { return }
         mutate(&mem[key]![characterId]!.messages[idx])
-    }
-
-    /// Seviye/ilerleme/mesaj-sayacı alanlarını yerinde günceller — mesaj
-    /// dizisine dokunmaz. Kayıt yoksa hiçbir şey yapmaz (bu üç alan sadece
-    /// `applyPostReplyEffects`'ten, yani bir mesaj zaten eklenmiş bir turun
-    /// sonunda çağrılır — kayıt bu noktada zaten var olmalı).
-    func updateFields(for id: UUID, level: Int, levelProgress: Double, msgCounter: Int) {
-        lock.lock(); defer { lock.unlock() }
-        let key = userKey()
-        guard mem[key]?[id] != nil else { return }
-        mem[key]?[id]?.level = level
-        mem[key]?[id]?.levelProgress = levelProgress
-        mem[key]?[id]?.msgCounter = msgCounter
-        RelationshipLevelStore.set(id, level: level, progress: levelProgress)
     }
 
     /// `detectedLanguage`'ı en son asistan mesajından yeniden hesaplar

@@ -529,7 +529,7 @@ struct ChatView: View {
             .onChange(of: viewModel.messages.count) {
                 guard readyToAutoScroll else {
                     // İlk yükleme (geçmiş): animasyonsuz dibe konumlan.
-                    scrollToBottomInstant(proxy)
+                    scrollToBottom(proxy, animated: false)
                     return
                 }
                 // Kullanıcı geçmişe bakmak için yukarı kaymışsa dibe ZORLAMA.
@@ -550,9 +550,9 @@ struct ChatView: View {
                         if !viewModel.messages.isEmpty { break }
                         try? await Task.sleep(nanoseconds: 40_000_000)
                     }
-                    scrollToBottomInstant(proxy)
+                    scrollToBottom(proxy, animated: false)
                     try? await Task.sleep(nanoseconds: 50_000_000)
-                    scrollToBottomInstant(proxy)   // layout oturduktan sonra kesin dibe
+                    scrollToBottom(proxy, animated: false)   // layout oturduktan sonra kesin dibe
                     withAnimation(.easeOut(duration: 0.2)) { readyToAutoScroll = true }
                 }
             }
@@ -560,16 +560,15 @@ struct ChatView: View {
         }
     }
 
-    private func scrollToBottomInstant(_ proxy: ScrollViewProxy) {
-        proxy.scrollTo("bottomAnchor", anchor: .bottom)
-    }
-
-    private func scrollToBottom(_ proxy: ScrollViewProxy) {
-        withAnimation {
-            // Padding'in ALTINDAki görünmez çapaya hizala — son mesaj/typing
-            // balonu 45pt boşlukla birlikte görünür kalsın (bkz. bottomAnchor).
+    /// Padding'in ALTINDAki görünmez çapaya hizalar — son mesaj/typing balonu
+    /// 45pt boşlukla birlikte görünür kalsın (bkz. bottomAnchor). Açılışta
+    /// animasyonsuz (`animated: false`), sonraki mesajlarda animasyonlu.
+    private func scrollToBottom(_ proxy: ScrollViewProxy, animated: Bool = true) {
+        guard animated else {
             proxy.scrollTo("bottomAnchor", anchor: .bottom)
+            return
         }
+        withAnimation { proxy.scrollTo("bottomAnchor", anchor: .bottom) }
     }
 
     // MARK: Mod düğmeleri
@@ -1000,10 +999,6 @@ private struct VoicePendingIndicator: View {
     }
 }
 
-/// Just a loading bar — no icon, no "Generating photo…" text (product
-/// decision: the photo itself arrives blurred behind a "Tap to view" prompt,
-/// see `ChatBubble`'s `imageURL` case, so this indicator doesn't need to
-/// announce anything either).
 // MARK: - Ödeme bekleyen foto/ses balonları
 
 /// Botun fotoğrafı — ilk halde HİÇ üretilmemiş, sadece tarif metni saklı
@@ -1155,9 +1150,11 @@ private struct IncomingVoiceWave: View {
     }
 }
 
+/// Spinner only — no icon, no "Generating photo…" text (product decision: the
+/// photo itself arrives blurred behind a "Tap to view" prompt, see
+/// `ChatBubble`'s `imageURL` case, so this indicator doesn't announce anything).
 private struct ImagePendingIndicator: View {
     var body: some View {
-        // Düz bar yerine dönen daire (spinner).
         ProgressView()
             .progressViewStyle(.circular)
             .tint(.white)

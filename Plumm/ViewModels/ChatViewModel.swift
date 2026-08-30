@@ -4,7 +4,7 @@
 //  Tüm karakterler için: geçmiş cihazda, yerel özetler (her 20 mesajda bir).
 //  XP/seviye/terfi hesabı artık SUNUCUDA (bkz. chat/index.ts
 //  applyRelationshipGain) — istemci cevaptaki `level`/`levelProgress` değerlerini
-//  sadece gösterir/saklar, kurcalayamaz. (Eski istemci mantığı: RelationshipXP.swift.)
+//  sadece gösterir/saklar, kurcalayamaz.
 //
 
 import Foundation
@@ -59,6 +59,20 @@ final class ChatViewModel {
         if let balance { tokenStore?.setBalance(balance) }
     }
 
+    /// Saniye cinsinden bekleme. `Task.sleep`'in nanosaniye dönüşümü onlarca
+    /// çağrı yerinde tekrarlanıyordu; süre sıfır/negatifse hiç beklenmez.
+    private func pause(_ seconds: TimeInterval) async {
+        guard seconds > 0 else { return }
+        try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+    }
+
+    /// "Yazıyor" balonunun kalan süresini tamamlar: bu uzunlukta bir cevabı
+    /// yazmak ne kadar sürerdi (bkz. TypingTiming) eksi balonun açık kaldığı
+    /// süre. Dört ayrı akışta aynı üç satır tekrarlanıyordu.
+    private func completeTypingDelay(forReplyLength length: Int, since bubbleStartedAt: Date) async {
+        await pause(TypingTiming.duration(forReplyLength: length) - Date().timeIntervalSince(bubbleStartedAt))
+    }
+
     /// 402 — bkz. chat/index.ts, chat-image/index.ts, voice-message-tts/index.ts
     /// chargeOrReject. Genel ağ hatası mesajı yerine kullanıcıya net bir sebep
     /// göstermek için ayırt edilir.
@@ -108,6 +122,43 @@ final class ChatViewModel {
             return false
         }
         return true
+    }
+
+    /// Sunucu cevabını beklemeden rozeti anında düşür — gerçek maliyet cevapla
+    /// (handleTokenBalance) ya da hata yolunda `refresh()` ile düzeltilir.
+    private func deductBadgeOptimistically(_ cost: Int) {
+        if let balance = tokenStore?.balance { tokenStore?.setBalance(balance - cost) }
+    }
+
+    /// Gönderim hatası ortak kuyruğu (send / sendUserVoice / sendUserPhoto):
+    /// 402 ise uyarı yerine paywall/coin mağazası, değilse mesajı "başarısız"
+    /// işaretle + hatayı göster. `refundsBadge` true ise gönderim başında
+    /// anında düşülen rozet bakiyesi gerçek değerle düzeltilir (istek sunucuya
+    /// ulaşmadıysa ücretlendirme de olmadı); foto yolunda önden düşüş
+    /// yapılmadığı için false geçilir.
+    private func handleSendFailure(_ error: Error, messageID: UUID, refundsBadge: Bool) {
+        if isInsufficientTokensError(error) {
+            presentInsufficientTokensPaywall()   // uyarı yok, paywall aç (kendi içinde refresh() var)
+        } else {
+            errorMessage = error.localizedDescription
+            if let idx = messages.firstIndex(where: { $0.id == messageID }) {
+                messages[idx].failed = true
+            }
+            if refundsBadge { Task { await tokenStore?.refresh() } }
+        }
+        showsTypingBubble = false
+        store?.setTyping(character.id, false)
+    }
+
+    /// Sunucu "karakter bu turda uyumayı kabul etti" dediyse (bkz.
+    /// ChatReply.wentToSleep) yerel uyku durumunu kalıcılaştırır — üç gönderim
+    /// yolunda da birebir aynı blok tekrarlanıyordu.
+    private func applyWentToSleep(fallback stored: LocalConversationStore.Stored?) {
+        var updated = LocalConversationStore.shared.load(for: character.id) ?? stored
+        updated?.manualSleepAt = Date()
+        updated?.wokenUpAt = nil
+        if let updated { LocalConversationStore.shared.save(updated, for: character.id) }
+        NotificationScheduler.shared.cancelSleepyGoodnight(for: character.id)
     }
 
     init(character: Character) {
@@ -315,10 +366,10 @@ final class ChatViewModel {
     /// (gerçek bir mesaj gibi sayılır ve önbelleğe alınır).
     private func attachFirstHello(line: String? = nil, synthetic: Bool = true) async {
         isLoadingHistory = false // mesaj listesi görünür olsun ki "yazıyor" balonu gösterilebilsin
-        try? await Task.sleep(nanoseconds: UInt64(TypingTiming.randomStartDelay() * 1_000_000_000))
+        await pause(TypingTiming.randomStartDelay())
         showsTypingBubble = true
         let helloLine = line ?? FirstHelloContent.randomLine()
-        try? await Task.sleep(nanoseconds: UInt64(TypingTiming.duration(forReplyLength: helloLine.count) * 1_000_000_000))
+        await pause(TypingTiming.duration(forReplyLength: helloLine.count))
         showsTypingBubble = false
         messages = [Message(role: .assistant, content: helloLine)]
         hasSyntheticOpening = synthetic
@@ -344,15 +395,12 @@ final class ChatViewModel {
         inputText = ""
         isSending = true
         errorMessage = nil
-        // Rozeti sunucu cevabını (tam tur: yazıyor balonu + cevap üretimi) beklemeden
-        // ANINDA düşür — gerçek maliyet sunucudan gelince (handleTokenBalance) veya
-        // hata/red durumunda (refresh()) düzeltilir, bkz. catch bloğu.
-        if let balance = tokenStore?.balance { tokenStore?.setBalance(balance - cost) }
+        deductBadgeOptimistically(cost)
 
         Task {
             await handleWakeUpIfAsleep()
             // Balon anında değil, insan gibi kısa bir tereddütten sonra belirir.
-            try? await Task.sleep(nanoseconds: UInt64(TypingTiming.randomStartDelay() * 1_000_000_000))
+            await pause(TypingTiming.randomStartDelay())
             showsTypingBubble = true
             store?.setTyping(character.id, true)
             let bubbleStartedAt = Date()
@@ -386,27 +434,9 @@ final class ChatViewModel {
                 applyPostReplyEffects(gotPhoto: nil, stored: stored,
                                       serverLevel: result.level, serverProgress: result.levelProgress)
 
-                if result.wentToSleep {
-                    var updated = LocalConversationStore.shared.load(for: character.id) ?? stored
-                    updated?.manualSleepAt = Date()
-                    updated?.wokenUpAt = nil
-                    if let updated { LocalConversationStore.shared.save(updated, for: character.id) }
-                    NotificationScheduler.shared.cancelSleepyGoodnight(for: character.id)
-                }
+                if result.wentToSleep { applyWentToSleep(fallback: stored) }
             } catch {
-                if isInsufficientTokensError(error) {
-                    presentInsufficientTokensPaywall()   // uyarı yok, paywall aç (kendi içinde refresh() var)
-                } else {
-                    errorMessage = error.localizedDescription
-                    if let idx = messages.firstIndex(where: { $0.id == userMsg.id }) {
-                        messages[idx].failed = true
-                    }
-                    // İstek sunucuya ulaşmadı/başarısız oldu → sunucu ÜCRETLENDİRMEDİ.
-                    // Yukarıdaki anlık düşüşü gerçek bakiyeyle düzelt (bkz. gönderim başı).
-                    Task { await tokenStore?.refresh() }
-                }
-                showsTypingBubble = false
-                store?.setTyping(character.id, false)
+                handleSendFailure(error, messageID: userMsg.id, refundsBadge: true)
             }
             isSending = false
         }
@@ -499,9 +529,12 @@ final class ChatViewModel {
     /// boşsa/nil ise eski tek-balon davranışına düşer (voice/image-reaction
     /// turları ve her türlü eski sunucu cevabı için sıfır riskli geri dönüş).
     private func deliverSegments(_ result: ChatReply, bubbleStartedAt: Date) async {
-        let serverSegments: [ReplySegment] = (result.replySegments?.isEmpty == false)
-            ? result.replySegments!
-            : [ReplySegment(text: result.reply, delaySeconds: 0)]
+        let serverSegments: [ReplySegment]
+        if let paced = result.replySegments, !paced.isEmpty {
+            serverSegments = paced
+        } else {
+            serverSegments = [ReplySegment(text: result.reply, delaySeconds: 0)]
+        }
         // Sunucunun kendi [PAUSE:n] mantığı AYNEN korunur — bu sadece EK bir
         // istemci-taraflı geçiş: her balonu, uzunluğuna göre ayrıca bölebilir
         // (bkz. maybeSplitForLength). Sunucu zaten bölmüşse her parça yine bu
@@ -512,18 +545,13 @@ final class ChatViewModel {
             if index == 0 {
                 // İlk parça: mevcut davranış — balon zaten çağrı ÖNCESİNDE
                 // açılmıştı, sadece "bunu yazmak ne kadar sürerdi" kadar tamamla.
-                let elapsed = Date().timeIntervalSince(bubbleStartedAt)
-                let wanted = TypingTiming.duration(forReplyLength: segment.text.count)
-                let remaining = wanted - elapsed
-                if remaining > 0 {
-                    try? await Task.sleep(nanoseconds: UInt64(remaining * 1_000_000_000))
-                }
+                await completeTypingDelay(forReplyLength: segment.text.count, since: bubbleStartedAt)
             } else {
                 // Sonraki parçalar: balonu YENİDEN aç, dramatik duraklamayı
                 // "yazıyor..." animasyonuyla göster.
                 showsTypingBubble = true
                 store?.setTyping(character.id, true)
-                try? await Task.sleep(nanoseconds: UInt64(segment.delaySeconds * 1_000_000_000))
+                await pause(segment.delaySeconds)
             }
             showsTypingBubble = false
             store?.setTyping(character.id, false)
@@ -584,12 +612,11 @@ final class ChatViewModel {
         isImageArmed = false
         isSending = true
         errorMessage = nil
-        // Rozeti sunucu cevabını beklemeden ANINDA düşür — bkz. send().
-        if let balance = tokenStore?.balance { tokenStore?.setBalance(balance - cost) }
+        deductBadgeOptimistically(cost)
 
         Task {
             await handleWakeUpIfAsleep()
-            try? await Task.sleep(nanoseconds: UInt64(TypingTiming.randomStartDelay() * 1_000_000_000))
+            await pause(TypingTiming.randomStartDelay())
             showsTypingBubble = true
             store?.setTyping(character.id, true)
             let bubbleStartedAt = Date()
@@ -612,26 +639,9 @@ final class ChatViewModel {
                 applyPostReplyEffects(gotPhoto: nil, stored: stored,
                                       serverLevel: result.level, serverProgress: result.levelProgress)
 
-                if result.wentToSleep {
-                    var updated = LocalConversationStore.shared.load(for: character.id) ?? stored
-                    updated?.manualSleepAt = Date()
-                    updated?.wokenUpAt = nil
-                    if let updated { LocalConversationStore.shared.save(updated, for: character.id) }
-                    NotificationScheduler.shared.cancelSleepyGoodnight(for: character.id)
-                }
+                if result.wentToSleep { applyWentToSleep(fallback: stored) }
             } catch {
-                if isInsufficientTokensError(error) {
-                    presentInsufficientTokensPaywall()   // uyarı yok, paywall aç (kendi içinde refresh() var)
-                } else {
-                    errorMessage = error.localizedDescription
-                    if let idx = messages.firstIndex(where: { $0.id == userMsg.id }) {
-                        messages[idx].failed = true
-                    }
-                    // Sunucu ücretlendirmedi → anlık düşüşü gerçek bakiyeyle düzelt.
-                    Task { await tokenStore?.refresh() }
-                }
-                showsTypingBubble = false
-                store?.setTyping(character.id, false)
+                handleSendFailure(error, messageID: userMsg.id, refundsBadge: true)
             }
             isSending = false
         }
@@ -662,7 +672,7 @@ final class ChatViewModel {
 
         Task {
             await handleWakeUpIfAsleep()
-            try? await Task.sleep(nanoseconds: UInt64(TypingTiming.randomStartDelay() * 1_000_000_000))
+            await pause(TypingTiming.randomStartDelay())
             showsTypingBubble = true
             store?.setTyping(character.id, true)
             let bubbleStartedAt = Date()
@@ -687,24 +697,10 @@ final class ChatViewModel {
                 applyPostReplyEffects(gotPhoto: nil, stored: stored,
                                       serverLevel: result.level, serverProgress: result.levelProgress)
 
-                if result.wentToSleep {
-                    var updated = LocalConversationStore.shared.load(for: character.id) ?? stored
-                    updated?.manualSleepAt = Date()
-                    updated?.wokenUpAt = nil
-                    if let updated { LocalConversationStore.shared.save(updated, for: character.id) }
-                    NotificationScheduler.shared.cancelSleepyGoodnight(for: character.id)
-                }
+                if result.wentToSleep { applyWentToSleep(fallback: stored) }
             } catch {
-                if isInsufficientTokensError(error) {
-                    presentInsufficientTokensPaywall()   // uyarı yok, paywall aç
-                } else {
-                    errorMessage = error.localizedDescription
-                    if let idx = messages.firstIndex(where: { $0.id == userMsg.id }) {
-                        messages[idx].failed = true
-                    }
-                }
-                showsTypingBubble = false
-                store?.setTyping(character.id, false)
+                // Foto yolunda rozet önden düşürülmüyor → düzeltme de gerekmez.
+                handleSendFailure(error, messageID: userMsg.id, refundsBadge: false)
             }
             isSending = false
         }
@@ -793,7 +789,7 @@ final class ChatViewModel {
         // animasyonlu belirir (bkz. PendingVoiceBubble transition).
         preparingVoiceMessageIDs.insert(pendingID)
         Task {
-            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            await pause(3)
             withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
                 _ = preparingVoiceMessageIDs.remove(pendingID)
             }
@@ -817,8 +813,7 @@ final class ChatViewModel {
         guard let userMessageIdx = messages[..<idx].lastIndex(where: { $0.role == .user }) else { return }
         // Token yetmiyorsa HİÇ loading gösterme — doğrudan paywall/coin mağazası.
         guard hasTokensOrPaywall(cost: 12) else { return }
-        // Rozeti sunucu cevabını beklemeden ANINDA düşür — bkz. send().
-        if let balance = tokenStore?.balance { tokenStore?.setBalance(balance - 12) }
+        deductBadgeOptimistically(12)
         let text = messages[userMessageIdx].content
         let lastMessageAt = userMessageIdx > 0 ? messages[userMessageIdx - 1].createdAt : nil
 
@@ -848,12 +843,7 @@ final class ChatViewModel {
                     currentActivity: currentActivity?.detail
                 )
 
-                let elapsed = Date().timeIntervalSince(bubbleStartedAt)
-                let wanted = TypingTiming.duration(forReplyLength: result.reply.count)
-                let remaining = wanted - elapsed
-                if remaining > 0 {
-                    try? await Task.sleep(nanoseconds: UInt64(remaining * 1_000_000_000))
-                }
+                await completeTypingDelay(forReplyLength: result.reply.count, since: bubbleStartedAt)
 
                 // ElevenLabs [tag] işaretleri SADECE seslendirme için — mesajın
                 // kalıcı `content`'ine (yerel geçmiş + özetlemeye giden) asla
@@ -997,10 +987,10 @@ final class ChatViewModel {
             // "Fotoğraf hazırlıyor" hissi: kısa yazıyor balonu → sonra bulanık
             // foto balonu. Foto isteğine METİN cevabı verilmez (foto + açılınca
             // gelen caption yanıttır).
-            try? await Task.sleep(nanoseconds: UInt64(TypingTiming.randomStartDelay() * 1_000_000_000))
+            await pause(TypingTiming.randomStartDelay())
             showsTypingBubble = true
             store?.setTyping(character.id, true)
-            try? await Task.sleep(nanoseconds: 900_000_000)
+            await pause(0.9)
             showsTypingBubble = false
             store?.setTyping(character.id, false)
             withAnimation(.spring(response: 0.45, dampingFraction: 0.72)) {
@@ -1028,8 +1018,7 @@ final class ChatViewModel {
         else { return }
         // Token yetmiyorsa HİÇ loading gösterme — doğrudan paywall/coin mağazası.
         guard hasTokensOrPaywall(cost: 25) else { return }
-        // Rozeti sunucu cevabını beklemeden ANINDA düşür — bkz. send().
-        if let balance = tokenStore?.balance { tokenStore?.setBalance(balance - 25) }
+        deductBadgeOptimistically(25)
 
         generatingImageMessageIDs.insert(messageID)
         isSending = true
@@ -1114,7 +1103,7 @@ final class ChatViewModel {
             // Normal send()'deki AYNI "insan gibi tereddüt" gecikmesi + yazıyor
             // balonu — bu bir arka plan olayı olsa da kullanıcıya ANINDA
             // gelen bir mesaj gibi değil, gerçek bir cevap gibi hissettirsin.
-            try? await Task.sleep(nanoseconds: UInt64(TypingTiming.randomStartDelay() * 1_000_000_000))
+            await pause(TypingTiming.randomStartDelay())
             showsTypingBubble = true
             store?.setTyping(character.id, true)
             let bubbleStartedAt = Date()
@@ -1141,12 +1130,7 @@ final class ChatViewModel {
                 return
             }
 
-            let elapsed = Date().timeIntervalSince(bubbleStartedAt)
-            let wanted = TypingTiming.duration(forReplyLength: trimmed.count)
-            let remaining = wanted - elapsed
-            if remaining > 0 {
-                try? await Task.sleep(nanoseconds: UInt64(remaining * 1_000_000_000))
-            }
+            await completeTypingDelay(forReplyLength: trimmed.count, since: bubbleStartedAt)
             showsTypingBubble = false
             store?.setTyping(character.id, false)
 
@@ -1284,12 +1268,12 @@ final class ChatViewModel {
 
         guard CharacterSleepState.isEffectivelyAsleep(stored: stored) else { return }
 
-        try? await Task.sleep(nanoseconds: 5_000_000_000)
+        await pause(5)
         currentActivity = (
             label: String(localized: "Just woke up"),
             detail: "just woke up from being asleep, still a little groggy, texting from bed"
         )
-        try? await Task.sleep(nanoseconds: 5_000_000_000)
+        await pause(5)
 
         guard var updated = LocalConversationStore.shared.load(for: character.id) else { return }
         updated.wokenUpAt = Date()
@@ -1317,7 +1301,7 @@ final class ChatViewModel {
     func startActivityRefreshLoop() async {
         while !Task.isCancelled {
             refreshCurrentActivity()
-            try? await Task.sleep(nanoseconds: 60_000_000_000)
+            await pause(60)
         }
     }
 

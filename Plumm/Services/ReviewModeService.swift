@@ -98,11 +98,7 @@ final class ReviewModeService {
         let endpoint = "\(Config.supabaseURL)/rest/v1/app_config?select=bool_value&key=eq.kokomombo"
         guard let url = URL(string: endpoint) else { return nil }
 
-        var request = URLRequest(url: url)
-        request.setValue(Config.supabaseAnonKey, forHTTPHeaderField: "apikey")
-        let bearer = UserDefaultsManager.shared.accessToken ?? Config.supabaseAnonKey
-        request.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
-        request.timeoutInterval = 8
+        let request = SupabaseRequest.authorized(url: url, bearer: SupabaseRequest.sessionBearer, timeout: 8)
 
         do {
             let (data, response) = try await URLSession.shared.data(for: request)

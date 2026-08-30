@@ -1,11 +1,11 @@
 //
 //  AppearanceOptions.swift
 //  Karakter yaratma sihirbazındaki görünüm adımları (saç stili/rengi, göz şekli/
-//  rengi, burun şekli, ten tonu) için seçenek listeleri + FacePreview'ün
-//  kullandığı renk eşlemeleri.
+//  rengi, burun şekli, ten tonu) için seçenek listeleri. Önizleme görselleri
+//  Assets.xcassets'ten gelir (bkz. FacePreview).
 //
 
-import SwiftUI
+import Foundation
 
 enum AppearanceOptions {
     static let hairstyles = ["Straight", "Wavy", "Curly", "Ponytail", "Bun", "Pixie",
@@ -30,54 +30,4 @@ enum AppearanceOptions {
                                "South Asian", "Southeast Asian", "Scandinavian",
                                "North African", "Latina", "Middle Eastern", "Slavic", "Mixed"]
     static let ageRanges = ["18-21", "22-27", "28-35", "36-42", "43-52", "53-65", "65+"]
-
-    static func hairColorValue(_ name: String) -> Color {
-        switch name {
-        case "Black":    return Color(hex: 0x1C1B1A)
-        case "Brown":    return Color(hex: 0x5C3A21)
-        case "Blonde":   return Color(hex: 0xE8C77E)
-        case "Red":      return Color(hex: 0xA33F1F)
-        case "Auburn":   return Color(hex: 0x7B3F2A)
-        case "Pink":     return Color(hex: 0xE79ACB)
-        case "Silver":   return Color(hex: 0xC7CBD1)
-        case "Blue":     return Color(hex: 0x4E7FB5)
-        case "Chestnut": return Color(hex: 0x6B3A2E)
-        case "Platinum": return Color(hex: 0xEDEAE3)
-        case "Copper":   return Color(hex: 0xB5622A)
-        case "Purple":   return Color(hex: 0x7C5AA6)
-        default:         return .gray
-        }
-    }
-
-    static func eyeColorValue(_ name: String) -> Color {
-        switch name {
-        case "Brown":      return Color(hex: 0x6B4226)
-        case "Blue":       return Color(hex: 0x3C7DC4)
-        case "Green":      return Color(hex: 0x4C8C4A)
-        case "Hazel":      return Color(hex: 0x8C7A4B)
-        case "Gray":       return Color(hex: 0x9AA0A6)
-        case "Amber":      return Color(hex: 0xC98A2C)
-        case "Turquoise":  return Color(hex: 0x3FB6A8)
-        case "Violet":     return Color(hex: 0x8B5FBF)
-        case "Emerald":    return Color(hex: 0x2E8B6F)
-        case "Steel Blue": return Color(hex: 0x4A6D8C)
-        default:           return .gray
-        }
-    }
-
-    static func skinToneValue(_ name: String) -> Color {
-        switch name {
-        case "Porcelain": return Color(hex: 0xF6E1D3)
-        case "Fair":      return Color(hex: 0xEFC9A8)
-        case "Light":     return Color(hex: 0xE0AC80)
-        case "Medium":    return Color(hex: 0xC38A5F)
-        case "Tan":       return Color(hex: 0x9C6B44)
-        case "Deep":      return Color(hex: 0x5A3A22)
-        case "Ivory":     return Color(hex: 0xFBEBDD)
-        case "Golden":    return Color(hex: 0xD9A066)
-        case "Caramel":   return Color(hex: 0xA8703F)
-        case "Ebony":     return Color(hex: 0x3B2415)
-        default:          return .gray
-        }
-    }
 }

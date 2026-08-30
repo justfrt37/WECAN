@@ -711,11 +711,8 @@ enum JealousyContent {
     ]
 
     static func randomLine(language: String, role: String, vibe: String) -> String {
-        let resolvedLanguage = byLanguageRoleAndVibe[language] != nil ? language : "en"
-        let byRoleAndVibe = byLanguageRoleAndVibe[resolvedLanguage]!
-        let resolvedRole = byRoleAndVibe[role] != nil ? role : "flirty"
-        let vibeTable = byRoleAndVibe[resolvedRole]!
-        let resolvedVibe = vibeTable[vibe] != nil ? vibe : "Sweet"
-        return vibeTable[resolvedVibe]!.randomElement()!
+        NotificationContentLookup.randomLine(
+            in: byLanguageRoleAndVibe, language: language, role: role, vibe: vibe
+        )
     }
 }

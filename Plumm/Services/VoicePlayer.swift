@@ -51,19 +51,29 @@ final class VoicePlayer: NSObject, AVAudioPlayerDelegate, AVSpeechSynthesizerDel
         }
     }
 
-    func stop() {
-        synth.stopSpeaking(at: .immediate)
-        player?.stop()
-        player = nil
+    /// Oynatma durumunu (zamanlayıcı + ilerleme + aktif mesaj) sıfırlar.
+    /// `stop()` ve oynatma bitiş delegesi aynı alanları temizliyordu.
+    private func resetPlaybackState() {
         progressTimer?.invalidate()
         progressTimer = nil
         playbackProgress = 0
         playbackElapsed = 0
         isPlaying = false
         speakingMessageID = nil
-        // Ses oturumunu bırak — .playback + .duckOthers ile başka uygulamaların
-        // sesini kalıcı kısık bırakmayalım (bkz. playData/speakOnDevice setActive(true)).
+    }
+
+    /// Ses oturumunu bırak — .playback + .duckOthers ile başka uygulamaların
+    /// sesini kalıcı kısık bırakmayalım (bkz. playData/speakOnDevice setActive(true)).
+    private static func deactivateAudioSession() {
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+    }
+
+    func stop() {
+        synth.stopSpeaking(at: .immediate)
+        player?.stop()
+        player = nil
+        resetPlaybackState()
+        Self.deactivateAudioSession()
     }
 
     /// Duraklat — player CANLI kalır (kaldığı yerden devam + duruyorken sarma
@@ -140,14 +150,8 @@ final class VoicePlayer: NSObject, AVAudioPlayerDelegate, AVSpeechSynthesizerDel
 
     nonisolated func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
         Task { @MainActor in
-            self.progressTimer?.invalidate()
-            self.progressTimer = nil
-            self.playbackProgress = 0
-            self.playbackElapsed = 0
-            self.isPlaying = false
-            self.speakingMessageID = nil
-            // Bitişte ses oturumunu bırak — başka uygulamaların sesi kısık kalmasın.
-            try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+            self.resetPlaybackState()
+            Self.deactivateAudioSession()
         }
     }
 
@@ -157,24 +161,25 @@ final class VoicePlayer: NSObject, AVAudioPlayerDelegate, AVSpeechSynthesizerDel
         Task { @MainActor in
             self.isPlaying = false
             self.speakingMessageID = nil
-            try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+            Self.deactivateAudioSession()
         }
     }
 }
 
 /// Sunucudaki "tts" Edge Function'ı çağırır. Anahtar yoksa nil döner (fallback).
 struct TTSService {
+    /// Ortak POST kurucusu (JSON gövde + Supabase auth başlıkları) — iki TTS
+    /// çağrısı da aynı yedi satırı tekrarlıyordu.
+    fileprivate static func request(url: URL, payload: [String: Any], timeout: TimeInterval) -> URLRequest? {
+        guard let body = try? JSONSerialization.data(withJSONObject: payload) else { return nil }
+        var req = SupabaseRequest.post(url: url, bearer: SupabaseRequest.sessionBearer, timeout: timeout)
+        req.httpBody = body
+        return req
+    }
+
     func synthesize(text: String) async -> Data? {
         guard let url = URL(string: "\(Config.supabaseURL)/functions/v1/tts"),
-              let body = try? JSONSerialization.data(withJSONObject: ["text": text]) else { return nil }
-        var req = URLRequest(url: url)
-        req.httpMethod = "POST"
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        let bearer = UserDefaultsManager.shared.accessToken ?? Config.supabaseAnonKey
-        req.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
-        req.setValue(Config.supabaseAnonKey, forHTTPHeaderField: "apikey")
-        req.httpBody = body
-        req.timeoutInterval = 20
+              let req = Self.request(url: url, payload: ["text": text], timeout: 20) else { return nil }
 
         guard let (data, resp) = try? await URLSession.shared.data(for: req),
               let http = resp as? HTTPURLResponse, http.statusCode == 200,
@@ -215,15 +220,8 @@ extension TTSService {
         // uses it directly when present, else falls back to the role+vibe
         // map (bkz. voice-message-tts/index.ts).
         if let voiceId, !voiceId.isEmpty { payload["voiceId"] = voiceId }
-        guard let body = try? JSONSerialization.data(withJSONObject: payload) else { return .failure }
-        var req = URLRequest(url: Config.voiceMessageTTSFunctionURL)
-        req.httpMethod = "POST"
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        let bearer = UserDefaultsManager.shared.accessToken ?? Config.supabaseAnonKey
-        req.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
-        req.setValue(Config.supabaseAnonKey, forHTTPHeaderField: "apikey")
-        req.httpBody = body
-        req.timeoutInterval = 30
+        guard let req = Self.request(url: Config.voiceMessageTTSFunctionURL, payload: payload, timeout: 30)
+        else { return .failure }
 
         guard let (data, resp) = try? await URLSession.shared.data(for: req),
               let http = resp as? HTTPURLResponse

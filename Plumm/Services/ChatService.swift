@@ -116,7 +116,6 @@ private struct ChatResponse: Codable {
     /// Güncel seviyenin ilerleme oranı (0..1) — SUNUCUDA hesaplanır (bkz.
     /// chat/index.ts applyRelationshipGain). İstemci sadece gösterir.
     let levelProgress: Double?
-    let leveledUp: Bool?
     let photoUrl: String?
     let summary: String?   // özetleme modunda döner
     let schedule: CharacterSchedule?   // özetleme modunda döner (rafine edilmiş rutin)
@@ -179,17 +178,42 @@ private struct AddNoteResponse: Codable {
 }
 
 struct ChatService {
+    /// Her Edge Function çağrısının ortak iskeleti: POST + JSON + Supabase auth
+    /// başlıkları (oturum jetonu yoksa anon key) + açık timeout. Aynı altı satır
+    /// her istek kurucusunda tekrarlanıyordu.
+    private func authorizedRequest(url: URL, timeout: TimeInterval) -> URLRequest {
+        SupabaseRequest.post(url: url, bearer: SupabaseRequest.sessionBearer, timeout: timeout)
+    }
+
+    /// Sunucuya gidecek geçmiş penceresi — görsel/bekleyen balonlar atılır,
+    /// son 20 tur alınır. Dört ayrı çağrıda birebir aynı zincir tekrarlanıyordu.
+    private func wireHistory(from messages: [Message]) -> [WireHistoryMessage] {
+        messages
+            .filter { $0.imageURL == nil && $0.localImagePath == nil && !$0.isPending }
+            .suffix(20)
+            .map { WireHistoryMessage(role: $0.role.rawValue, content: $0.content) }
+    }
+
+    /// Sunucu cevabını istemci modeline çevirir — `fallbackLevel`, sunucu seviye
+    /// döndürmediğinde kullanılan (istemcinin bildiği) güncel seviye.
+    private func chatReply(from resp: ChatResponse, fallbackLevel: Int) -> ChatReply {
+        ChatReply(
+            reply: resp.reply ?? "",
+            replySegments: resp.replySegments?.map { ReplySegment(text: $0.text, delaySeconds: $0.delaySeconds) },
+            level: resp.level ?? fallbackLevel,
+            levelProgress: resp.levelProgress,
+            photoURL: resp.photoUrl.flatMap(URL.init(string:)),
+            wentToSleep: resp.wentToSleep ?? false,
+            tokenBalance: resp.tokenBalance,
+            autoMedia: resp.autoMedia
+        )
+    }
+
     /// "Anı Ekle" / "Davranış Ekle" — karaktere kalıcı bir not ekler (Grok ile doğrulanır).
     /// Sunucu reddederse (geçersiz içerik) `false` döner; ağ/decode hatasında throw eder.
     @discardableResult
     func addCharacterNote(characterId: UUID, kind: String, content: String) async throws -> Bool {
-        var request = URLRequest(url: Config.addCharacterNoteFunctionURL)
-        request.httpMethod = "POST"
-        request.timeoutInterval = 20
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        let bearer = UserDefaultsManager.shared.accessToken ?? Config.supabaseAnonKey
-        request.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
-        request.setValue(Config.supabaseAnonKey, forHTTPHeaderField: "apikey")
+        var request = authorizedRequest(url: Config.addCharacterNoteFunctionURL, timeout: 20)
         request.httpBody = try JSONEncoder().encode(
             AddNoteRequest(characterId: characterId.uuidString.lowercased(), kind: kind, content: content)
         )
@@ -231,13 +255,7 @@ struct ChatService {
     /// bildirimlerde false (var olmayan sohbete yazmaz). Dönen: mesaj eklendi mi.
     @discardableResult
     func injectProactiveMessage(character: Character, kind: String, text: String, createIfMissing: Bool, messageKind: String = "text") async -> Bool {
-        var request = URLRequest(url: Config.chatFunctionURL)
-        request.httpMethod = "POST"
-        request.timeoutInterval = 20
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        let bearer = UserDefaultsManager.shared.accessToken ?? Config.supabaseAnonKey
-        request.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
-        request.setValue(Config.supabaseAnonKey, forHTTPHeaderField: "apikey")
+        var request = authorizedRequest(url: Config.chatFunctionURL, timeout: 20)
         guard let body = try? JSONEncoder().encode(InjectProactiveRequest(
             characterId: character.id.uuidString.lowercased(),
             systemPrompt: character.systemPrompt,
@@ -267,13 +285,7 @@ struct ChatService {
     /// görsele çevir. Böylece açılmamış foto da chate tekrar girince görünür.
     @discardableResult
     func savePhotoMessage(character: Character, prompt: String, url: String?) async -> Bool {
-        var request = URLRequest(url: Config.chatFunctionURL)
-        request.httpMethod = "POST"
-        request.timeoutInterval = 20
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        let bearer = UserDefaultsManager.shared.accessToken ?? Config.supabaseAnonKey
-        request.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
-        request.setValue(Config.supabaseAnonKey, forHTTPHeaderField: "apikey")
+        var request = authorizedRequest(url: Config.chatFunctionURL, timeout: 20)
         guard let body = try? JSONEncoder().encode(PhotoMessageRequest(
             characterId: character.id.uuidString.lowercased(),
             systemPrompt: character.systemPrompt,
@@ -302,13 +314,7 @@ struct ChatService {
     /// (kind=voice, content=URL). Böylece reload'da METİN değil SES balonu görünür.
     @discardableResult
     func saveVoiceMessage(character: Character, requestText: String, url: String?) async -> Bool {
-        var request = URLRequest(url: Config.chatFunctionURL)
-        request.httpMethod = "POST"
-        request.timeoutInterval = 20
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        let bearer = UserDefaultsManager.shared.accessToken ?? Config.supabaseAnonKey
-        request.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
-        request.setValue(Config.supabaseAnonKey, forHTTPHeaderField: "apikey")
+        var request = authorizedRequest(url: Config.chatFunctionURL, timeout: 20)
         guard let body = try? JSONEncoder().encode(VoiceMessageRequest(
             characterId: character.id.uuidString.lowercased(),
             systemPrompt: character.systemPrompt,
@@ -323,30 +329,13 @@ struct ChatService {
 
     /// Preset karakter: sunucudan geçmiş yükle.
     func loadHistory(character: Character) async throws -> ChatHistory {
-        let resp = try await call(character: character, userMessage: nil)
+        let resp = try await perform(character: character, userMessage: nil)
         let messages = (resp.history ?? [])
             .filter { $0.kind != "image_request" && $0.kind != "voice_request" }
             .map {
                 Message.fromServer(role: $0.role, content: $0.content, kind: $0.kind, createdAt: Date())
             }
         return ChatHistory(messages: messages, level: resp.level ?? 1, xp: resp.xp ?? 0, levelProgress: resp.levelProgress)
-    }
-
-    /// Preset karakter: yeni mesaj gönder.
-    /// `lastMessageAt`: sohbetteki bir önceki mesajın zamanı — sunucu bunu şu anki
-    /// zamanla karşılaştırıp bota doğal bir zaman/boşluk bağlamı verir.
-    func send(character: Character, userMessage: String, level: Int, lastMessageAt: Date? = nil) async throws -> ChatReply {
-        let resp = try await call(character: character, userMessage: userMessage, level: level, lastMessageAt: lastMessageAt)
-        return ChatReply(
-            reply: resp.reply ?? "",
-            replySegments: resp.replySegments?.map { ReplySegment(text: $0.text, delaySeconds: $0.delaySeconds) },
-            level: resp.level ?? level,
-            levelProgress: resp.levelProgress,
-            photoURL: resp.photoUrl.flatMap(URL.init(string:)),
-            wentToSleep: resp.wentToSleep ?? false,
-            tokenBalance: resp.tokenBalance,
-            autoMedia: resp.autoMedia
-        )
     }
 
     /// Kullanıcı karakteri: geçmişi + özeti istemciden gönder; Supabase messages'a yazılmaz.
@@ -368,14 +357,10 @@ struct ChatService {
         nearSleepTime: Bool = false,
         imageRedirected: Bool = false
     ) async throws -> ChatReply {
-        let wireHistory = localMessages
-            .filter { $0.imageURL == nil && $0.localImagePath == nil && !$0.isPending }
-            .suffix(20)
-            .map { WireHistoryMessage(role: $0.role.rawValue, content: $0.content) }
         let resp = try await perform(
             character: character,
             userMessage: userMessage,
-            extra: .localHistory(wireHistory, summary: summary.isEmpty ? nil : summary),
+            extra: .localHistory(wireHistory(from: localMessages), summary: summary.isEmpty ? nil : summary),
             level: level,
             lastMessageAt: lastMessageAt,
             voiceChat: voiceChat,
@@ -384,16 +369,7 @@ struct ChatService {
             nearSleepTime: nearSleepTime,
             imageRedirected: imageRedirected
         )
-        return ChatReply(
-            reply: resp.reply ?? "",
-            replySegments: resp.replySegments?.map { ReplySegment(text: $0.text, delaySeconds: $0.delaySeconds) },
-            level: resp.level ?? level,
-            levelProgress: resp.levelProgress,
-            photoURL: resp.photoUrl.flatMap(URL.init(string:)),
-            wentToSleep: resp.wentToSleep ?? false,
-            tokenBalance: resp.tokenBalance,
-            autoMedia: resp.autoMedia
-        )
+        return chatReply(from: resp, fallbackLevel: level)
     }
 
     /// Kullanıcının BOTA gönderdiği fotoğraf — Grok'a vision girişi olarak
@@ -412,31 +388,18 @@ struct ChatService {
         currentActivity: String? = nil,
         nearSleepTime: Bool = false
     ) async throws -> ChatReply {
-        let wireHistory = localMessages
-            .filter { $0.imageURL == nil && $0.localImagePath == nil && !$0.isPending }
-            .suffix(20)
-            .map { WireHistoryMessage(role: $0.role.rawValue, content: $0.content) }
         let wireCaption = userCaption.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? " " : userCaption
         let resp = try await perform(
             character: character,
             userMessage: wireCaption,
-            extra: .localHistory(wireHistory, summary: summary.isEmpty ? nil : summary),
+            extra: .localHistory(wireHistory(from: localMessages), summary: summary.isEmpty ? nil : summary),
             level: level,
             lastMessageAt: lastMessageAt,
             currentActivity: currentActivity,
             nearSleepTime: nearSleepTime,
             userImageBase64: base64Image
         )
-        return ChatReply(
-            reply: resp.reply ?? "",
-            replySegments: resp.replySegments?.map { ReplySegment(text: $0.text, delaySeconds: $0.delaySeconds) },
-            level: resp.level ?? level,
-            levelProgress: resp.levelProgress,
-            photoURL: resp.photoUrl.flatMap(URL.init(string:)),
-            wentToSleep: resp.wentToSleep ?? false,
-            tokenBalance: resp.tokenBalance,
-            autoMedia: resp.autoMedia
-        )
+        return chatReply(from: resp, fallbackLevel: level)
     }
 
     private struct ChatImageRequest: Codable {
@@ -474,15 +437,11 @@ struct ChatService {
     /// çalışıyorum") görsel üretim promptuna taşımak için, `sendWithLocalHistory`
     /// ile aynı amaçla gönderilir.
     func generateChatImage(character: Character, prompt: String, localMessages: [Message], summary: String, currentActivity: String? = nil) async throws -> ChatImageResult {
-        let wireHistory = localMessages
-            .filter { $0.imageURL == nil && $0.localImagePath == nil && !$0.isPending }
-            .suffix(20)
-            .map { WireHistoryMessage(role: $0.role.rawValue, content: $0.content) }
         let bodyData = try JSONEncoder().encode(
             ChatImageRequest(
                 characterId: character.id.uuidString.lowercased(),
                 prompt: prompt,
-                history: wireHistory,
+                history: wireHistory(from: localMessages),
                 summary: summary.isEmpty ? nil : summary,
                 currentActivity: currentActivity
             )
@@ -515,14 +474,10 @@ struct ChatService {
         level: Int,
         photoURL: URL
     ) async throws -> String? {
-        let wireHistory = localMessages
-            .filter { $0.imageURL == nil && $0.localImagePath == nil && !$0.isPending }
-            .suffix(20)
-            .map { WireHistoryMessage(role: $0.role.rawValue, content: $0.content) }
         let resp = try await perform(
             character: character,
             userMessage: nil,
-            extra: .photoDownloadReaction(wireHistory, summary: summary.isEmpty ? nil : summary, photoURL: photoURL.absoluteString),
+            extra: .photoDownloadReaction(wireHistory(from: localMessages), summary: summary.isEmpty ? nil : summary, photoURL: photoURL.absoluteString),
             level: level
         )
         return resp.reply
@@ -542,14 +497,8 @@ struct ChatService {
     /// İlk günlük rutin üretimi — bkz. ChatViewModel.ensureScheduleGenerated,
     /// sadece cihazda hiç kayıtlı rutin yokken çağrılır.
     func generateInitialSchedule(character: Character) async throws -> CharacterSchedule {
-        var request = URLRequest(url: Config.characterScheduleFunctionURL)
-        request.httpMethod = "POST"
         // Rutin üretimi bir LLM çağrısı — 20s bazen yetmez, biraz daha cömert.
-        request.timeoutInterval = 60
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        let bearer = UserDefaultsManager.shared.accessToken ?? Config.supabaseAnonKey
-        request.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
-        request.setValue(Config.supabaseAnonKey, forHTTPHeaderField: "apikey")
+        var request = authorizedRequest(url: Config.characterScheduleFunctionURL, timeout: 60)
         request.httpBody = try JSONEncoder().encode(
             CharacterScheduleRequest(
                 characterId: character.id.uuidString.lowercased(),
@@ -606,12 +555,6 @@ struct ChatService {
         case localHistory([WireHistoryMessage], summary: String?)
         case summarize([WireHistoryMessage], existing: String)
         case photoDownloadReaction([WireHistoryMessage], summary: String?, photoURL: String)
-    }
-
-    private func call(character: Character, userMessage: String?, level: Int? = nil, lastMessageAt: Date? = nil) async throws -> ChatResponse {
-        // 401 kurtar+yeniden-dene artık `perform`/`sendChatRequest` içinde ortak —
-        // burada ayrıca sarmalamaya gerek yok (çift kurtarma olmasın).
-        return try await perform(character: character, userMessage: userMessage, extra: .none, level: level, lastMessageAt: lastMessageAt)
     }
 
     private func perform(
@@ -691,8 +634,8 @@ struct ChatService {
         )
         let bodyData = try JSONEncoder().encode(body)
 
-        // 401 (token süresi doldu) tek seferlik kurtar+yeniden-dene ARTIK burada,
-        // ortak `perform`ta yaşıyor — böylece bunu çağıran TÜM akışlar
+        // 401 (token süresi doldu) tek seferlik kurtar+yeniden-dene ortak
+        // `sendChatRequest`te — böylece buradan geçen TÜM akışlar
         // (sendWithLocalHistory / sendUserPhotoMessage / sendPhotoDownloadReaction /
         // clear / summarize / loadHistory) token yenilemesinden faydalanır, yoksa
         // süre dolduktan sonraki ilk gönderim kullanıcıya "Server error (401)" olarak
@@ -709,18 +652,11 @@ struct ChatService {
 
     /// Ortak POST yürütücü: JSON gövdesini gönderir, 401 gelirse bir kez
     /// `SupabaseAuth.recover()` deneyip isteği TAZE erişim jetonuyla yeniden kurup
-    /// gönderir. Auth başlıklarını ve açık `timeoutInterval`ı tek yerde uygular —
-    /// hem `perform` hem `generateChatImage` bunu kullanır (bkz. fix: 401 sadece
-    /// eski `call()`de vardı, doğrudan `perform` çağıranlar bypass ediyordu).
+    /// gönderir. Hem `perform` hem `generateChatImage` bunu kullanır, böylece
+    /// 401 kurtarması hiçbir akışta atlanmaz.
     private func sendChatRequest(body: Data, url: URL, timeout: TimeInterval) async throws -> (Data, HTTPURLResponse) {
         func attempt() async throws -> (Data, HTTPURLResponse) {
-            var request = URLRequest(url: url)
-            request.httpMethod = "POST"
-            request.timeoutInterval = timeout
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            let bearer = UserDefaultsManager.shared.accessToken ?? Config.supabaseAnonKey
-            request.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
-            request.setValue(Config.supabaseAnonKey, forHTTPHeaderField: "apikey")
+            var request = authorizedRequest(url: url, timeout: timeout)
             request.httpBody = body
             let (data, response) = try await URLSession.shared.data(for: request)
             guard let http = response as? HTTPURLResponse else { throw ChatServiceError.decoding }

@@ -6,6 +6,16 @@
 import Foundation
 
 struct CharacterCreateService {
+    /// `create-character` Edge Function'ına POST isteği kurar (JSON gövde + Supabase
+    /// auth başlıkları). Gövde serileştirilemezse nil döner. İki çağrı yolu
+    /// (`generateImage` / `create`) bu aynı sekiz satırı tekrarlıyordu.
+    private func makeRequest(body: [String: Any]) -> URLRequest? {
+        guard let url = URL(string: "\(Config.supabaseURL)/functions/v1/create-character"),
+              let data = try? JSONSerialization.data(withJSONObject: body) else { return nil }
+        var req = SupabaseRequest.post(url: url, bearer: SupabaseRequest.sessionBearer)
+        req.httpBody = data
+        return req
+    }
 
     /// Görünüm seçimlerinden ("hairstyle" vb. sihirbaz adımları) bir karakter
     /// fotoğrafı üretir — hiçbir DB kaydı OLUŞTURMAZ, sadece geçici bir
@@ -42,16 +52,7 @@ struct CharacterCreateService {
             "ethnicity": ethnicity,
         ]
 
-        guard let url = URL(string: "\(Config.supabaseURL)/functions/v1/create-character"),
-              let data = try? JSONSerialization.data(withJSONObject: body) else { return nil }
-
-        var req = URLRequest(url: url)
-        req.httpMethod = "POST"
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        let bearer = UserDefaultsManager.shared.accessToken ?? Config.supabaseAnonKey
-        req.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
-        req.setValue(Config.supabaseAnonKey, forHTTPHeaderField: "apikey")
-        req.httpBody = data
+        guard let req = makeRequest(body: body) else { return nil }
 
         guard let (respData, resp) = try? await URLSession.shared.data(for: req),
               let http = resp as? HTTPURLResponse,
@@ -136,16 +137,7 @@ struct CharacterCreateService {
             body["interests"] = interests
         }
 
-        guard let url = URL(string: "\(Config.supabaseURL)/functions/v1/create-character"),
-              let data = try? JSONSerialization.data(withJSONObject: body) else { return .networkFailure }
-
-        var req = URLRequest(url: url)
-        req.httpMethod = "POST"
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        let bearer = UserDefaultsManager.shared.accessToken ?? Config.supabaseAnonKey
-        req.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
-        req.setValue(Config.supabaseAnonKey, forHTTPHeaderField: "apikey")
-        req.httpBody = data
+        guard let req = makeRequest(body: body) else { return .networkFailure }
 
         guard let (respData, resp) = try? await URLSession.shared.data(for: req),
               let http = resp as? HTTPURLResponse

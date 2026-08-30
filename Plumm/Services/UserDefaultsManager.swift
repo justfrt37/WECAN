@@ -16,7 +16,6 @@ final class UserDefaultsManager {
         static let userId = "auth.userId"
         static let accessToken = "auth.accessToken"
         static let refreshToken = "auth.refreshToken"
-        static let skipMeetConfirm = "feed.skipMeetConfirm"
     }
 
     // userId/accessToken/refreshToken used to live in UserDefaults, which is
@@ -55,13 +54,6 @@ final class UserDefaultsManager {
         Keychain.write(key, legacy)
         defaults.removeObject(forKey: key)
         return legacy
-    }
-
-    /// Kullanıcı "bir daha gösterme" kutucuğunu işaretlediyse, Keşfet'te beğenince
-    /// artık "tanışmak ister misin?" onayı sorulmaz.
-    var skipMeetConfirm: Bool {
-        get { defaults.bool(forKey: Keys.skipMeetConfirm) }
-        set { defaults.set(newValue, forKey: Keys.skipMeetConfirm) }
     }
 }
 

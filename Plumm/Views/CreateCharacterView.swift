@@ -37,10 +37,9 @@ private let roleOptions: [RoleOption] = [
 // MARK: - Personality definitions (role + vibe merged into one pick)
 //
 // "Select Mood" step used to be two separate steps (role, then vibe) — the
-// role step was never actually wired into the wizard (dead `roleStep` var,
-// `selectedRole` silently stayed at its "flirty" default). Merging them into
-// one curated set fixes that gap and drops incoherent role/vibe pairings
-// (e.g. Distant+Energetic). `role`/`vibe` still map 1:1 to the existing
+// role step was never wired into the wizard, so `selectedRole` silently stayed
+// at its "flirty" default. Merging them into one curated set fixes that gap and
+// drops incoherent role/vibe pairings (e.g. Distant+Energetic). `role`/`vibe` still map 1:1 to the existing
 // `personality_role`/`builder_selections.vibe` fields — no backend change.
 // `ex` keeps its existing single-role behavior (no vibe pairing, same as
 // before), just borrowing one of the 4 existing vibe photos below so its
@@ -408,56 +407,6 @@ struct CreateCharacterView: View {
                 .autocorrectionDisabled()
         }
         .padding(.top, 12)
-    }
-
-    // MARK: Step 1 — Role
-
-    private var roleStep: some View {
-        LazyVGrid(columns: columns2, spacing: 12) {
-            ForEach(roleOptions) { role in
-                let selected = selectedRole == role.id
-                Button { selectedRole = role.id } label: {
-                    VStack(spacing: 8) {
-                        Text(role.emoji)
-                            .font(.system(size: 30))
-                        Text(role.label)
-                            .font(.system(size: 15, weight: .bold))
-                            .foregroundStyle(.white)
-                        Text(role.description)
-                            .font(.system(size: 12))
-                            .foregroundStyle(.white.opacity(0.6))
-                            .multilineTextAlignment(.center)
-                            .lineLimit(2)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    .padding(.vertical, 16)
-                    .padding(.horizontal, 10)
-                    .frame(maxWidth: .infinity)
-                    .background(
-                        LinearGradient(
-                            colors: selected
-                                ? [AppColor.pink.opacity(0.45), AppColor.amber.opacity(0.45)]
-                                : [Color.white.opacity(0.06), Color.white.opacity(0.06)],
-                            startPoint: .topLeading, endPoint: .bottomTrailing),
-                        in: RoundedRectangle(cornerRadius: 18)
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 18)
-                            .strokeBorder(selected ? AppColor.pink : .white.opacity(0.1),
-                                          lineWidth: selected ? 2 : 1)
-                    )
-                    .overlay(alignment: .topTrailing) {
-                        if selected {
-                            Image(systemName: "checkmark.circle.fill")
-                                .font(.system(size: 18))
-                                .foregroundStyle(AppColor.pink)
-                                .padding(8)
-                        }
-                    }
-                }
-                .buttonStyle(.plain)
-            }
-        }
     }
 
     // MARK: Step 4 — Mood (personality: role + vibe merged)
@@ -1171,9 +1120,6 @@ struct CreateCharacterView: View {
         }
     }
 
-    // Tüm altyazılar kaldırıldı — sade başlık.
-    private var stepSubtitle: String { "" }
-
     private var stepIsValid: Bool {
         switch stepIndex {
         case 0: return !selectedCategory.isEmpty
@@ -1248,13 +1194,13 @@ struct CreateCharacterView: View {
             // bu da photo_url/avatar_url NULL bir karakteri (dummy vibe fotosu
             // arkasında gizli) 50 coin karşılığında yaratıyordu (bkz. Astra
             // vakası — üretim başarısız oldu ama karakter yine de oluştu).
-            if generatedPhotoURL == nil {
+            guard let photoURLString = generatedPhotoURL else {
                 generating = false
                 photoGenError = photoGenError ?? String(localized: "Couldn't generate your character's photo. Please try again.")
                 return
             }
             // Gerçek fotoğrafı ÖNCEDEN indir ki reveal anında dummy flaşlamasın.
-            if let urlStr = generatedPhotoURL, let url = URL(string: urlStr) {
+            if let url = URL(string: photoURLString) {
                 var req = URLRequest(url: url)
                 req.timeoutInterval = 20
                 if let (data, _) = try? await URLSession.shared.data(for: req) {
