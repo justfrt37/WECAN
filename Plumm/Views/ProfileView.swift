@@ -21,8 +21,6 @@ struct ProfileView: View {
     @State private var notificationsOn = false
     /// uid kopyalandı → ikon kısa süre ✓ olur (bkz. avatarCard).
     @State private var didCopyUID = false
-    @State private var showPaywall = false
-    private var purchases: PurchaseService { PurchaseService.shared }
 
     // TODO: gerçek URL'lerle değiştir (App Store / gizlilik / koşullar).
     private let shareURL = URL(string: "https://apps.apple.com/app/id0000000000")!
@@ -34,9 +32,11 @@ struct ProfileView: View {
             header
             ScrollView {
                 VStack(spacing: 14) {
-                    avatarCard
-                    membershipCard
+                    // Sayfa yalnızca ayarlardan ibaret: avatar kartı (kişi
+                    // ikonu + "Guest User") ve üyelik kartı kaldırıldı, geriye
+                    // kalan tek bilgi olan UID en altta (bkz. kullanıcı talebi).
                     settingsSection
+                    userIdFooter
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 4)
@@ -50,69 +50,21 @@ struct ProfileView: View {
                 .ignoresSafeArea()
         )
         .task { notificationsOn = await currentNotificationStatus() }
-        .fullScreenCover(isPresented: $showPaywall) { OnboardingPaywallView() }
     }
 
-    // MARK: Üyelik
-
-    /// PRO rozeti/CTA'sı artık SADECE burada görünür — eskiden her sekmede
-    /// (Discover/Chat/Explore/Likes) global bir buton olarak nag ediyordu
-    /// (bkz. MainTabView, ChatView, kullanıcı talebi). PRO değilse dokununca
-    /// paywall açılır; PRO ise sadece durum gösterir, tıklanamaz.
-    private var membershipCard: some View {
-        Group {
-            if purchases.isPro {
-                HStack(spacing: 12) {
-                    Image(systemName: "crown.fill")
-                        .font(.system(size: 18, weight: .bold))
-                        .foregroundStyle(Color(hex: 0xFFB938))
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("\(purchases.tier.displayName) Member")
-                            .font(.system(size: 15, weight: .bold))
-                            .foregroundStyle(.white)
-                        Text("Thanks for supporting Plumm")
-                            .font(.system(size: 12))
-                            .foregroundStyle(.white.opacity(0.6))
-                    }
-                    Spacer()
-                }
-                .padding(16)
-                .background(AppColor.card, in: RoundedRectangle(cornerRadius: cardRadius, style: .continuous))
-            } else {
-                Button { showPaywall = true } label: {
-                    HStack(spacing: 12) {
-                        Image(systemName: "crown.fill")
-                            .font(.system(size: 18, weight: .bold))
-                            .foregroundStyle(.white)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Get PRO")
-                                .font(.system(size: 15, weight: .bold))
-                                .foregroundStyle(.white)
-                            Text("Unlock more characters, voice & more")
-                                .font(.system(size: 12))
-                                .foregroundStyle(.white.opacity(0.85))
-                        }
-                        Spacer()
-                        Image(systemName: "chevron.right")
-                            .foregroundStyle(.white.opacity(0.7))
-                    }
-                    .padding(16)
-                    .background(
-                        LinearGradient(colors: [Color(hex: 0xFFAF5C), Color(hex: 0xFF6F61)],
-                                       startPoint: .leading, endPoint: .trailing),
-                        in: RoundedRectangle(cornerRadius: cardRadius, style: .continuous)
-                    )
-                }
-                .buttonStyle(.plain)
-            }
-        }
-    }
+    // MARK: Üyelik — KALDIRILDI
+    //
+    // `membershipCard` tamamen silindi: PRO değilken turuncu "Get PRO" CTA'sı,
+    // PRO'yken de "Max Member" durum kartı gösteriyordu. İkisi de istenmedi —
+    // bu sayfada üyelikle ilgili hiçbir şey yazmıyor (bkz. kullanıcı talebi).
+    // Dönüşüm yolu her sekmenin sağ üstündeki PRO butonu (bkz. MainTabView).
 
     // MARK: Başlık
 
      private var header: some View {
         HStack {
-            Text("Profile")
+            // Sayfa başlığı sekmeyle aynı: "Settings" (bkz. MainTab.titleKey).
+            Text("Settings")
                 .font(.system(size: 22, weight: .bold))
                 .foregroundStyle(.white)
             Spacer()
@@ -123,24 +75,12 @@ struct ProfileView: View {
 
     // MARK: Avatar (kimlik bölümü minimal — gerçek kullanıcı verisi yok)
 
-    private var avatarCard: some View {
-        VStack(spacing: 10) {
-            ZStack {
-                Circle()
-                    .fill(LinearGradient(colors: [AppColor.pink, AppColor.amber],
-                                         startPoint: .topLeading, endPoint: .bottomTrailing))
-                    .frame(width: 88, height: 88)
-                Image(systemName: "person.fill")
-                    .font(.system(size: 38))
-                    .foregroundStyle(.white)
-                    .frame(width: 80, height: 80)
-                    .background(AppColor.card, in: Circle())
-            }
-            Text("Guest User")
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.7))
-            // TEMP TESTING (2026-07-12) — Supabase auth UID'sini gösterir
-            // (DB satırlarıyla eşleştirme için). Dokununca kopyalar.
+    /// TEMP TESTING (2026-07-12) — Supabase auth UID'si (DB satırlarıyla
+    /// eşleştirmek için). Dokununca kopyalar. Eskiden sayfanın TEPESİNDEki
+    /// avatar kartındaydı; o kart (kişi ikonu + "Guest User") kaldırılınca
+    /// buraya, en alta taşındı (bkz. kullanıcı talebi).
+    private var userIdFooter: some View {
+        Group {
             if let uid = UserDefaultsManager.shared.userId {
                 Button {
                     UIPasteboard.general.string = uid
@@ -162,47 +102,37 @@ struct ProfileView: View {
                 .buttonStyle(.plain)
             }
         }
-        .padding(.vertical, 24)
+        // Kart değil, sade bir alt bilgi: eskiden avatar kartının içindeydi ve
+        // o kartın gradient/çerçevesini paylaşıyordu. Sayfanın en altında bir
+        // teşhis satırı olarak durması yeterli, dikkat çekmesi gerekmiyor.
+        .padding(.top, 10)
         .frame(maxWidth: .infinity)
-        .background(
-            LinearGradient(colors: [AppColor.bg2, AppColor.card],
-                           startPoint: .topLeading, endPoint: .bottomTrailing),
-            in: RoundedRectangle(cornerRadius: 24)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 24).strokeBorder(.white.opacity(0.08), lineWidth: 1)
-        )
     }
 
     // MARK: Ayarlar bölümü (inline)
 
     private var settingsSection: some View {
         VStack(spacing: 14) {
-            HStack {
-                Text("Settings")
-                    .font(.system(size: 15, weight: .bold))
-                    .foregroundStyle(.white.opacity(0.55))
-                Spacer()
-            }
-            .padding(.top, 6)
-
+            // Bölüm etiketi kaldırıldı: sayfa başlığı zaten "Settings",
+            // hemen altında ikinci kez tekrar ediyordu. Etiket gidince ilk
+            // kart başlığa fazla yaklaştı — 7pt nefes payı (bkz. kullanıcı talebi).
             notificationsCard
+                .padding(.top, 7)
 
             ShareLink(item: shareURL) {
-                row("Share a Friend", trailingIcon: "square.and.arrow.up")
+                row("Share a Friend")
             }
             .buttonStyle(.plain)
 
             Button { requestReview() } label: {
                 HStack {
-                    Text("Rate Us")
+                    // verbatim: bkz. notificationsCard'daki not.
+                    // Altın yıldız da kaldırıldı — diğer satırlardaki ikonlarla
+                    // birlikte (bkz. kullanıcı talebi).
+                    Text(verbatim: "Rate Us")
                         .font(.system(size: 16, weight: .medium))
                         .foregroundStyle(.white)
                     Spacer()
-                    // Tek altın yıldız (bkz. kullanıcı talebi).
-                    Image(systemName: "star.fill")
-                        .font(.system(size: 16))
-                        .foregroundStyle(Color(hex: 0xFFC24B))
                 }
                 .padding(.horizontal, 20)
                 .frame(height: 66)
@@ -213,19 +143,19 @@ struct ProfileView: View {
             .buttonStyle(.plain)
 
             Button { openURL(supportMailURL) } label: {
-                row("Help & Support", trailingIcon: "envelope.fill")
+                row("Help & Support")
             }
             .buttonStyle(.plain)
 
             // Yasal metinler — dış tarayıcıda plummai.com'a açılır (App Store
             // Connect'teki Privacy/Terms URL'leriyle aynı, artık in-app sheet yok).
             Button { openURL(Config.privacyURL) } label: {
-                row("Privacy Policy", trailingIcon: "lock.shield.fill")
+                row("Privacy Policy")
             }
             .buttonStyle(.plain)
 
             Button { openURL(Config.termsURL) } label: {
-                row("Terms of Use", trailingIcon: "doc.text.fill")
+                row("Terms of Use")
             }
             .buttonStyle(.plain)
         }
@@ -233,7 +163,9 @@ struct ProfileView: View {
 
     private var notificationsCard: some View {
         HStack(spacing: 12) {
-            Text("Notifications")
+            // verbatim: cihaz dili Türkçeyken katalog bunu "Bildirimler" yapıyordu;
+            // bu iki satırın İngilizce kalması istendi (bkz. kullanıcı talebi).
+            Text(verbatim: "Notifications")
                 .font(.system(size: 16, weight: .medium))
                 .foregroundStyle(.white)
             Spacer()
@@ -252,17 +184,15 @@ struct ProfileView: View {
         .overlay(RoundedRectangle(cornerRadius: cardRadius).strokeBorder(.white.opacity(0.10), lineWidth: 1))
     }
 
-    private func row(_ title: String, trailingIcon: String? = nil, trailingTint: Color = .white.opacity(0.8)) -> some View {
+    /// Ayar satırı — sağdaki ikonlar kaldırıldı (bkz. kullanıcı talebi),
+    /// geriye yalnızca metin kalıyor. `Spacer()` duruyor ki satır tam
+    /// genişlikte kalsın ve dokunma hedefi daralmasın.
+    private func row(_ title: String) -> some View {
         HStack {
             Text(title)
                 .font(.system(size: 16, weight: .medium))
                 .foregroundStyle(.white)
             Spacer()
-            if let trailingIcon {
-                Image(systemName: trailingIcon)
-                    .font(.system(size: 16))
-                    .foregroundStyle(trailingTint)
-            }
         }
         .padding(.horizontal, 20)
         .frame(height: 66)

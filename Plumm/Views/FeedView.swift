@@ -25,10 +25,19 @@ struct FeedView: View {
     private func computeDeck() -> [Character] {
         // Yalnızca backend'den gelen (store.characters) karakterler — sahte/dummy
         // feed kaldırıldı (bkz. kullanıcı talebi: "backende ne geliyorsa onu göster").
-        store.characters.filter {
-            !BlockedCharactersStore.isBlocked($0.id) &&
-            !PassedCharactersStore.isPassed($0.id)
+        let available = store.characters.filter { !BlockedCharactersStore.isBlocked($0.id) }
+        let unseen = available.filter { !PassedCharactersStore.isPassed($0.id) }
+        // Discover ASLA "hepsini tanıdın" ekranına düşmemeli: tüm kızlar
+        // görüldüyse "nope" geçmişi sıfırlanır ve deste baştan başlar
+        // (bkz. kullanıcı talebi). `available` boşken sıfırlamıyoruz — o
+        // durumda gerçekten gösterilecek karakter yok (hepsi engelli ya da
+        // store henüz yüklenmedi) ve sıfırlamak sonsuz döngü olurdu; emptyState
+        // yalnızca o gerçek boşluk için kalıyor.
+        if unseen.isEmpty && !available.isEmpty {
+            PassedCharactersStore.clear()
+            return available
         }
+        return unseen
     }
 
     /// Desteyi yeniden hesaplar ve `currentIndex`'i sınırlar. Kaydırma sonrası

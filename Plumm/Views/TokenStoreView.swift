@@ -20,6 +20,17 @@ struct TokenStoreView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var purchases = PurchaseService.shared
     @State private var purchasingId: String?
+    /// Satın alma sonucu — başarı da hata da kullanıcıya GÖSTERİLİYOR.
+    /// Eskiden sonuç sessizce yutuluyordu: hata durumunda ekran hiçbir şey
+    /// demeden eski hâline dönüyordu (bkz. kullanıcı talebi).
+    @State private var resultMessage: PurchaseAlert?
+
+    private struct PurchaseAlert: Identifiable {
+        let id = UUID()
+        let title: String
+        let message: String
+        let isError: Bool
+    }
 
     private let columns = [
         GridItem(.flexible(), spacing: 14),
@@ -67,6 +78,46 @@ struct TokenStoreView: View {
                     .scrollIndicators(.hidden)
                 }
             }
+
+            // Satın alma sürerken TÜM ekranı kapatan karartma + spinner.
+            // Neden gerekli: satın alma App Store onayından sonra bitmiyor —
+            // ardından sunucu doğrulaması geliyor (purchase-tokens: RC'yi
+            // secret key ile kontrol eder, token'ı yazar, güncel bakiyeyi
+            // döner) ve bu birkaç saniye sürebiliyor. O aralıkta ekran
+            // dokunulabilir kalıyordu: kullanıcı token'ı henüz gelmemişken
+            // eski bakiyeyi görüyor, başka bir pakete basabiliyor ya da
+            // mağazayı kapatabiliyordu (bkz. kullanıcı talebi).
+            //
+            // `allowsHitTesting` yerine dokunuşları katmanın KENDİSİ yutuyor
+            // (contentShape + üstte olması), böylece arkadaki kartların
+            // basılma ihtimali kalmıyor.
+            if purchasingId != nil {
+                Color.black.opacity(0.55)
+                    .ignoresSafeArea()
+                    .contentShape(Rectangle())
+                    .onTapGesture { }          // dokunuşları yut
+                    .overlay {
+                        VStack(spacing: 14) {
+                            ProgressView()
+                                .controlSize(.large)
+                                .tint(.white)
+                            Text("Completing your purchase…")
+                                .font(.system(size: 14, weight: .medium))
+                                .foregroundStyle(.white.opacity(0.9))
+                        }
+                    }
+                    .transition(.opacity)
+            }
+        }
+        .animation(.easeInOut(duration: 0.2), value: purchasingId)
+        .alert(item: $resultMessage) { alert in
+            Alert(
+                title: Text(alert.title),
+                message: Text(alert.message),
+                // Başarıda mağazayı kapat (kullanıcı işini bitirdi), hatada
+                // açık bırak ki tekrar deneyebilsin.
+                dismissButton: .default(Text("OK")) { if !alert.isError { dismiss() } }
+            )
         }
         .task {
             if purchases.tokenPackages.isEmpty { await purchases.loadOfferings() }
@@ -185,10 +236,40 @@ struct TokenStoreView: View {
         guard purchasingId == nil else { return }
         Task {
             purchasingId = pack.id
-            let ok = await purchases.purchase(pack)
-            if ok { await tokenStore.refresh() }
+            let outcome = await purchases.purchaseDetailed(pack)
             purchasingId = nil
-            if ok { dismiss() }
+
+            switch outcome {
+            case .success(let granted):
+                // Bakiyeyi sunucu zaten yazdı (purchase-tokens yanıtı), bu
+                // yalnızca son bir doğrulama.
+                await tokenStore.refresh()
+                resultMessage = PurchaseAlert(
+                    title: String(localized: "Purchase complete"),
+                    message: granted > 0
+                        ? String(localized: "\(granted.formatted()) tokens added to your balance.")
+                        : String(localized: "Your purchase was successful."),
+                    isError: false
+                )
+            case .cancelled:
+                // Kullanıcının kendi kapattığı diyalog hata değil — sessiz geç.
+                break
+            case .failed(let reason):
+                resultMessage = PurchaseAlert(
+                    title: String(localized: "Purchase failed"),
+                    message: reason,
+                    isError: true
+                )
+            case .paidButNotGranted:
+                // En kritik durum: para gitti, token yazılamadı. Kullanıcı
+                // bunu MUTLAKA görmeli ve ne yapacağını bilmeli.
+                await tokenStore.refresh()
+                resultMessage = PurchaseAlert(
+                    title: String(localized: "Couldn't add your tokens"),
+                    message: String(localized: "Your payment went through, but we couldn't add the tokens. Check your connection and tap Restore Purchases — nothing is lost."),
+                    isError: true
+                )
+            }
         }
     }
 

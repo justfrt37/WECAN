@@ -40,8 +40,6 @@ struct OnboardingPaywallView: View {
     /// Zaten Pro/Pro+/Max sahibi biri paywall'ı tekrar açarsa (bkz. kullanıcı
     /// talebi) kendi planını ya da daha düşüğünü göstermek yerine SADECE daha
     /// yüksek tier'lar + en sağda "Buy Tokens" seçeneği gösterilir.
-    @State private var buyTokensSelected = false
-    @State private var showTokenStore = false
 
     /// Hangi gate bu paywall'ı açtırdıysa o tier ön-seçili gelsin (ör. voice
     /// gate → Pro+) — yoksa zaten Pro sahibi biri voice engellenince kendi
@@ -55,24 +53,28 @@ struct OnboardingPaywallView: View {
         (.pro, "Pro"), (.proPlus, "Pro+"), (.max, "Pro Max"),
     ]
 
+    /// `case buyTokens` kaldırıldı — bu ekranda artık yalnızca kullanıcının
+    /// henüz sahip OLMADIĞI tier'lar gösteriliyor (bkz. visibleSlots).
     private enum PaywallSlot: Hashable {
         case tier(SubscriptionTier)
-        case buyTokens
     }
 
-    /// Ücretsiz kullanıcı üç tier'ı da görür (mevcut davranış, değişmedi).
-    /// Zaten abone biri (Pro/Pro+/Max) için: kendi tier'ı ve altındakiler
-    /// listeden düşer, en sağa "Buy Tokens" eklenir — bkz. kullanıcı talebi.
+    /// Ücretsiz kullanıcı üç tier'ı da görür. Zaten abone biri (Pro/Pro+/Max)
+    /// için kendi tier'ı ve altındakiler listeden düşer — yalnızca HENÜZ
+    /// ALMADIĞI üst tier'lar kalır.
+    ///
+    /// "Buy Tokens" slotu KALDIRILDI (bkz. kullanıcı talebi): bu ekran kilitli
+    /// bir özelliği açmak için çıkıyor ve token satın almak o özelliği açmıyor —
+    /// kullanıcıyı asıl eylemden (yükseltme) uzaklaştıran bir seçenekti.
+    /// Token satın alma yeri Store (TokenStoreView).
     private var visibleSlots: [(slot: PaywallSlot, label: String)] {
         let current = purchases.tier
         guard current != .none else {
             return tiers.map { (.tier($0.tier), $0.label) }
         }
-        var slots = tiers
+        return tiers
             .filter { $0.tier.rank > current.rank }
             .map { (PaywallSlot.tier($0.tier), $0.label) }
-        slots.append((.buyTokens, String(localized: "Buy Tokens")))
-        return slots
     }
 
     private var packages: [PaywallPackage] { purchases.packages(for: selectedTier) }
@@ -199,12 +201,10 @@ struct OnboardingPaywallView: View {
             guard current != .none, selectedTier.rank <= current.rank else { return }
             if case let .tier(t)? = visibleSlots.first?.slot {
                 selectedTier = t
-            } else {
-                buyTokensSelected = true
             }
-        }
-        .fullScreenCover(isPresented: $showTokenStore) {
-            TokenStoreView(tokenStore: tokenStore)
+            // Max sahibi kullanıcıda visibleSlots BOŞ olabilir (yükseltecek
+            // tier yok). O durumda seçim olduğu gibi kalır; ekranı zaten
+            // yükseltme gerektiren bir gate açmadıysa görmez.
         }
         .task {
             try? await Task.sleep(nanoseconds: 2_000_000_000)
@@ -237,10 +237,8 @@ struct OnboardingPaywallView: View {
 
     private var content: some View {
         VStack(spacing: 14) {
-            if buyTokensSelected {
-                buyTokensPrompt
-            } else {
-                // Özellikler (tik'li) — tier seçicinin ÜSTÜNDE.
+            // Özellikler (tik'li) — tier seçicinin ÜSTÜNDE.
+            Group {
                 VStack(alignment: .leading, spacing: 8) {
                     ForEach(features(for: selectedTier), id: \.self) { f in
                         HStack(spacing: 10) {
@@ -259,9 +257,7 @@ struct OnboardingPaywallView: View {
 
             tierSelector
 
-            if buyTokensSelected {
-                EmptyView()
-            } else if packages.isEmpty {
+            if packages.isEmpty {
                 // isLoadingOfferings false + hâlâ boş = RC offering'leri yüklenemedi
                 // (StoreKit sandbox yok vb.) — sonsuz spinner yerine geri bildirim
                 // göster (bkz. QA notu 2026-08-26).
@@ -284,12 +280,12 @@ struct OnboardingPaywallView: View {
                 }
             }
 
-            Button { buyTokensSelected ? (showTokenStore = true) : unlock() } label: {
+            Button { unlock() } label: {
                 Group {
                     if isPurchasing {
                         ProgressView().tint(.white)
                     } else {
-                        Text(buyTokensSelected ? "Buy Tokens" : "Continue")
+                        Text("Continue")
                             .font(.system(size: 25, weight: .heavy))
                     }
                 }
@@ -305,22 +301,6 @@ struct OnboardingPaywallView: View {
         .padding(.bottom, 15)   // buton yere daha yakın olsun (5px daha yukarı)
     }
 
-    /// "Buy Tokens" slot'u seçiliyken özellik listesinin yerini alan kısa
-    /// upsell metni — zaten abone birine aynı planı tekrar satmak yerine.
-    private var buyTokensPrompt: some View {
-        VStack(spacing: 10) {
-            Image(systemName: "bolt.heart.fill")
-                .font(.system(size: 34))
-                .foregroundStyle(Color(hex: 0x34D399))
-            Text("Need more coins right now? Top up anytime without changing your plan.")
-                .font(.system(size: 17, weight: .semibold))
-                .foregroundStyle(.white)
-                .multilineTextAlignment(.center)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.horizontal, OBTheme.screenPadding)
-        .padding(.vertical, 30)
-    }
 
     /// Üstteki yatay tier seçici — normalde Pro / Pro+ / Pro Max; zaten abone
     /// biri için sadece daha yüksek tier'lar + en sağda "Buy Tokens" (bkz.
@@ -330,16 +310,12 @@ struct OnboardingPaywallView: View {
             ForEach(visibleSlots, id: \.slot) { item in
                 let selected: Bool = {
                     switch item.slot {
-                    case .buyTokens: return buyTokensSelected
-                    case .tier(let t): return !buyTokensSelected && t == selectedTier
+                    case .tier(let t): return t == selectedTier
                     }
                 }()
                 Button {
                     switch item.slot {
-                    case .buyTokens:
-                        buyTokensSelected = true
                     case .tier(let t):
-                        buyTokensSelected = false
                         selectedTier = t
                         selectedPackageID = nil   // yeni tier → varsayılan (yıllık)
                     }
