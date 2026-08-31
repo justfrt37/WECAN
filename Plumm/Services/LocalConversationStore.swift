@@ -66,11 +66,18 @@ final class LocalConversationStore {
         var jealousyStage: Int = 0
         var jealousySentAt: Date?
         var jealousyMoodTurnsLeft: Int = 0
+        /// Pro+/Max nickname'ler (bkz. set-nickname edge function) — sunucu
+        /// tek doğru kaynak. `characterNickname` doluyken UI karakterin gerçek
+        /// adı yerine bunu gösterir (bkz. ChatView header, chat list satırı);
+        /// `userNickname` chat/index.ts'nin sistem promptuna girer.
+        var characterNickname: String?
+        var userNickname: String?
 
         enum CodingKeys: String, CodingKey {
             case messages, xp, level, summary, summarizedCount, msgCounter, levelProgress,
                  detectedLanguage, schedule, wokenUpAt, manualSleepAt, ghostedAt,
-                 jealousyStage, jealousySentAt, jealousyMoodTurnsLeft
+                 jealousyStage, jealousySentAt, jealousyMoodTurnsLeft,
+                 characterNickname, userNickname
         }
 
         init(
@@ -78,7 +85,7 @@ final class LocalConversationStore {
             msgCounter: Int = 0, levelProgress: Double = 0, detectedLanguage: String? = nil,
             schedule: CharacterSchedule? = nil, wokenUpAt: Date? = nil, manualSleepAt: Date? = nil,
             ghostedAt: Date? = nil, jealousyStage: Int = 0, jealousySentAt: Date? = nil,
-            jealousyMoodTurnsLeft: Int = 0
+            jealousyMoodTurnsLeft: Int = 0, characterNickname: String? = nil, userNickname: String? = nil
         ) {
             self.messages = messages
             self.xp = xp
@@ -95,6 +102,8 @@ final class LocalConversationStore {
             self.jealousyStage = jealousyStage
             self.jealousySentAt = jealousySentAt
             self.jealousyMoodTurnsLeft = jealousyMoodTurnsLeft
+            self.characterNickname = characterNickname
+            self.userNickname = userNickname
         }
 
         init(from decoder: Decoder) throws {
@@ -115,6 +124,8 @@ final class LocalConversationStore {
             jealousyStage = (try? c.decode(Int.self, forKey: .jealousyStage)) ?? 0
             jealousySentAt = try? c.decodeIfPresent(Date.self, forKey: .jealousySentAt)
             jealousyMoodTurnsLeft = (try? c.decode(Int.self, forKey: .jealousyMoodTurnsLeft)) ?? 0
+            characterNickname = try? c.decodeIfPresent(String.self, forKey: .characterNickname)
+            userNickname = try? c.decodeIfPresent(String.self, forKey: .userNickname)
         }
 
         func encode(to encoder: Encoder) throws {
@@ -134,6 +145,8 @@ final class LocalConversationStore {
             try c.encode(jealousyStage, forKey: .jealousyStage)
             try c.encodeIfPresent(jealousySentAt, forKey: .jealousySentAt)
             try c.encode(jealousyMoodTurnsLeft, forKey: .jealousyMoodTurnsLeft)
+            try c.encodeIfPresent(characterNickname, forKey: .characterNickname)
+            try c.encodeIfPresent(userNickname, forKey: .userNickname)
         }
     }
 

@@ -34,6 +34,15 @@ export function canUseVoice(tier: Tier): boolean {
   return VOICE_TIERS.includes(tier);
 }
 
+/// Nickname'ler (hem karakteri yeniden adlandırma hem de karakterin
+/// kullanıcıya nasıl hitap edeceği) yalnızca pro_plus ve max'te — düz pro
+/// KULLANAMAZ (bkz. kullanıcı talebi 2026-08-31).
+export const NICKNAME_TIERS: Tier[] = ["pro_plus", "max"];
+
+export function canUseNickname(tier: Tier): boolean {
+  return NICKNAME_TIERS.includes(tier);
+}
+
 /// Kullanıcının O AN aktif (dönemi bitmemiş) aboneliği. Yoksa "none".
 export async function activeTier(db: SupabaseClient, uid: string): Promise<Tier> {
   const { data } = await db
@@ -57,6 +66,20 @@ export async function requireVoiceEntitlement(
   if (canUseVoice(tier)) return null;
   return {
     body: { error: "voice_requires_pro_plus", tier, required_tier: "pro_plus" },
+    status: 403,
+  };
+}
+
+/// Nickname fonksiyonlarının (set-nickname) ortak kapısı — requireVoiceEntitlement
+/// ile birebir aynı şekil.
+export async function requireNicknameEntitlement(
+  db: SupabaseClient,
+  uid: string,
+): Promise<{ body: { error: string; tier: Tier; required_tier: string }; status: number } | null> {
+  const tier = await activeTier(db, uid);
+  if (canUseNickname(tier)) return null;
+  return {
+    body: { error: "nickname_requires_pro_plus", tier, required_tier: "pro_plus" },
     status: 403,
   };
 }

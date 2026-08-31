@@ -43,6 +43,12 @@ final class ChatViewModel {
 
     var relationshipStage: String { Relationship.stageName(relationshipLevel, role: character.personalityRole) }
 
+    /// Pro+/Max "Rename" (bkz. set-nickname edge function) — cosmetic only,
+    /// never reaches a prompt. `displayName` is what the UI (chat header,
+    /// chat list row) should actually show instead of `character.name`.
+    var characterNickname: String?
+    var displayName: String { characterNickname ?? character.name }
+
     private let service = ChatService()
     var store: CharacterStore?
     var tokenStore: TokenStore?
@@ -188,6 +194,25 @@ final class ChatViewModel {
         }
     }
 
+    /// Sunucudan her cevapla dönen Pro+/Max nickname'leri (bkz.
+    /// ChatReply.characterNickname/userNickname) yerel önbelleğe yansıtır —
+    /// applyJealousyState ile aynı desende, aynı üç gönderim yolunda çağrılır.
+    private func applyNicknames(from result: ChatReply, fallback stored: LocalConversationStore.Stored?) {
+        var updated = LocalConversationStore.shared.load(for: character.id) ?? stored
+        updated?.characterNickname = result.characterNickname
+        updated?.userNickname = result.userNickname
+        if let updated { LocalConversationStore.shared.save(updated, for: character.id) }
+        characterNickname = result.characterNickname
+    }
+
+    /// Called when the "Rename"/"Nickname for You" sheet dismisses — refreshes
+    /// `displayName` from the (already optimistically-updated, see
+    /// `AddCharacterNoteSheet.save`) local cache without waiting for the next
+    /// chat turn's response.
+    func refreshNicknameFromCache() {
+        characterNickname = LocalConversationStore.shared.load(for: character.id)?.characterNickname
+    }
+
     init(character: Character) {
         self.character = character
         // Seviye/ilerleme İLK KARE'de doğru olsun diye burada okunur: `loadHistory`
@@ -209,6 +234,7 @@ final class ChatViewModel {
         } else {
             self.relationshipLevel = max(1, character.relationshipLevel)
         }
+        self.characterNickname = LocalConversationStore.shared.load(for: character.id)?.characterNickname
     }
 
     private var realAssistantCount: Int {
@@ -463,6 +489,7 @@ final class ChatViewModel {
 
                 if result.wentToSleep { applyWentToSleep(fallback: stored) }
                 applyJealousyState(from: result, fallback: stored)
+                applyNicknames(from: result, fallback: stored)
             } catch {
                 handleSendFailure(error, messageID: userMsg.id, refundsBadge: true)
             }
@@ -594,13 +621,12 @@ final class ChatViewModel {
     /// Gerçek yatma saatine 1 saatten yakın mı (ya da içinde miyiz) — bkz.
     /// chat/index.ts sleepRule/turnContext. Yerel hesaplanır, ağ çağrısı yok.
     ///
-    /// UYKU ÖZELLİĞİ KAPATILDI (kullanıcı talebi 2026-08-26) — kod SİLİNMEDİ,
-    /// sadece devre dışı: her zaman false döner, sunucu da artık BEDTIME
-    /// PROXIMITY/sleepRule enjekte etmiyor (bkz. chat/index.ts). Geri açmak
-    /// için bu guard'ı ve sunucudaki ilgili yorumları kaldırmak yeterli.
+    /// UYKU ÖZELLİĞİ YENİDEN AÇILDI (kullanıcı talebi 2026-08-31 — 2026-08-26'da
+    /// kapatılmıştı). Bu SADECE konuşma-içi uyku anlaşması özelliğini
+    /// (sleepRule/classifySleepAgreement) tetikler — programın kendisi artık
+    /// hiçbir şeyi ENGELLEMEZ (bkz. CharacterSleepState), sadece burada "yatma
+    /// vaktine yakın mı" bilgisi için okunuyor.
     private func isNearSleepTime() -> Bool {
-        let sleepFeatureEnabled = false
-        guard sleepFeatureEnabled else { return false }
         guard let schedule = LocalConversationStore.shared.load(for: character.id)?.schedule else { return false }
         let now = Date()
         if ScheduleLookup.currentBlock(schedule: schedule, date: now)?.isSleep == true { return true }
@@ -669,6 +695,7 @@ final class ChatViewModel {
 
                 if result.wentToSleep { applyWentToSleep(fallback: stored) }
                 applyJealousyState(from: result, fallback: stored)
+                applyNicknames(from: result, fallback: stored)
             } catch {
                 handleSendFailure(error, messageID: userMsg.id, refundsBadge: true)
             }
@@ -728,6 +755,7 @@ final class ChatViewModel {
 
                 if result.wentToSleep { applyWentToSleep(fallback: stored) }
                 applyJealousyState(from: result, fallback: stored)
+                applyNicknames(from: result, fallback: stored)
             } catch {
                 // Foto yolunda rozet önden düşürülmüyor → düzeltme de gerekmez.
                 handleSendFailure(error, messageID: userMsg.id, refundsBadge: false)
@@ -1280,13 +1308,10 @@ final class ChatViewModel {
     /// o predicate'e bağlı kalamaz — aksi halde ikinci mesajdan itibaren hiç
     /// tetiklenmez (bkz. Task 7 review, bu tam olarak o hatanın düzeltmesi).
     private func handleWakeUpIfAsleep() async {
-        // UYKU ÖZELLİĞİ KAPATILDI (kullanıcı talebi 2026-08-26) — kod SİLİNMEDİ,
-        // sadece devre dışı: fonksiyon hiçbir şey yapmadan döner (uyandırma
-        // gecikmesi, "az önce uyandı" durumu, sleepy-goodnight zamanlayıcısı
-        // hiçbiri tetiklenmez). Geri açmak için bu guard'ı kaldırmak yeterli.
-        let sleepFeatureEnabled = false
-        guard sleepFeatureEnabled else { return }
-
+        // UYKU ÖZELLİĞİ YENİDEN AÇILDI (kullanıcı talebi 2026-08-31). Artık
+        // SADECE CharacterSleepState.isEffectivelyAsleep true döndüğünde
+        // (yani manualSleepAt konuşma-içi anlaşmayla set edilmişse) tetiklenir
+        // — program/rutin artık hiçbir zaman tek başına "uyuyor" saydırmaz.
         let stored = LocalConversationStore.shared.load(for: character.id)
 
         if stored?.wokenUpAt != nil {

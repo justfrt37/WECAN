@@ -55,6 +55,17 @@ enum Config {
         URL(string: "\(supabaseURL)/functions/v1/generate")!
     }
 
+    /// Pro+/Max nickname'leri (karakteri yeniden adlandırma / karakterin
+    /// kullanıcıya hitabı) — bkz. AddCharacterNoteSheet, ChatService.setNickname.
+    static var setNicknameFunctionURL: URL {
+        URL(string: "\(supabaseURL)/functions/v1/set-nickname")!
+    }
+
+    /// Token karşılığı anında +1 ilişki seviyesi — bkz. RelationshipLevelsView.
+    static var levelBoostFunctionURL: URL {
+        URL(string: "\(supabaseURL)/functions/v1/level-boost")!
+    }
+
     // MARK: Real-time voice call (bkz. CallService, CallViewModel)
 
     static var voiceCallStartFunctionURL: URL {

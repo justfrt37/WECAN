@@ -14,6 +14,8 @@ struct CharacterProfileView: View {
     @State private var page = 0
     @State private var showPaywall = false
     @State private var showLevels = false
+    @State private var showTokenStore = false
+    @Environment(TokenStore.self) private var tokenStore
     /// Bu kullanıcının bu karakterle olan gerçek seviyesi/ilerlemesi. `character.
     /// relationshipLevel` eski/global bir alan (bkz. gotchas); bunun yerine CANLI
     /// `CharacterStore.levelCache`'ten okunur (chat her mesajda günceller → profil
@@ -108,8 +110,22 @@ struct CharacterProfileView: View {
         }
         // PRO gerektiren her yerde onboarding paywall'ı (alttan fullscreen) açılır.
         .fullScreenCover(isPresented: $showPaywall) { OnboardingPaywallView() }
+        .fullScreenCover(isPresented: $showTokenStore) { TokenStoreView(tokenStore: tokenStore) }
         .sheet(isPresented: $showLevels) {
-            RelationshipLevelsView(currentLevel: userLevel)
+            RelationshipLevelsView(characterId: character.id, currentLevel: userLevel, tokenBalance: tokenStore.balance) { newLevel, newBalance in
+                characterStore?.setLevel(character.id, level: newLevel, progress: 0)
+                if var stored = LocalConversationStore.shared.load(for: character.id) {
+                    stored.level = newLevel
+                    stored.levelProgress = 0
+                    LocalConversationStore.shared.save(stored, for: character.id)
+                }
+                tokenStore.setBalance(newBalance)
+            } onInsufficientTokens: {
+                // ChatViewModel.presentInsufficientTokensPaywall ile aynı mantık:
+                // PRO ise coin mağazası, değilse paywall.
+                if PurchaseService.shared.isPro { showTokenStore = true }
+                else { showPaywall = true }
+            }
         }
         .task { await ImageCache.shared.prefetch(unlockedImages) }
     }

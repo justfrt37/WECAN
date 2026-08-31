@@ -247,7 +247,9 @@ final class CharacterStore {
                 ghostedAt: parseDate(state.ghostedAt),
                 jealousyStage: state.jealousyStage ?? 0,
                 jealousySentAt: parseDate(state.jealousySentAt),
-                jealousyMoodTurnsLeft: state.jealousyMoodTurnsLeft ?? 0
+                jealousyMoodTurnsLeft: state.jealousyMoodTurnsLeft ?? 0,
+                characterNickname: state.characterNickname,
+                userNickname: state.userNickname
             )
             LocalConversationStore.shared.save(stored, for: state.characterID)
         }

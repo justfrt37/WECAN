@@ -132,6 +132,10 @@ private struct ChatResponse: Codable {
     let jealousyStage: Int?
     let jealousySentAt: String?
     let jealousyMoodTurnsLeft: Int?
+    // Pro+/Max nickname'ler (bkz. set-nickname edge function) — sunucu tek
+    // doğru kaynak, her cevapla birlikte gelir.
+    let characterNickname: String?
+    let userNickname: String?
 }
 
 struct ChatHistory {
@@ -162,6 +166,9 @@ struct ChatReply {
     let jealousyStage: Int?
     let jealousySentAt: String?
     let jealousyMoodTurnsLeft: Int?
+    /// bkz. ChatResponse.characterNickname/userNickname.
+    let characterNickname: String?
+    let userNickname: String?
 }
 
 enum ChatServiceError: Error, LocalizedError {
@@ -185,6 +192,30 @@ private struct AddNoteRequest: Codable {
 private struct AddNoteResponse: Codable {
     let ok: Bool?
     let error: String?
+}
+
+private struct SetNicknameRequest: Codable {
+    let characterId: String
+    let kind: String
+    let content: String
+}
+
+private struct LevelBoostRequest: Codable {
+    let characterId: String
+}
+
+private struct LevelBoostResponse: Codable {
+    let level: Int?
+    let levelProgress: Double?
+    let tokenBalance: Int?
+    let error: String?
+}
+
+/// bkz. ChatService.boostLevel.
+struct LevelBoostResult {
+    let level: Int
+    let levelProgress: Double
+    let tokenBalance: Int
 }
 
 struct ChatService {
@@ -218,7 +249,9 @@ struct ChatService {
             autoMedia: resp.autoMedia,
             jealousyStage: resp.jealousyStage,
             jealousySentAt: resp.jealousySentAt,
-            jealousyMoodTurnsLeft: resp.jealousyMoodTurnsLeft
+            jealousyMoodTurnsLeft: resp.jealousyMoodTurnsLeft,
+            characterNickname: resp.characterNickname,
+            userNickname: resp.userNickname
         )
     }
 
@@ -240,6 +273,44 @@ struct ChatService {
         // Server rejected (e.g. Grok flagged the content as injection) — not a network
         // error, just "didn't save". Caller treats this the same as success (silent dismiss).
         return false
+    }
+
+    /// "Rename \(character)" / "Nickname for You" (bkz. set-nickname edge
+    /// function, Pro+/Max only). `kind` is `"character"` or `"user"`; empty
+    /// `content` clears the field. Same silent-fail-on-reject shape as
+    /// `addCharacterNote` — the caller already checked entitlement client-side
+    /// before offering this, so a 403 here is a rare stale-cache edge case,
+    /// not a normal path worth surfacing separately.
+    @discardableResult
+    func setNickname(characterId: UUID, kind: String, content: String) async throws -> Bool {
+        var request = authorizedRequest(url: Config.setNicknameFunctionURL, timeout: 20)
+        request.httpBody = try JSONEncoder().encode(
+            SetNicknameRequest(characterId: characterId.uuidString.lowercased(), kind: kind, content: content)
+        )
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw ChatServiceError.decoding }
+        if (200..<300).contains(http.statusCode) {
+            let decoded = try? JSONDecoder().decode(AddNoteResponse.self, from: data)
+            return decoded?.ok ?? true
+        }
+        return false
+    }
+
+    /// Token karşılığı +1 ilişki seviyesi (bkz. level-boost edge function,
+    /// RelationshipLevelsView). `nil` dönerse (yetersiz bakiye/zaten max
+    /// seviye/ağ hatası) çağıran mevcut coin mağazası/paywall akışını açar —
+    /// bu yüzden throw etmez, sessizce nil döner.
+    func boostLevel(characterId: UUID) async -> LevelBoostResult? {
+        var request = authorizedRequest(url: Config.levelBoostFunctionURL, timeout: 20)
+        request.httpBody = try? JSONEncoder().encode(LevelBoostRequest(characterId: characterId.uuidString.lowercased()))
+
+        guard let (data, response) = try? await URLSession.shared.data(for: request),
+              let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
+              let decoded = try? JSONDecoder().decode(LevelBoostResponse.self, from: data),
+              let level = decoded.level, let progress = decoded.levelProgress, let balance = decoded.tokenBalance
+        else { return nil }
+        return LevelBoostResult(level: level, levelProgress: progress, tokenBalance: balance)
     }
 
     private struct InjectProactivePayload: Codable {

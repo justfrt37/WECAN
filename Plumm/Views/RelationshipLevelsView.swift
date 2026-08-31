@@ -29,13 +29,63 @@ private let relationshipLevels: [RelationshipLevel] = [
 ]
 
 struct RelationshipLevelsView: View {
-    let currentLevel: Int
+    let characterId: UUID
+    /// Token boost'lar sonrası anında güncellenmesi için `@State` — sunucu
+    /// tek doğru kaynak (bkz. level-boost edge function), başarı sonrası
+    /// `onBoosted` çağıranın (CharacterProfileView) kendi kalıcı önbelleklerini
+    /// (levelCache/LocalConversationStore) güncellemesi için de gerekli.
+    @State private var currentLevel: Int
+    @State private var tokenBalance: Int
+    @State private var isBoosting = false
+    let onBoosted: (_ newLevel: Int, _ newBalance: Int) -> Void
+    let onInsufficientTokens: () -> Void
     @Environment(\.dismiss) private var dismiss
+    private let service = ChatService()
+
+    init(characterId: UUID, currentLevel: Int, tokenBalance: Int,
+         onBoosted: @escaping (_ newLevel: Int, _ newBalance: Int) -> Void,
+         onInsufficientTokens: @escaping () -> Void) {
+        self.characterId = characterId
+        self._currentLevel = State(initialValue: currentLevel)
+        self._tokenBalance = State(initialValue: tokenBalance)
+        self.onBoosted = onBoosted
+        self.onInsufficientTokens = onInsufficientTokens
+    }
 
     // Pencil tasarımından birebir tonlar
     private let coral = Color(hex: 0xFF6F61)
     private let gold = Color(hex: 0xFFC24B)
     private let ringBG = Color(hex: 0x1A0B14)
+
+    private static let maxLevel = 10
+    private static func boostCost(forTargetLevel level: Int) -> Int {
+        if level <= 5 { return 50 }
+        if level <= 8 { return 100 }
+        return 200
+    }
+
+    private func boost() {
+        guard !isBoosting, currentLevel < Self.maxLevel else { return }
+        let cost = Self.boostCost(forTargetLevel: currentLevel + 1)
+        guard tokenBalance >= cost else {
+            onInsufficientTokens()
+            return
+        }
+        isBoosting = true
+        Task {
+            if let result = await service.boostLevel(characterId: characterId) {
+                currentLevel = result.level
+                tokenBalance = result.tokenBalance
+                onBoosted(result.level, result.tokenBalance)
+            } else {
+                // Ağ hatası/yarışta bakiye değişmiş olabilir — güvenli taraf:
+                // yetersiz bakiye akışını aç (kullanıcı en kötü paywall/coin
+                // mağazasını gereksiz görür, sessizce hiçbir şey olmamasından iyi).
+                onInsufficientTokens()
+            }
+            isBoosting = false
+        }
+    }
 
     var body: some View {
         ZStack {
@@ -143,6 +193,12 @@ struct RelationshipLevelsView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 0)
+
+            // Token boost — sadece BİR SONRAKİ seviyenin kartında (bkz.
+            // level-boost edge function, her çağrı tam 1 seviye atlatır).
+            if level.id == currentLevel + 1 {
+                boostButton(targetLevel: level.id)
+            }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 14)
@@ -150,8 +206,28 @@ struct RelationshipLevelsView: View {
         .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous)
             .strokeBorder(cardStroke, lineWidth: cardStrokeWidth))
     }
+
+    private func boostButton(targetLevel: Int) -> some View {
+        let cost = Self.boostCost(forTargetLevel: targetLevel)
+        return Button { boost() } label: {
+            if isBoosting {
+                ProgressView().tint(.white).frame(width: 60, height: 30)
+            } else {
+                VStack(spacing: 1) {
+                    Text("Boost").font(.system(size: 11, weight: .bold))
+                    Text("\(cost) 🪙").font(.system(size: 10, weight: .semibold))
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(LinearGradient(colors: [coral, gold], startPoint: .leading, endPoint: .trailing), in: Capsule())
+            }
+        }
+        .buttonStyle(.plain)
+        .disabled(isBoosting)
+    }
 }
 
 #Preview {
-    RelationshipLevelsView(currentLevel: 3)
+    RelationshipLevelsView(characterId: UUID(), currentLevel: 3, tokenBalance: 100, onBoosted: { _, _ in }, onInsufficientTokens: {})
 }

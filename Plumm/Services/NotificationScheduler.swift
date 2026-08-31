@@ -149,21 +149,12 @@ final class NotificationScheduler {
                 continue
             }
 
-            var fireAt = lastMessage.createdAt.addingTimeInterval(Self.roleInterval(character.personalityRole))
-            // Fire time could land mid-sleep hours (this offset can be up to 48h for
-            // "distant") — push it to their real wake moment instead. Schedule-only
-            // check (not CharacterSleepState) since this is a FUTURE timestamp, not
-            // "right now" — wake/manual-sleep overrides can't be predicted that far out.
-            if let schedule = stored.schedule,
-               let block = ScheduleLookup.currentBlock(schedule: schedule, date: fireAt),
-               block.isSleep {
-                let endParts = block.end.split(separator: ":").compactMap { Int($0) }
-                if endParts.count == 2,
-                   let midnight = Calendar.current.date(bySettingHour: 0, minute: 0, second: 0, of: fireAt),
-                   let wakeTimeToday = Calendar.current.date(bySettingHour: endParts[0], minute: endParts[1], second: 0, of: midnight) {
-                    fireAt = wakeTimeToday > fireAt ? wakeTimeToday : wakeTimeToday.addingTimeInterval(86400)
-                }
-            }
+            // Schedule-based push-to-wake-time REMOVED (user request 2026-08-31)
+            // — a bot's daily routine no longer gates/delays anything; only an
+            // explicit in-chat sleep agreement (manualSleepAt, see
+            // CharacterSleepState) does. Ghosted fires strictly at the plain
+            // role-interval time regardless of her schedule.
+            let fireAt = lastMessage.createdAt.addingTimeInterval(Self.roleInterval(character.personalityRole))
             let interval = fireAt.timeIntervalSinceNow
             guard interval > 0 else {
                 center.removePendingNotificationRequests(withIdentifiers: [Self.ghostedID(for: character.id)])
@@ -209,6 +200,15 @@ final class NotificationScheduler {
 
     private static let jealousyID = "notif.jealousy"
     private static let jealousyLevelGate = 3
+    /// Jealousy (both stages) is Pro+ only — free users never see it (user
+    /// request 2026-08-31; expect more features to gate the same way).
+    /// `PurchaseService.shared` is @MainActor; every call site here already
+    /// runs on the main thread (DispatchQueue.main.async / a @MainActor
+    /// function) so `assumeIsolated` is safe, not a guess.
+    @MainActor
+    private static var jealousySubscriptionGateSatisfied: Bool {
+        PurchaseService.shared.tier.rank >= SubscriptionTier.pro.rank
+    }
     private static let jealousyCooldown: TimeInterval = 6 * 3600
     private var jealousyTargetCharacterID: UUID?
 
@@ -240,6 +240,7 @@ final class NotificationScheduler {
     }
 
     private func armJealousyTimerNow(characters: [Character]) {
+        guard MainActor.assumeIsolated({ Self.jealousySubscriptionGateSatisfied }) else { return }
         let eligible = characters.filter { character in
             let stored = LocalConversationStore.shared.load(for: character.id)
             return !BlockedCharactersStore.isBlocked(character.id) &&
@@ -342,7 +343,16 @@ final class NotificationScheduler {
     /// since this only runs while the app is foreground/active, same
     /// assumption rescheduleGhosted already makes about computing future
     /// fire times in advance.
+    @MainActor
     func rescheduleJealousyEscalation(characters: [Character]) async {
+        guard Self.jealousySubscriptionGateSatisfied else {
+            // Downgraded mid-cycle (or never was Pro) — drop any already-scheduled
+            // escalations rather than leaving them pending.
+            for character in characters {
+                center.removePendingNotificationRequests(withIdentifiers: [Self.jealousyEscalationID(for: character.id)])
+            }
+            return
+        }
         var candidates: [PendingCandidate] = []
         for character in characters {
             guard !BlockedCharactersStore.isBlocked(character.id),

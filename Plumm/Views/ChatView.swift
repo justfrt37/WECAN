@@ -168,8 +168,11 @@ struct ChatView: View {
                 }
             }
         }
-        .sheet(item: $addSheetKind) { kind in
-            AddCharacterNoteSheet(character: viewModel.character, kind: kind)
+        .sheet(item: $addSheetKind, onDismiss: { viewModel.refreshNicknameFromCache() }) { kind in
+            let stored = LocalConversationStore.shared.load(for: viewModel.character.id)
+            let initial = kind == .characterNickname ? (stored?.characterNickname ?? "")
+                : kind == .userNickname ? (stored?.userNickname ?? "") : ""
+            AddCharacterNoteSheet(character: viewModel.character, kind: kind, initialText: initial)
         }
         .sheet(isPresented: $showClearChatOptions) {
             ClearChatOptionsSheet(character: viewModel.character) { keepLevel, keepMemories, keepBehaviors in
@@ -289,7 +292,7 @@ struct ChatView: View {
                     HStack(spacing: 10) {
                         avatarWithLevel
                         VStack(alignment: .leading, spacing: 1) {
-                            Text(viewModel.character.name)
+                            Text(viewModel.displayName)
                                 .font(.system(size: 17, weight: .bold))
                                 .foregroundStyle(.white)
                             // Engellenmişse durum/aktivite HİÇ gösterilmez — çevrimiçi
@@ -384,6 +387,8 @@ struct ChatView: View {
                 Button { showProfile = true } label: { Label("View Profile", systemImage: "person.circle") }
                 Button { addSheetKind = .memory } label: { Label("Add Memory", systemImage: "sparkles") }
                 Button { addSheetKind = .behavior } label: { Label("Add Behavior", systemImage: "face.smiling") }
+                Button { openNicknameSheet(.characterNickname) } label: { Label("Rename \(viewModel.character.name)", systemImage: "pencil") }
+                Button { openNicknameSheet(.userNickname) } label: { Label("Nickname for You", systemImage: "tag") }
                 Button(role: .destructive) { showClearChatOptions = true } label: { Label("Clear Chat", systemImage: "trash") }
                 if isBlocked {
                     Button {
@@ -398,6 +403,20 @@ struct ChatView: View {
             }
         } else {
             Button(action: action) { headerIcon(icon) }
+        }
+    }
+
+    /// Nickname rows are visible to everyone (bkz. kullanıcı talebi); tapping
+    /// gates on Pro+/Max — eligible opens the entry sheet, otherwise bounces
+    /// to the Pro+ paywall with an explanation. Exact same gate pattern as
+    /// the voice-call header button above (`PurchaseService.shared.canUseVoice`).
+    private func openNicknameSheet(_ kind: NoteKind) {
+        if PurchaseService.shared.tier.rank >= SubscriptionTier.proPlus.rank {
+            addSheetKind = kind
+        } else {
+            viewModel.errorMessage = String(localized: "Only Pro+ and Max members can set nicknames.")
+            viewModel.paywallTier = .proPlus
+            viewModel.showPaywall = true
         }
     }
 

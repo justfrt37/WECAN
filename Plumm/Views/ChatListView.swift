@@ -14,7 +14,11 @@ private struct ChatItem: Identifiable {
     let last: LastMessage?
     let unread: Int
     let updatedAt: String?
+    /// Pro+/Max "Rename" (bkz. AddCharacterNoteSheet.characterNickname) —
+    /// shown instead of `character.name` in the row when set.
+    let nickname: String?
     var id: UUID { character.id }
+    var displayName: String { nickname ?? character.name }
 }
 
 struct ChatListView: View {
@@ -30,7 +34,7 @@ struct ChatListView: View {
 
     private var filtered: [ChatItem] {
         guard !searchText.isEmpty else { return items }
-        return items.filter { $0.character.name.localizedCaseInsensitiveContains(searchText) }
+        return items.filter { $0.displayName.localizedCaseInsensitiveContains(searchText) }
     }
 
     /// Sohbeti listeden kaldır + SUNUCU kaydını sil (bkz. ChatMaintenance).
@@ -159,7 +163,8 @@ struct ChatListView: View {
                             role: $0.role, createdAt: $0.createdAt, kind: $0.kind)
             }
             return ChatItem(character: ch, conversationID: conv.id,
-                            last: last, unread: unread, updatedAt: conv.updatedAt)
+                            last: last, unread: unread, updatedAt: conv.updatedAt,
+                            nickname: LocalConversationStore.shared.load(for: ch.id)?.characterNickname)
         }
 
         items.sort { lhs, rhs in
@@ -286,7 +291,7 @@ private struct ChatHistoryRow: View {
             }
 
             VStack(alignment: .leading, spacing: 3) {
-                Text(item.character.name)
+                Text(item.displayName)
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(.white)
                 subtitle

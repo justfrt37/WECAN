@@ -928,7 +928,7 @@ Deno.serve(async (req: Request) => {
         .maybeSingle(),
       db
         .from("conversations")
-        .select("id, summary, summarized_count, xp, relationship_level, level_progress, schedule, woken_up_at, manual_sleep_at, ghosted_at, jealousy_sent_at, jealousy_stage, jealousy_mood_turns_left")
+        .select("id, summary, summarized_count, xp, relationship_level, level_progress, schedule, woken_up_at, manual_sleep_at, ghosted_at, jealousy_sent_at, jealousy_stage, jealousy_mood_turns_left, character_nickname, user_nickname")
         .eq("user_id", uid)
         .eq("character_id", characterId)
         .order("updated_at", { ascending: false })
@@ -1067,7 +1067,7 @@ Deno.serve(async (req: Request) => {
         const ins = await db
           .from("conversations")
           .upsert({ user_id: uid, character_id: characterId }, { onConflict: "user_id,character_id" })
-          .select("id, summary, summarized_count, xp, relationship_level, level_progress, schedule, woken_up_at, manual_sleep_at, ghosted_at, jealousy_sent_at, jealousy_stage, jealousy_mood_turns_left")
+          .select("id, summary, summarized_count, xp, relationship_level, level_progress, schedule, woken_up_at, manual_sleep_at, ghosted_at, jealousy_sent_at, jealousy_stage, jealousy_mood_turns_left, character_nickname, user_nickname")
           .single();
         convo = ins.data!;
         await seedDefaultUserGenderMemory(convo.id);
@@ -1191,6 +1191,8 @@ Deno.serve(async (req: Request) => {
         jealousyStage: convo.jealousy_stage ?? 0,
         jealousySentAt: convo.jealousy_sent_at ?? null,
         jealousyMoodTurnsLeft: convo.jealousy_mood_turns_left ?? 0,
+        characterNickname: convo.character_nickname ?? null,
+        userNickname: convo.user_nickname ?? null,
       });
     }
 
@@ -1201,7 +1203,7 @@ Deno.serve(async (req: Request) => {
       const ins = await db
         .from("conversations")
         .upsert({ user_id: uid, character_id: characterId }, { onConflict: "user_id,character_id" })
-        .select("id, summary, summarized_count, xp, relationship_level, level_progress, schedule, woken_up_at, manual_sleep_at, ghosted_at, jealousy_sent_at, jealousy_stage, jealousy_mood_turns_left")
+        .select("id, summary, summarized_count, xp, relationship_level, level_progress, schedule, woken_up_at, manual_sleep_at, ghosted_at, jealousy_sent_at, jealousy_stage, jealousy_mood_turns_left, character_nickname, user_nickname")
         .single();
       convo = ins.data!;
       await seedDefaultUserGenderMemory(convo.id);
@@ -1288,6 +1290,12 @@ Deno.serve(async (req: Request) => {
     system += `\n\n${directive}`;
 
     system += IDENTITY_RULE;
+    // Pro+/Max "Nickname for You" (bkz. set-nickname edge function) — kozmetik
+    // character_nickname'in AKSİNE bu gerçekten prompta girer, karakterin
+    // kullanıcıya hitap şeklini etkiler.
+    if (convo.user_nickname) {
+      system += `\n\nThe user wants to be called "${convo.user_nickname}" — use it naturally sometimes, not forced into every message.`;
+    }
     system += languageDirective(clientLanguage);
     system += TEXTING_STYLE_RULE;
     system += VARIATION_RULE;
@@ -1319,9 +1327,11 @@ Deno.serve(async (req: Request) => {
     // akışının kendisi, o turlarda bu uyarı anlamsız/çelişkili olurdu.
     if (!voiceChat && !imageReactionChat) {
       system += MEDIA_REQUEST_RULE;
-      // UYKU ÖZELLİĞİ KAPATILDI (kullanıcı talebi 2026-08-26) — sleepRule()
-      // KALDIRILMADI, sadece artık enjekte edilmiyor. Geri açmak için bu
-      // satırı geri eklemek yeterli: system += sleepRule(personalityRole, currentLevel);
+      // UYKU ÖZELLİĞİ YENİDEN AÇILDI (kullanıcı talebi 2026-08-31 — 2026-08-26'da
+      // kapatılmıştı). Program artık hiçbir şeyi ENGELLEMİYOR (bkz.
+      // CharacterSleepState.swift, client) — bu sadece konuşma-içi uyku
+      // anlaşması kuralı, yatma vaktine yakınken devreye girer.
+      system += sleepRule(personalityRole, currentLevel);
       // Çoklu-balon PAUSE:n mekanizması KALDIRILDI (2026-08-28) — bölme artık
       // tamamen istemci tarafında (bkz. ChatViewModel.maybeSplitForLength).
     }
@@ -1396,15 +1406,12 @@ Deno.serve(async (req: Request) => {
         `a fact you're reciting. If none fit the current moment, ignore this ` +
         `entirely this turn.`;
     }
-    // UYKU ÖZELLİĞİ KAPATILDI (kullanıcı talebi 2026-08-26) — [BEDTIME PROXIMITY]
-    // notu artık turnContext'e EKLENMİYOR (kod KALDIRILMADI, aşağıda yorum
-    // satırı olarak duruyor). `nearSleepTime` istemciden hâlâ gelebilir ama
-    // burada kullanılmıyor.
-    // if (!voiceChat && !imageReactionChat) {
-    //   turnContext += nearSleepTime
-    //     ? "\n\n[BEDTIME PROXIMITY] It is currently close to or within your real scheduled sleep time."
-    //     : "\n\n[BEDTIME PROXIMITY] It is NOT close to your real scheduled sleep time right now.";
-    // }
+    // UYKU ÖZELLİĞİ YENİDEN AÇILDI (kullanıcı talebi 2026-08-31).
+    if (!voiceChat && !imageReactionChat) {
+      turnContext += nearSleepTime
+        ? "\n\n[BEDTIME PROXIMITY] It is currently close to or within your real scheduled sleep time."
+        : "\n\n[BEDTIME PROXIMITY] It is NOT close to your real scheduled sleep time right now.";
+    }
 
     // === CEVAP MODU ===
     // 2) Geçmişi al — clientHistory varsa istemciden, yoksa DB'den
@@ -1462,13 +1469,10 @@ Deno.serve(async (req: Request) => {
       if (charge.ok) tokenBalanceAfterCharge = charge.balance;
     }
 
-    // UYKU ÖZELLİĞİ KAPATILDI (kullanıcı talebi 2026-08-26) — classifySleepAgreement
-    // ARTIK ÇAĞRILMIYOR (gereksiz bir LLM çağrısı daha az), wentToSleep her zaman
-    // false. Kod KALDIRILMADI — geri açmak için `sleepFeatureEnabled`'ı true yapıp
-    // eski koşullu ifadeyi geri getirmek yeterli: (!voiceChat && !imageReactionChat
-    // && nearSleepTime) ? await classifySleepAgreement(userMessage!, reply) : false.
-    const sleepFeatureEnabled = false;
-    const wentToSleep = (sleepFeatureEnabled && !voiceChat && !imageReactionChat && nearSleepTime)
+    // UYKU ÖZELLİĞİ YENİDEN AÇILDI (kullanıcı talebi 2026-08-31 — 2026-08-26'da
+    // kapatılmıştı). classifySleepAgreement sadece yatma vaktine yakınken
+    // (nearSleepTime, istemci hesaplar) çalışır — gereksiz LLM çağrısı yok.
+    const wentToSleep = (!voiceChat && !imageReactionChat && nearSleepTime)
       ? await classifySleepAgreement(userMessage!, reply)
       : false;
 
@@ -1552,6 +1556,8 @@ Deno.serve(async (req: Request) => {
       jealousyStage: newJealousyStage,
       jealousySentAt: convo.jealousy_sent_at ?? null,
       jealousyMoodTurnsLeft: newJealousyMoodTurnsLeft,
+      characterNickname: convo.character_nickname ?? null,
+      userNickname: convo.user_nickname ?? null,
     };
 
     // 5) Özetleme — sadece DB modunda (clientHistory modunda istemci geçmişi yönetiyor)
