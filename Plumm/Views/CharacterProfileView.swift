@@ -62,19 +62,20 @@ struct CharacterProfileView: View {
             : character.galleryURLs
     }
 
-    /// Kilitli (PRO olmayan) foto için UCUZ "buzlu cam" yer tutucu. Eskiden
-    /// kilitli fotolar tam çözünürlükte İNDİRİLİP hem hero (520, blur 22) hem
-    /// grid'de (240, blur 18) Gaussian blur uygulanıyordu → aynı görsel iki kez
-    /// çözülüyor + tam-res blur RAM/CPU yiyordu. Kilitli zaten görünmez olacağı
-    /// için görseli hiç indirmeden obscured bir zemin çiziyoruz (görsel eşdeğer).
-    private var frostedLockedFill: some View {
-        Rectangle()
-            .fill(AppColor.card)
-            .overlay(
-                LinearGradient(colors: [AppColor.pink.opacity(0.12), AppColor.card.opacity(0.9)],
-                               startPoint: .topLeading, endPoint: .bottomTrailing)
-            )
-            .overlay(.ultraThinMaterial)
+    /// Kilitli (PRO olmayan) foto — gerçek görsel İNDİRİLİP bulanıklaştırılır
+    /// (bkz. kullanıcı talebi: "actually load that photo and blur it, that
+    /// would make it more realistic" — önceki "buzlu cam" yer tutucu bunun
+    /// yerine kullanılıyordu, indirme maliyetinden kaçınmak için). `scaleEffect`
+    /// blur'un kenarlarda şeffaf/bulanık taşma bırakmasını `clipped()` ile
+    /// birlikte engeller.
+    private func blurredLockedImage(url: URL?) -> some View {
+        CachedImage(url: url) { image in
+            image.resizable().scaledToFill()
+                .blur(radius: 22, opaque: true)
+                .scaleEffect(1.08)
+        } placeholder: {
+            AppColor.card
+        }
     }
 
     var body: some View {
@@ -127,34 +128,30 @@ struct CharacterProfileView: View {
                 else { showPaywall = true }
             }
         }
-        .task { await ImageCache.shared.prefetch(unlockedImages) }
-    }
-
-    /// `images` filtered to what's actually downloadable — mirrors the per-index
-    /// lock check in `hero`/`photosSection` (idx 0 always unlocked, rest require PRO)
-    /// so locked photos are never prefetched/downloaded.
-    private var unlockedImages: [URL] {
-        images.enumerated()
-            .filter { idx, _ in idx == 0 || PurchaseService.shared.isPro }
-            .map(\.element)
+        // Locked photos are now blurred-in-place (bkz. blurredLockedImage) —
+        // they're actually visible (just illegible), so prefetch ALL of them,
+        // not just the unlocked ones.
+        .task { await ImageCache.shared.prefetch(images) }
+        .onAppear {
+            EventLogger.shared.log("character_profile_viewed", [
+                "character_id": character.id, "source": showsChatButton ? "browse" : "chat",
+            ])
+        }
     }
 
     // MARK: Hero (kaydırılabilir resimler + isim + seviye)
 
     private var hero: some View {
         ZStack(alignment: .bottom) {
-            // Kaydırılabilir resimler — hazır galeri fotoğrafları (pre-made)
-            // SADECE burada gösteriliyor (bkz. GalleryView, "More Photos" oradan
-            // kaldırıldı). İlk foto (ana profil fotosu) her zaman açık — geri
-            // kalanı PRO olmayanlar için bulanık/kilitli kalır.
+            // Kaydırılabilir resimler — hazır galeri fotoğrafları (pre-made).
+            // İlk foto (ana profil fotosu) her zaman açık — geri kalanı PRO
+            // olmayanlar için bulanık kalır (bkz. blurredLockedImage).
             TabView(selection: $page) {
                 ForEach(Array(images.enumerated()), id: \.offset) { idx, url in
                     let locked = idx > 0 && !PurchaseService.shared.isPro
                     ZStack {
-                        // Kilitli: tam-res görseli indirip bulanıklaştırma yerine
-                        // ucuz buzlu-cam yer tutucu (bkz. frostedLockedFill).
                         if locked {
-                            frostedLockedFill
+                            blurredLockedImage(url: url)
                         } else {
                             CachedImage(url: url) { image in
                                 image.resizable().scaledToFill()
@@ -162,18 +159,10 @@ struct CharacterProfileView: View {
                                 AppColor.card
                             }
                         }
-
-                        if locked {
-                            Color.black.opacity(0.25)
-                            Button { showPaywall = true } label: {
-                                Image(systemName: "lock.fill")
-                                    .font(.system(size: 34))
-                                    .foregroundStyle(.white)
-                                    .shadow(color: .black.opacity(0.5), radius: 8, y: 4)
-                            }
-                            .buttonStyle(.plain)
-                        }
                     }
+                    .clipped()
+                    .contentShape(Rectangle())
+                    .onTapGesture { if locked { showPaywall = true } }
                     .tag(idx)
                 }
             }
@@ -316,25 +305,12 @@ struct CharacterProfileView: View {
                         .frame(maxWidth: .infinity)
                         .frame(height: 240)
                         .overlay {
-                            // Kilitli: tam-res indir+blur yerine buzlu yer tutucu
-                            // (bkz. frostedLockedFill) → çift çözme + tam-res blur yok.
                             if locked {
-                                frostedLockedFill
+                                blurredLockedImage(url: url)
                             } else {
                                 CachedImage(url: url) { image in
                                     image.resizable().scaledToFill()
                                 } placeholder: { AppColor.card }
-                            }
-                        }
-                        .overlay {
-                            if locked {
-                                ZStack {
-                                    Color.black.opacity(0.25)
-                                    Image(systemName: "lock.fill")
-                                        .font(.system(size: 26))
-                                        .foregroundStyle(.white)
-                                        .shadow(color: .black.opacity(0.5), radius: 6, y: 3)
-                                }
                             }
                         }
                         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))

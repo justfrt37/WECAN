@@ -127,6 +127,7 @@ struct AddCharacterNoteSheet: View {
             // Additive lists — an empty save is a no-op, nothing to clear.
             if !content.isEmpty {
                 let apiKind = kind == .memory ? "memory" : "behavior"
+                EventLogger.shared.log("feature_used", ["feature": kind == .memory ? "memory_add" : "behavior_add"])
                 Task { _ = try? await service.addCharacterNote(characterId: characterId, kind: apiKind, content: content) }
             }
         case .characterNickname, .userNickname:
@@ -140,6 +141,7 @@ struct AddCharacterNoteSheet: View {
                 LocalConversationStore.shared.save(stored, for: characterId)
             }
             let apiKind = kind == .characterNickname ? "character" : "user"
+            EventLogger.shared.log("feature_used", ["feature": kind == .characterNickname ? "nickname_character" : "nickname_user"])
             Task { _ = try? await service.setNickname(characterId: characterId, kind: apiKind, content: content) }
         }
         dismiss()

@@ -17,6 +17,18 @@ enum MainTab: Int, CaseIterable, Identifiable {
     case discover, chat, explore, likes, profile
     var id: Int { rawValue }
 
+    /// Analytics'te okunabilir olsun diye (bkz. `tab_switched`) — Int rawValue
+    /// SQL'de anlamsız kalırdı.
+    var analyticsName: String {
+        switch self {
+        case .discover: return "discover"
+        case .chat: return "chat"
+        case .explore: return "explore"
+        case .likes: return "likes"
+        case .profile: return "profile"
+        }
+    }
+
     var titleKey: LocalizedStringKey {
         switch self {
         case .discover: return "Discover"
@@ -187,6 +199,9 @@ struct MainTabView: View {
             }
             .navigationDestination(for: MeetRequest.self) { request in
                 ChatView(character: request.character, prefillText: request.prefillText)
+            }
+            .onChange(of: selection) { old, new in
+                EventLogger.shared.log("tab_switched", ["from": old.analyticsName, "to": new.analyticsName])
             }
             .onChange(of: store.pendingMeetRequest) { _, request in
                 if let request {

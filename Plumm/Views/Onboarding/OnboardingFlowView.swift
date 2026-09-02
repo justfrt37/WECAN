@@ -21,22 +21,32 @@ struct OnboardingFlowView: View {
             case .name:
                 OnboardingNameView()
                     .transition(.opacity)
+                    .onAppear { logStepViewed("name", 0) }
             case .socialProof:
                 OnboardingSocialProofView()
                     .transition(.opacity)
+                    .onAppear { logStepViewed("social_proof", 1) }
             case .characterSelect:
                 OnboardingCharacterSelectView()
                     .transition(.opacity)
+                    .onAppear { logStepViewed("character_select", 2) }
             case .questions:
                 OnboardingQuestionsView()
                     .transition(.opacity)
+                    .onAppear { logStepViewed("questions", 3) }
             case .finalTease:
                 OnboardingReadyView()
                     .transition(.opacity)
+                    .onAppear { logStepViewed("final_tease", 4) }
             case .paywall:
                 OnboardingPaywallView()
                     .transition(.opacity)
+                    .onAppear { logStepViewed("paywall", 5) }
             }
         }
+    }
+
+    private func logStepViewed(_ step: String, _ index: Int) {
+        EventLogger.shared.log("onboarding_step_viewed", ["step": step, "step_index": index])
     }
 }

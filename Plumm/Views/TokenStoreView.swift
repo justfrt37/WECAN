@@ -120,6 +120,7 @@ struct TokenStoreView: View {
             )
         }
         .task {
+            EventLogger.shared.log("feature_used", ["feature": "token_store_shown"])
             if purchases.tokenPackages.isEmpty { await purchases.loadOfferings() }
         }
     }

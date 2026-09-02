@@ -225,11 +225,13 @@ struct FeedView: View {
                 character: current,
                 prefillText: isNew ? IcebreakerPool.next() : ""
             )
+            EventLogger.shared.log("character_liked", ["character_id": current.id])
         } else {
             // Kartı `passed` olarak işaretle. Desteyi HEMEN yeniden kurmuyoruz —
             // aksi halde animasyon bitmeden üstteki kart bir sonrakine sıçrardı.
             // Yeniden kurma animasyon sonunda (asyncAfter) yapılır.
             PassedCharactersStore.pass(current.id)
+            EventLogger.shared.log("character_passed", ["character_id": current.id])
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.36) {
             dragOffset = .zero
@@ -253,7 +255,6 @@ private struct FeedCard: View {
     let safeTop: CGFloat
     let safeBottom: CGFloat
 
-    @State private var showGallery = false
     @State private var showProfile = false
 
     private let tabBarSpace: CGFloat = 72
@@ -286,9 +287,6 @@ private struct FeedCard: View {
                         .padding(.horizontal, 16)
                 }
                 .padding(.bottom, safeBottom + tabBarSpace + 35)
-            }
-            .fullScreenCover(isPresented: $showGallery) {
-                GalleryView(character: character)
             }
             .fullScreenCover(isPresented: $showProfile) {
                 CharacterProfileView(character: character)
@@ -361,7 +359,10 @@ private struct FeedCard: View {
 
     private var actionRow: some View {
         HStack(spacing: 12) {
-            bigActionButton(icon: "photo.fill", label: "Gallery") { showGallery = true }
+            // "Gallery" düğmesi artık ayrı bir sayfa açmıyor — chat/"See All"
+            // ile AYNI "About Me" sayfasına gider (bkz. CharacterProfileView,
+            // kullanıcı talebi: 3 giriş noktası da aynı sayfayı göstermeli).
+            bigActionButton(icon: "photo.fill", label: "Gallery") { showProfile = true }
 
             NavigationLink(value: character) {
                 bigActionLabel(icon: "bubble.left.and.bubble.right.fill", label: "Chat")

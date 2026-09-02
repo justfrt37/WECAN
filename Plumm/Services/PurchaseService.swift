@@ -194,8 +194,8 @@ final class PurchaseService {
     // Non-PRO test için .none (bkz. kullanıcı talebi). PRO test etmek istersen
     // DEBUG'ta tekrar .pro yapabilirsin.
     var tier: SubscriptionTier = .none
-    /// Eski `isPro` çağrı yerleri (CreateCharacterView, LikesView, GalleryView,
-    /// PaywallHostView) hiç değişmeden derlenmeye devam etsin diye korunuyor.
+    /// Eski `isPro` çağrı yerleri (CreateCharacterView, LikesView,
+    /// CharacterProfileView, PaywallHostView) hiç değişmeden derlenmeye devam etsin diye korunuyor.
     var isPro: Bool { tier != .none }
     /// Ses (sesli mesaj + sesli arama) hakkı — Pro'da YOK, Pro+/Max'te var.
     /// Sunucu da aynı kuralı uygular; bu yalnızca boşuna istek atmamak için.
@@ -369,6 +369,24 @@ final class PurchaseService {
     /// Seçili paketi satın alır ve sonucu AYRINTILI döner (bkz. PurchaseOutcome).
 
     func purchaseDetailed(_ package: PaywallPackage) async -> PurchaseOutcome {
+        EventLogger.shared.log("paywall_purchase_attempted", [
+            "package_id": package.id, "product_id": package.productId, "period": package.periodName,
+        ])
+        let outcome = await purchaseDetailedInner(package)
+        switch outcome {
+        case .success(let granted):
+            EventLogger.shared.log("paywall_purchase_succeeded", ["package_id": package.id, "granted": granted])
+        case .cancelled:
+            EventLogger.shared.log("paywall_purchase_cancelled", ["package_id": package.id])
+        case .failed(let error):
+            EventLogger.shared.log("paywall_purchase_failed", ["package_id": package.id, "error": error])
+        case .paidButNotGranted:
+            EventLogger.shared.log("paywall_purchase_failed", ["package_id": package.id, "error": "paid_but_not_granted"])
+        }
+        return outcome
+    }
+
+    private func purchaseDetailedInner(_ package: PaywallPackage) async -> PurchaseOutcome {
         #if canImport(RevenueCat)
         guard isConfigured else { return .failed("Store is not ready yet.") }
         // configure()'daki logIn, uid henüz yazılmamışken (uygulama açılış
@@ -429,6 +447,13 @@ final class PurchaseService {
     /// "Satın alımları geri yükle".
     @discardableResult
     func restore() async -> Bool {
+        EventLogger.shared.log("paywall_restore_tapped")
+        let success = await restoreInner()
+        EventLogger.shared.log("paywall_restore_result", ["success": success])
+        return success
+    }
+
+    private func restoreInner() async -> Bool {
         #if canImport(RevenueCat)
         guard isConfigured else { return false }
         if let uid = UserDefaultsManager.shared.userId, Purchases.shared.appUserID != uid {

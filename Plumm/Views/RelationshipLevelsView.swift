@@ -76,6 +76,7 @@ struct RelationshipLevelsView: View {
             if let result = await service.boostLevel(characterId: characterId) {
                 currentLevel = result.level
                 tokenBalance = result.tokenBalance
+                EventLogger.shared.log("feature_used", ["feature": "level_boost", "new_level": result.level])
                 onBoosted(result.level, result.tokenBalance)
             } else {
                 // Ağ hatası/yarışta bakiye değişmiş olabilir — güvenli taraf:

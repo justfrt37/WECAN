@@ -1299,6 +1299,7 @@ struct CreateCharacterView: View {
             if let tokenBalance { tokenStore.setBalance(tokenBalance) }
             withAnimation { created = c }
             store.characters.append(c)
+            EventLogger.shared.log("character_created", ["character_id": c.id])
             // Yeni karakter, kullanıcı hiç mesaj atmasa bile Sohbetler listesinde
             // görünsün (bkz. kullanıcı talebi): onboarding'deki gibi sunucuya
             // kalıcı bir ilk-selam ekle → konuşma+mesaj oluşur, liste gösterir.

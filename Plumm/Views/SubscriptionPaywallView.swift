@@ -103,12 +103,16 @@ struct SubscriptionPaywallView: View {
             }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button { dismiss() } label: { Image(systemName: "xmark").foregroundStyle(.white) }
+                    Button {
+                        EventLogger.shared.log("paywall_closed", ["tier_shown": selectedTier.displayName])
+                        dismiss()
+                    } label: { Image(systemName: "xmark").foregroundStyle(.white) }
                 }
             }
         }
         .animation(.easeInOut(duration: 0.2), value: isPurchasing)
         .task {
+            EventLogger.shared.log("paywall_shown", ["default_tier": selectedTier.displayName])
             if packages.isEmpty { await purchases.loadOfferings() }
         }
     }
@@ -122,6 +126,7 @@ struct SubscriptionPaywallView: View {
                 Button {
                     selectedTier = item.tier
                     selectedPackageID = nil   // yeni tier → varsayılan (yıllık)
+                    EventLogger.shared.log("paywall_tier_tab_tapped", ["tier": item.tier.displayName])
                 } label: {
                     Text(item.label)
                         .font(.system(size: 13, weight: .bold))
@@ -140,7 +145,10 @@ struct SubscriptionPaywallView: View {
 
     private func planCard(_ pkg: PaywallPackage, isTop: Bool) -> some View {
         let selected = pkg.id == selectedPackage?.id
-        return Button { selectedPackageID = pkg.id } label: {
+        return Button {
+            selectedPackageID = pkg.id
+            EventLogger.shared.log("paywall_package_selected", ["package_id": pkg.id, "tier": selectedTier.displayName, "period": pkg.periodName])
+        } label: {
             VStack(alignment: .leading, spacing: 6) {
                 if isTop {
                     Text(savingsBadge(for: pkg))

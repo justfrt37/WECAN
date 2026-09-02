@@ -141,6 +141,10 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
 
         guard navigate else { return true }
 
+        if kind == .jealousy || kind == .jealousyEscalation {
+            EventLogger.shared.log("feature_used", ["feature": "jealousy_notification_tap"])
+        }
+
         // Level-up dışındaki bot bildirimleri sadece ilgili sekmeye yönlendirir —
         // doğrudan o botun sohbetini açmaz. "Liked You" artık Beğeniler
         // sekmesine gider (bkz. LikedByStore/LikesView), diğerleri Sohbetler'e.

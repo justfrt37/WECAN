@@ -1,17 +1,6 @@
 //
-//  ReviewModeService.swift
-//  Review Mode — App Store inceleme (Apple review) sürecinde uygulamanın daha
-//  "güvenli" bir karakter seti göstermesi için UZAKTAN (backend) açılıp kapanan
-//  anahtar. Tüm review-mode mantığı yalnızca bu dosyada toplanır; başka yerlere
-//  sızmaz (CharacterStore sadece `fetchCharacters()`'ı çağırır).
+
 //
-//  ── Backend sözleşmesi ─────────────────────────────────────────────────────
-//  1) Anahtar `app_config` adlı bir tabloda tutulur (public read RLS gerekli).
-//     Anahtar adı bilerek belirsiz/gizli seçildi: "kokomombo" (review_mode değil).
-//        create table app_config (
-//          key        text primary key,
-//          bool_value boolean not null default false
-//        );
 //        insert into app_config (key, bool_value) values ('kokomombo', false);
 //     REST okuma:
 //        GET /rest/v1/app_config?select=bool_value&key=eq.kokomombo
@@ -21,8 +10,6 @@
 //     `characters_review` tablosundan çekilir (AYNI şema, "güvenli" kızlar).
 //     FALSE veya belirlenemiyorsa → normal `characters`.
 //
-//  Apple incelemeye başlarken backend'de `kokomombo`'yu true yap; onaylanınca
-//  false'a çek. İstemci tarafında hiçbir sürüm/güncelleme gerekmez.
 //  ───────────────────────────────────────────────────────────────────────────
 //
 

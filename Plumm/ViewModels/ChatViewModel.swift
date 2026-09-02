@@ -49,6 +49,10 @@ final class ChatViewModel {
     var characterNickname: String?
     var displayName: String { characterNickname ?? character.name }
 
+    /// Bu chat açık kaldığı sürece gönderilen mesaj sayısı (bkz. `chat_closed`
+    /// analytics olayı) — session-scoped, kalıcılaşmaz.
+    var messagesSentThisSession = 0
+
     private let service = ChatService()
     var store: CharacterStore?
     var tokenStore: TokenStore?
@@ -235,6 +239,7 @@ final class ChatViewModel {
             self.relationshipLevel = max(1, character.relationshipLevel)
         }
         self.characterNickname = LocalConversationStore.shared.load(for: character.id)?.characterNickname
+        EventLogger.shared.log("conversation_opened", ["character_id": character.id])
     }
 
     private var realAssistantCount: Int {
@@ -445,6 +450,8 @@ final class ChatViewModel {
         LocalConversationStore.shared.appendMessage(userMsg, for: character.id, defaultLevel: relationshipLevel, defaultLevelProgress: levelProgress)
         store?.chatCache[character.id] = realMessages()
         NotificationScheduler.shared.noteUserSent(character: character)
+        messagesSentThisSession += 1
+        EventLogger.shared.log("message_sent", ["character_id": character.id, "kind": "text"])
         inputText = ""
         isSending = true
         errorMessage = nil
@@ -662,6 +669,8 @@ final class ChatViewModel {
         LocalConversationStore.shared.appendMessage(userMsg, for: character.id, defaultLevel: relationshipLevel, defaultLevelProgress: levelProgress)
         store?.chatCache[character.id] = realMessages()
         NotificationScheduler.shared.noteUserSent(character: character)
+        messagesSentThisSession += 1
+        EventLogger.shared.log("message_sent", ["character_id": character.id, "kind": "voice"])
         isVoiceArmed = false
         isImageArmed = false
         isSending = true
@@ -1006,6 +1015,9 @@ final class ChatViewModel {
         if !typed.isEmpty { messages.append(Message(role: .user, content: typed)) }
         updateCache()
         NotificationScheduler.shared.noteUserSent(character: character)
+        messagesSentThisSession += 1
+        EventLogger.shared.log("message_sent", ["character_id": character.id, "kind": "image_request"])
+        EventLogger.shared.log("feature_used", ["feature": "photo_request"])
         inputText = ""
         isImageArmed = false
         errorMessage = nil

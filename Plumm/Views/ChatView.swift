@@ -120,6 +120,10 @@ struct ChatView: View {
         .onAppear { viewModel.isVisible = true }
         .onDisappear {
             viewModel.isVisible = false
+            EventLogger.shared.log("chat_closed", [
+                "character_id": viewModel.character.id,
+                "messages_sent_this_session": viewModel.messagesSentThisSession,
+            ])
             // Sohbetten çıkınca ses çalmaya / mikrofon açık kalmaya devam etmesin —
             // oynatıcıyı durdur (ses oturumunu da bırakır) ve kaydı iptal et.
             voice.stop()

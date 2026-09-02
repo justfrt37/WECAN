@@ -83,6 +83,7 @@ final class CallViewModel {
                 language: languageCode
             )
             debug("Call started, session \(result.callSessionId)")
+            EventLogger.shared.log("feature_used", ["feature": "voice_call"])
         } catch CallServiceError.insufficientTokens {
             debug("voice-call-start: insufficient tokens")
             soundPlayer.stopRinging()

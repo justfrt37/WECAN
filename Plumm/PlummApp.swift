@@ -52,6 +52,8 @@ struct PlummApp: App {
             .environment(onboarding)
             .preferredColorScheme(.dark)
             .task {
+                EventLogger.shared.startNewSession()
+                EventLogger.shared.log("app_launch")
                 // Satın alma sonrası sunucudan dönen bakiyeyi anında yazabilmek
                 // için (TokenStore singleton değil, environment'tan geliyor).
                 PurchaseService.shared.tokenStore = tokenStore
@@ -80,6 +82,12 @@ struct PlummApp: App {
         .onChange(of: scenePhase) { _, newPhase in
             switch newPhase {
             case .active:
+                // Soğuk açılıştaki İLK .active geçişi zaten .task'ta bir kez
+                // damgalanıyor (app_launch + startNewSession) — burası arka
+                // plandan DÖNÜŞLERİ de kapsıyor, bu yüzden her .active'de
+                // yeniden çağırmak zararsız (yeni sessionId = yeni "ziyaret").
+                EventLogger.shared.startNewSession()
+                EventLogger.shared.log("app_foreground")
                 NotificationScheduler.shared.onForeground(characters: store.characters)
                 notificationDelegate?.catchUpOnDeliveredNotifications()
                 // Picks up newly-added characters (DEV curated creations, etc.)
@@ -87,6 +95,8 @@ struct PlummApp: App {
                 Task { await store.refreshCharacters() }
                 ImageCache.shared.evictIfNeeded()
             case .background:
+                EventLogger.shared.log("app_background")
+                EventLogger.shared.flush()
                 NotificationScheduler.shared.onBackground(characters: store.characters)
             default:
                 break

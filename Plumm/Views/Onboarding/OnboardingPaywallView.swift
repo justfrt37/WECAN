@@ -21,6 +21,7 @@ struct OnboardingPaywallView: View {
     /// complete olur (bkz. MainTabView.openPendingOnboardingChat). Seçim yoksa
     /// doğrudan tamamla.
     private func close() {
+        EventLogger.shared.log("paywall_closed", ["tier_shown": selectedTier.displayName])
         dismiss()
         if !onboarding.isCompleted, let name = onboarding.selectedCharacter?.chatCharacterName {
             onboarding.pendingChatCharacterName = name
@@ -191,6 +192,7 @@ struct OnboardingPaywallView: View {
         }
         .animation(.easeInOut(duration: 0.2), value: isPurchasing)
         .task {
+            EventLogger.shared.log("paywall_shown", ["default_tier": selectedTier.displayName, "source": "onboarding"])
             if packages.isEmpty { await purchases.loadOfferings() }
         }
         .task {
@@ -318,6 +320,7 @@ struct OnboardingPaywallView: View {
                     case .tier(let t):
                         selectedTier = t
                         selectedPackageID = nil   // yeni tier → varsayılan (yıllık)
+                        EventLogger.shared.log("paywall_tier_tab_tapped", ["tier": t.displayName])
                     }
                 } label: {
                     Text(item.label)
@@ -337,7 +340,10 @@ struct OnboardingPaywallView: View {
     /// Token miktarı GÖSTERİLMEZ (bkz. kullanıcı talebi). En pahalıda tasarruf rozeti.
     private func planCard(_ pkg: PaywallPackage, isTop: Bool) -> some View {
         let selected = selectedPackage?.id == pkg.id
-        return Button { selectedPackageID = pkg.id } label: {
+        return Button {
+            selectedPackageID = pkg.id
+            EventLogger.shared.log("paywall_package_selected", ["package_id": pkg.id, "tier": selectedTier.displayName, "period": pkg.periodName])
+        } label: {
             HStack(spacing: 10) {
                 Text(pkg.localizedPeriodName).font(.system(size: 19, weight: .bold)).foregroundStyle(.white)
                 Spacer()
