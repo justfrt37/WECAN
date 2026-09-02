@@ -5,6 +5,7 @@
 //
 
 import SwiftUI
+import TipKit
 
 struct CharacterProfileView: View {
     let character: Character
@@ -89,6 +90,9 @@ struct CharacterProfileView: View {
                         about
                             .padding(.horizontal, 24)
                             .padding(.top, 22)
+                        relationshipSection
+                            .padding(.horizontal, 24)
+                            .padding(.top, 22)
                         interestsSection
                             .padding(.horizontal, 24)
                             .padding(.top, 22)
@@ -113,7 +117,7 @@ struct CharacterProfileView: View {
         .fullScreenCover(isPresented: $showPaywall) { OnboardingPaywallView() }
         .fullScreenCover(isPresented: $showTokenStore) { TokenStoreView(tokenStore: tokenStore) }
         .sheet(isPresented: $showLevels) {
-            RelationshipLevelsView(characterId: character.id, currentLevel: userLevel, tokenBalance: tokenStore.balance) { newLevel, newBalance in
+            RelationshipLevelsView(characterId: character.id, role: character.personalityRole, currentLevel: userLevel, tokenBalance: tokenStore.balance) { newLevel, newBalance in
                 characterStore?.setLevel(character.id, level: newLevel, progress: 0)
                 if var stored = LocalConversationStore.shared.load(for: character.id) {
                     stored.level = newLevel
@@ -238,8 +242,18 @@ struct CharacterProfileView: View {
     /// Kalp + LV N, ring seviyenin İÇİNDEKİ ilerlemeyle (levelProgress) orantılı dolar (0 → boş).
     /// Dokununca İlişki Seviyeleri ekranı açılır.
     private var levelCircle: some View {
-        Button { showLevels = true } label: { levelCircleContent }
-            .buttonStyle(.plain)
+        VStack(spacing: 4) {
+            Button {
+                showLevels = true
+                EventLogger.shared.log("feature_used", [
+                    "feature": "relationship_levels_opened", "source": "hero_circle",
+                ])
+            } label: { levelCircleContent }
+                .buttonStyle(.plain)
+            Text("Tap for levels")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(.white.opacity(0.6))
+        }
     }
 
     /// Daire, hero fotonun üstünde durduğu için soluk kalıyordu — kaynak
@@ -320,6 +334,45 @@ struct CharacterProfileView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    // MARK: İlişki
+
+    /// Profil gövdesinde görünür, etiketli seviye bölümü — hero'daki küçük
+    /// çemberden çok daha keşfedilebilir. "İlerlemeyi Gör" aynı sheet'i açar.
+    private var relationshipSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("RELATIONSHIP")
+                .font(.system(size: 13, weight: .bold))
+                .tracking(0.5)
+                .foregroundStyle(.white.opacity(0.8))
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Level \(userLevel) · \(Relationship.stageName(userLevel, role: character.personalityRole))")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(.white)
+                    ProgressView(value: userLevelProgress)
+                        .tint(AppColor.pink)
+                        .frame(maxWidth: 180)
+                }
+                Spacer()
+                Button {
+                    showLevels = true
+                    EventLogger.shared.log("feature_used", [
+                        "feature": "relationship_levels_opened", "source": "profile_section",
+                    ])
+                } label: {
+                    Text("View progress")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 14).padding(.vertical, 8)
+                        .background(AppColor.pink.opacity(0.9), in: Capsule())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .popoverTip(LevelSectionTip(), arrowEdge: .top)
     }
 
     // MARK: Hakkımda
