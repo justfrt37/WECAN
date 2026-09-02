@@ -6,6 +6,7 @@
 import SwiftUI
 import Photos
 import PhotosUI
+import TipKit
 import UIKit
 import Combine
 
@@ -338,7 +339,9 @@ struct ChatView: View {
                         viewModel.showPaywall = true
                     }
                 })
+                .popoverTip(VoiceCallTip(), arrowEdge: .top)
                 TokenBadge(tokenStore: tokenStore) { showTokenStore = true }
+                    .popoverTip(TokenBadgeTip(), arrowEdge: .top)
                 headerButton("gearshape.fill", menu: true)
             }
         }
@@ -601,20 +604,24 @@ struct ChatView: View {
             modeButton(
                 icon: viewModel.isVoiceArmed ? "waveform.circle.fill" : "waveform.circle",
                 label: String(localized: "Send me a voice"),
+                costTokens: TokenCosts.voiceMessage,
                 isArmed: viewModel.isVoiceArmed
             ) {
                 viewModel.isVoiceArmed.toggle()
                 if viewModel.isVoiceArmed { viewModel.isImageArmed = false }
             }
+            .popoverTip(VoiceMessageTip(), arrowEdge: .bottom)
 
             modeButton(
                 icon: viewModel.isImageArmed ? "camera.circle.fill" : "camera.circle",
                 label: String(localized: "Send me a photo"),
+                costTokens: TokenCosts.photo,
                 isArmed: viewModel.isImageArmed
             ) {
                 viewModel.isImageArmed.toggle()
                 if viewModel.isImageArmed { viewModel.isVoiceArmed = false }
             }
+            .popoverTip(RequestPhotoTip(), arrowEdge: .bottom)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
@@ -625,9 +632,15 @@ struct ChatView: View {
         )
     }
 
-    private func modeButton(icon: String, label: String, isArmed: Bool, action: @escaping () -> Void) -> some View {
+    private func modeButton(icon: String, label: String, costTokens: Int? = nil, isArmed: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Text(label).font(.system(size: 13, weight: .semibold))
+            HStack(spacing: 5) {
+                Text(label).font(.system(size: 13, weight: .semibold))
+                if let costTokens {
+                    Text("\(costTokens)").font(.system(size: 12, weight: .bold))
+                    CoinIcon(size: 11)
+                }
+            }
             .lineLimit(1)
             .minimumScaleFactor(0.6)
             .foregroundStyle(isArmed ? AppColor.amber : .white.opacity(0.85))
@@ -742,6 +755,7 @@ struct ChatView: View {
         .padding(.top, 10)
         .padding(.bottom, 10 + bottomInset)
         .background(AppColor.card.opacity(0.9))
+        .popoverTip(SendFirstMessageTip(), arrowEdge: .bottom)
     }
 
     /// Mikrofon: kaydı başlat/durdur. ARTIK OTOMATIK GÖNDERMEZ — durunca

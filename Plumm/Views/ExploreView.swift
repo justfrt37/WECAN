@@ -8,6 +8,7 @@
 //
 
 import SwiftUI
+import TipKit
 
 struct ExploreView: View {
     @Environment(CharacterStore.self) private var store
@@ -109,6 +110,7 @@ struct ExploreView: View {
         LazyVGrid(columns: columns, spacing: 12) {
             Button { showCreate = true } label: { createCard }
                 .buttonStyle(.plain)
+                .popoverTip(CreateCharacterTip(), arrowEdge: .top)
             ForEach(filtered) { character in
                 Button {
                     profileCharacter = character
