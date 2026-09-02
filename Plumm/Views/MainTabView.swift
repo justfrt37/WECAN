@@ -112,6 +112,23 @@ struct MainTabView: View {
         }
     }
 
+    /// Ön plana dönüşte tier'ı SUNUCUDAN TAZELER, sonra paywall'a karar verir.
+    ///
+    /// `ensureTierResolved()` tek başına yetmiyor: ilk okumadan sonra hep
+    /// "çözülmüş" sayıldığı için anında dönüyor ve bayat değeri kullanıyor.
+    /// Bu, yükseltmeden sonra ekranın eski tier'da kalmasına yol açıyordu —
+    /// satın alma anındaki sync penceresi RevenueCat yayılımını kaçırırsa
+    /// webhook DB'yi güncelliyor ama uygulama bunu ancak yeniden başlatılınca
+    /// görüyordu (bkz. kullanıcı raporu: "Pro'dan Pro+'a geçiş 3 dakika sürdü").
+    ///
+    /// Maliyeti tek bir Supabase select — RevenueCat'e gitmiyor.
+    private func refreshTierThenMaybeShowPaywall() {
+        Task {
+            await PurchaseService.shared.refreshServerTier()
+            maybeShowPaywall()
+        }
+    }
+
     private func maybeShowPaywall() {
         // `skipPaywallDueToOnboarding` BİLEREK burada tüketilmiyor (onAppear
         // VE hemen ardından gelen scenePhase→.active patlaması aynı açılışta
@@ -199,7 +216,7 @@ struct MainTabView: View {
             }
             .onChange(of: scenePhase) { _, phase in
                 switch phase {
-                case .active: maybeShowPaywallAfterTierResolves()
+                case .active: refreshTierThenMaybeShowPaywall()
                 // Gerçekten arka plana gitti — bir SONRAKİ .active artık
                 // GERÇEK bir yeniden-giriş, onboarding'den gelen tek seferlik
                 // muafiyet burada biter.
@@ -213,18 +230,20 @@ struct MainTabView: View {
         // böylece ChatView push edilince (kök yerini alınca) rozet KAYBOLMAZ,
         // her zaman en üstte kalır (bkz. tasarım: "chat içinde de görünmeli").
         .overlay(alignment: .topTrailing) {
-            // Yalnızca sekme KÖKLERİNDE (path boş). PRO OLMAYAN kullanıcı HER
-            // sekmede PRO butonunu görür, token rozetini görmez; PRO kullanıcı
-            // her sekmede token rozetini görür (bkz. kullanıcı talebi: "Pro
-            // değilse jeton sayısı görünmesin, pro butonu görünsün").
+            // Yalnızca sekme KÖKLERİNDE (path boş).
             //
-            // Bu, "PRO butonu sadece Profile'da görünsün + token rozeti herkeste
-            // kalsın" şeklindeki önceki düzeni değiştirir: token bakiyesi artık
-            // yalnızca satın alınabilir bir şeyi OLAN (PRO) kullanıcıya
-            // gösteriliyor, PRO olmayana ise dönüşüm yolu.
+            // PRO butonu, YÜKSELTECEK bir tier kaldığı sürece görünür — yani
+            // ücretsiz kullanıcıda da, Pro'da da, Pro+'ta da. Önceden yalnızca
+            // `!isPro` koşuluna bakılıyordu ve Pro+ olan bir kullanıcının
+            // Pro Max'e ulaşabileceği hiçbir giriş noktası kalmıyordu
+            // (bkz. kullanıcı talebi). Paywall zaten sahip olunmayan üst
+            // tier'ları gösteriyor, o yüzden buton doğru ekranı açıyor.
+            //
+            // Yalnızca Max'te buton kaybolur ve yerini token rozeti alır:
+            // orada satılacak bir üst paket yok, bakiye göstermek daha faydalı.
             if path.isEmpty {
                 Group {
-                    if !PurchaseService.shared.isPro {
+                    if PurchaseService.shared.tier != .max {
                         proButton
                     } else {
                         TokenBadge(tokenStore: tokenStore) { showTokenStore = true }

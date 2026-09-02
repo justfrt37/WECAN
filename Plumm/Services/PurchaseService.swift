@@ -520,13 +520,24 @@ final class PurchaseService {
         return lastGranted
     }
 
-    private func syncWithServerRetrying(maxAttempts: Int = 4, delaySeconds: UInt64 = 2) async {
-        for attempt in 1...maxAttempts {
+    /// Sabit 2sn x 4 deneme (~8sn) yetmiyordu: RevenueCat makbuzu işleyip
+    /// entitlement'ı yayınlaması bazen bundan uzun sürüyor (canlı örnek:
+    /// Pro -> Pro+ yükseltmesi ancak ~3 dakika sonra düştü). Pencere
+    /// dolduğunda istemci pes ediyor ve tier eski kalıyordu.
+    ///
+    /// Artan bekleme ile ~60 saniyeye çıkarıldı. Sabit kısa aralıkla 30 kez
+    /// denemek yerine artan aralık: ilk saniyelerde hızlı yakalar (yaygın
+    /// durum), geç kalan yayılımı da sunucuyu gereksiz yormadan bekler.
+    private static let syncBackoff: [UInt64] = [1, 2, 3, 5, 8, 12, 15, 15]
+
+    private func syncWithServerRetrying() async {
+        for (i, wait) in Self.syncBackoff.enumerated() {
             if await syncWithServer() { return }
-            if attempt < maxAttempts {
-                try? await Task.sleep(nanoseconds: delaySeconds * 1_000_000_000)
+            if i < Self.syncBackoff.count - 1 {
+                try? await Task.sleep(nanoseconds: wait * 1_000_000_000)
             }
         }
+        PurchaseService.diag.log("[PW-DIAG] sync: pencere doldu, tier sunucudan doğrulanamadı")
     }
 
     /// Sunucu tarafı token ekonomisine köprü. `sync-subscription` edge
@@ -711,8 +722,16 @@ final class PurchaseService {
         // bekleyenler serbest bırakılmalı, yoksa paywall süresiz beklerdi.
         defer { markTierResolved() }
         let uid = UserDefaultsManager.shared.userId ?? "yok"
+        // `current_period_end >= now` filtresi ŞART: sorgu bunsuz, süresi
+        // DOLMUŞ bir aboneliğin tier'ını da döndürüyordu. Sunucu tarafı her
+        // yerde bu filtreyle bakıyor (entitlements.ts activeTier,
+        // create-character), yani istemci "Max'im" derken sunucu sesli
+        // aramayı/karakter yaratmayı reddediyordu — ve PRO butonu, yükseltecek
+        // yer olmadığı sanılarak gizli kalıyordu.
+        let nowISO = ISO8601DateFormatter().string(from: Date())
+        let encodedNow = nowISO.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? nowISO
         guard let accessToken = UserDefaultsManager.shared.accessToken,
-              let url = URL(string: "\(Config.supabaseURL)/rest/v1/subscriptions?select=tier")
+              let url = URL(string: "\(Config.supabaseURL)/rest/v1/subscriptions?select=tier&current_period_end=gte.\(encodedNow)")
         else {
             PurchaseService.diag.log("[PW-DIAG] serverTier: oturum yok, atlandı (uid=\(uid, privacy: .public))")
             return
