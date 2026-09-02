@@ -20,6 +20,7 @@ struct TokenStoreView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var purchases = PurchaseService.shared
     @State private var purchasingId: String?
+    @State private var showCosts = false
     /// Satın alma sonucu — başarı da hata da kullanıcıya GÖSTERİLİYOR.
     /// Eskiden sonuç sessizce yutuluyordu: hata durumunda ekran hiçbir şey
     /// demeden eski hâline dönüyordu (bkz. kullanıcı talebi).
@@ -110,6 +111,7 @@ struct TokenStoreView: View {
             }
         }
         .animation(.easeInOut(duration: 0.2), value: purchasingId)
+        .sheet(isPresented: $showCosts) { TokenCostsView() }
         .alert(item: $resultMessage) { alert in
             Alert(
                 title: Text(alert.title),
@@ -148,6 +150,15 @@ struct TokenStoreView: View {
                     Image(systemName: "chevron.left")
                         .font(.system(size: 17, weight: .bold))
                         .foregroundStyle(.white)
+                        .frame(width: 40, height: 40)
+                        .background(.white.opacity(0.10), in: Circle())
+                }
+                .buttonStyle(.plain)
+
+                Button { showCosts = true } label: {
+                    Image(systemName: "info.circle")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.85))
                         .frame(width: 40, height: 40)
                         .background(.white.opacity(0.10), in: Circle())
                 }
