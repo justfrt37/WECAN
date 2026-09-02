@@ -1,35 +1,22 @@
 //
 //  RelationshipLevelsView.swift
-//  İlişki Seviyeleri — profil sayfasındaki seviye çemberine dokununca açılan
-//  liste. 10 seviyeli ilişki ilerlemesini gösterir; kullanıcının şu anki
-//  seviyesi vurgulanır, geçmiş seviyeler mercan halkalı, gelecek seviyeler
-//  soluk, 10. seviye (Ruh İkizleri) altın renkli.
-//  Tasarım: AIGUI .pen "İlişki Seviyeleri (Plumm)" (Ej48q).
+//  İlişki Seviyeleri — profil sayfasındaki seviye çemberine / "İlerlemeyi Gör"
+//  butonuna dokununca açılan liste. 10 seviyeli ilişki ilerlemesini gösterir;
+//  kullanıcının şu anki seviyesi vurgulanır, geçmiş seviyeler mercan halkalı,
+//  gelecek seviyeler soluk, 10. seviye altın renkli.
+//
+//  Seviye ADLARI artık karakterin rolüne göre (bkz. Relationship.stageName) —
+//  eskiden burada sabit, romantik-statü ağırlıklı bir liste ("Lovers",
+//  "Engaged"...) vardı; kaldırıldı (kullanıcı talebi 2026-09-02). Tek doğru
+//  kaynak Relationship.stageName + Relationship.stageBlurb.
 //
 
 import SwiftUI
 
-private struct RelationshipLevel: Identifiable {
-    let id: Int          // 1...10
-    let title: String
-    let blurb: String
-}
-
-private let relationshipLevels: [RelationshipLevel] = [
-    .init(id: 1,  title: String(localized: "Strangers"),        blurb: String(localized: "You just met, getting to know each other.")),
-    .init(id: 2,  title: String(localized: "Acquaintances"),    blurb: String(localized: "You've started getting to know each other.")),
-    .init(id: 3,  title: String(localized: "Friends"),          blurb: String(localized: "There's a genuine friendship between you.")),
-    .init(id: 4,  title: String(localized: "Close Friends"),    blurb: String(localized: "You trust each other and share most things.")),
-    .init(id: 5,  title: String(localized: "Flirting"),         blurb: String(localized: "Sparks have started flying between you.")),
-    .init(id: 6,  title: String(localized: "Partners"),         blurb: String(localized: "You're officially together now.")),
-    .init(id: 7,  title: String(localized: "Lovers"),           blurb: String(localized: "You're passionately bound to each other.")),
-    .init(id: 8,  title: String(localized: "Committed"),        blurb: String(localized: "You dream of the future together.")),
-    .init(id: 9,  title: String(localized: "Engaged"),          blurb: String(localized: "The proposal is done, the big day approaches.")),
-    .init(id: 10, title: String(localized: "Soulmates"),        blurb: String(localized: "You complete each other, the highest level.")),
-]
-
 struct RelationshipLevelsView: View {
     let characterId: UUID
+    /// Seviye adlarını doğru role göre çözmek için (bkz. Relationship.stageName).
+    let role: String
     /// Token boost'lar sonrası anında güncellenmesi için `@State` — sunucu
     /// tek doğru kaynak (bkz. level-boost edge function), başarı sonrası
     /// `onBoosted` çağıranın (CharacterProfileView) kendi kalıcı önbelleklerini
@@ -37,15 +24,17 @@ struct RelationshipLevelsView: View {
     @State private var currentLevel: Int
     @State private var tokenBalance: Int
     @State private var isBoosting = false
+    @State private var boostError: String?
     let onBoosted: (_ newLevel: Int, _ newBalance: Int) -> Void
     let onInsufficientTokens: () -> Void
     @Environment(\.dismiss) private var dismiss
     private let service = ChatService()
 
-    init(characterId: UUID, currentLevel: Int, tokenBalance: Int,
+    init(characterId: UUID, role: String, currentLevel: Int, tokenBalance: Int,
          onBoosted: @escaping (_ newLevel: Int, _ newBalance: Int) -> Void,
          onInsufficientTokens: @escaping () -> Void) {
         self.characterId = characterId
+        self.role = role
         self._currentLevel = State(initialValue: currentLevel)
         self._tokenBalance = State(initialValue: tokenBalance)
         self.onBoosted = onBoosted
@@ -58,31 +47,28 @@ struct RelationshipLevelsView: View {
     private let ringBG = Color(hex: 0x1A0B14)
 
     private static let maxLevel = 10
-    private static func boostCost(forTargetLevel level: Int) -> Int {
-        if level <= 5 { return 50 }
-        if level <= 8 { return 100 }
-        return 200
-    }
 
     private func boost() {
         guard !isBoosting, currentLevel < Self.maxLevel else { return }
-        let cost = Self.boostCost(forTargetLevel: currentLevel + 1)
+        let cost = TokenCosts.levelBoost(toLevel: currentLevel + 1)
         guard tokenBalance >= cost else {
             onInsufficientTokens()
             return
         }
         isBoosting = true
         Task {
-            if let result = await service.boostLevel(characterId: characterId) {
+            switch await service.boostLevel(characterId: characterId) {
+            case .success(let result):
                 currentLevel = result.level
                 tokenBalance = result.tokenBalance
                 EventLogger.shared.log("feature_used", ["feature": "level_boost", "new_level": result.level])
                 onBoosted(result.level, result.tokenBalance)
-            } else {
-                // Ağ hatası/yarışta bakiye değişmiş olabilir — güvenli taraf:
-                // yetersiz bakiye akışını aç (kullanıcı en kötü paywall/coin
-                // mağazasını gereksiz görür, sessizce hiçbir şey olmamasından iyi).
+            case .insufficientTokens:
                 onInsufficientTokens()
+            case .alreadyMaxLevel:
+                currentLevel = Self.maxLevel
+            case .failed:
+                boostError = String(localized: "Couldn't boost right now. Check your connection and try again.")
             }
             isBoosting = false
         }
@@ -98,7 +84,7 @@ struct RelationshipLevelsView: View {
                 header
                 ScrollView {
                     VStack(spacing: 12) {
-                        ForEach(relationshipLevels) { level in
+                        ForEach(1...Self.maxLevel, id: \.self) { level in
                             levelRow(level)
                         }
                     }
@@ -110,6 +96,14 @@ struct RelationshipLevelsView: View {
             }
         }
         .preferredColorScheme(.dark)
+        .alert(String(localized: "Boost failed"), isPresented: Binding(
+            get: { boostError != nil },
+            set: { if !$0 { boostError = nil } }
+        )) {
+            Button("OK", role: .cancel) { boostError = nil }
+        } message: {
+            Text(boostError ?? "")
+        }
     }
 
     private var header: some View {
@@ -121,6 +115,12 @@ struct RelationshipLevelsView: View {
                 Text("As you chat your level rises and your bond deepens.")
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(.white.opacity(0.65))
+                if currentLevel < Self.maxLevel {
+                    Text("Chat to grow closer over time — or spend tokens to jump ahead now.")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.65))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
             Spacer()
             Button { dismiss() } label: {
@@ -136,10 +136,10 @@ struct RelationshipLevelsView: View {
         .padding(.bottom, 10)
     }
 
-    private func levelRow(_ level: RelationshipLevel) -> some View {
-        let isCurrent = level.id == currentLevel
-        let isPast = level.id < currentLevel
-        let isTop = level.id == 10
+    private func levelRow(_ level: Int) -> some View {
+        let isCurrent = level == currentLevel
+        let isPast = level < currentLevel
+        let isTop = level == Self.maxLevel
 
         // Halka rengi
         let ringStroke: Color = {
@@ -172,22 +172,25 @@ struct RelationshipLevelsView: View {
             return .white.opacity(0.55)
         }()
 
+        let title = Relationship.stageName(level, role: role)
+        let blurb = Relationship.stageBlurb(level)
+
         return HStack(alignment: .center, spacing: 14) {
             ZStack {
                 Circle()
                     .fill(ringBG)
                     .overlay(Circle().strokeBorder(ringStroke, lineWidth: ringWidth))
-                Text("\(level.id)")
-                    .font(.system(size: level.id == 10 ? 16 : 17, weight: .heavy))
+                Text("\(level)")
+                    .font(.system(size: level == 10 ? 16 : 17, weight: .heavy))
                     .foregroundStyle(numberColor)
             }
             .frame(width: 48, height: 48)
 
             VStack(alignment: .leading, spacing: 3) {
-                Text(level.title)
+                Text(title)
                     .font(.system(size: 16, weight: .heavy))
                     .foregroundStyle(titleColor)
-                Text(isCurrent ? "\(level.blurb) " + String(localized: "(your current level)") : level.blurb)
+                Text(isCurrent ? blurb + " " + String(localized: "(your current level)") : blurb)
                     .font(.system(size: 12, weight: isCurrent ? .semibold : .medium))
                     .foregroundStyle(blurbColor)
                     .lineSpacing(2)
@@ -197,8 +200,8 @@ struct RelationshipLevelsView: View {
 
             // Token boost — sadece BİR SONRAKİ seviyenin kartında (bkz.
             // level-boost edge function, her çağrı tam 1 seviye atlatır).
-            if level.id == currentLevel + 1 {
-                boostButton(targetLevel: level.id)
+            if level == currentLevel + 1 {
+                boostButton(targetLevel: level)
             }
         }
         .padding(.horizontal, 16)
@@ -209,7 +212,7 @@ struct RelationshipLevelsView: View {
     }
 
     private func boostButton(targetLevel: Int) -> some View {
-        let cost = Self.boostCost(forTargetLevel: targetLevel)
+        let cost = TokenCosts.levelBoost(toLevel: targetLevel)
         return Button { boost() } label: {
             if isBoosting {
                 ProgressView().tint(.white).frame(width: 60, height: 30)
@@ -230,5 +233,5 @@ struct RelationshipLevelsView: View {
 }
 
 #Preview {
-    RelationshipLevelsView(characterId: UUID(), currentLevel: 3, tokenBalance: 100, onBoosted: { _, _ in }, onInsufficientTokens: {})
+    RelationshipLevelsView(characterId: UUID(), role: "flirty", currentLevel: 3, tokenBalance: 100, onBoosted: { _, _ in }, onInsufficientTokens: {})
 }

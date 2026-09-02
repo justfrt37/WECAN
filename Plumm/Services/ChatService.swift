@@ -218,6 +218,17 @@ struct LevelBoostResult {
     let tokenBalance: Int
 }
 
+/// Typed result of a boost attempt. Previously `boostLevel` returned an
+/// optional and the UI treated `nil` as "not enough tokens" — so a network
+/// blip, a 5xx, or a 404 all silently routed the user to the token store.
+/// Now the caller can tell a real 402 from a transient failure.
+enum BoostOutcome {
+    case success(LevelBoostResult)
+    case insufficientTokens   // real 402 from charge_tokens
+    case alreadyMaxLevel      // 400 already_max_level
+    case failed               // network / 5xx / decode — "try again", no redirect
+}
+
 struct ChatService {
     /// Her Edge Function çağrısının ortak iskeleti: POST + JSON + Supabase auth
     /// başlıkları (oturum jetonu yoksa anon key) + açık timeout. Aynı altı satır
@@ -298,19 +309,30 @@ struct ChatService {
     }
 
     /// Token karşılığı +1 ilişki seviyesi (bkz. level-boost edge function,
-    /// RelationshipLevelsView). `nil` dönerse (yetersiz bakiye/zaten max
-    /// seviye/ağ hatası) çağıran mevcut coin mağazası/paywall akışını açar —
-    /// bu yüzden throw etmez, sessizce nil döner.
-    func boostLevel(characterId: UUID) async -> LevelBoostResult? {
+    /// RelationshipLevelsView). Throw etmez — sonucu `BoostOutcome` ile döner:
+    /// `.insufficientTokens` yalnızca gerçek 402'de, geçici ağ/sunucu
+    /// hatalarında `.failed` (çağıran mağazaya YÖNLENDİRMEZ, "tekrar dene" der).
+    func boostLevel(characterId: UUID) async -> BoostOutcome {
         var request = authorizedRequest(url: Config.levelBoostFunctionURL, timeout: 20)
         request.httpBody = try? JSONEncoder().encode(LevelBoostRequest(characterId: characterId.uuidString.lowercased()))
 
         guard let (data, response) = try? await URLSession.shared.data(for: request),
-              let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
-              let decoded = try? JSONDecoder().decode(LevelBoostResponse.self, from: data),
-              let level = decoded.level, let progress = decoded.levelProgress, let balance = decoded.tokenBalance
-        else { return nil }
-        return LevelBoostResult(level: level, levelProgress: progress, tokenBalance: balance)
+              let http = response as? HTTPURLResponse
+        else { return .failed }
+
+        if (200..<300).contains(http.statusCode) {
+            guard let decoded = try? JSONDecoder().decode(LevelBoostResponse.self, from: data),
+                  let level = decoded.level, let progress = decoded.levelProgress, let balance = decoded.tokenBalance
+            else { return .failed }
+            return .success(LevelBoostResult(level: level, levelProgress: progress, tokenBalance: balance))
+        }
+
+        let errorCode = (try? JSONDecoder().decode(LevelBoostResponse.self, from: data))?.error
+        switch (http.statusCode, errorCode) {
+        case (402, _):                   return .insufficientTokens
+        case (400, "already_max_level"): return .alreadyMaxLevel
+        default:                         return .failed
+        }
     }
 
     private struct InjectProactivePayload: Codable {
