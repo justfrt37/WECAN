@@ -8,16 +8,15 @@
 // "newMemories" summarization block).
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { fetchActiveMemories, numberedMemoryLines, applyMemoryExtraction } from "../_shared/directiveHelpers.ts";
+import { fetchActiveMemories, numberedMemoryLines, applyMemoryExtraction, pruneMemoriesIfOverCap } from "../_shared/directiveHelpers.ts";
+import type { NewMemory } from "../_shared/directiveHelpers.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-const XAI_API_KEY = Deno.env.get("XAI_API_KEY") ?? "";
-const XAI_URL = "https://api.x.ai/v1/chat/completions";
-const MODEL = "grok-4.3";
+import { callLLM } from "../_shared/llm.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -45,15 +44,8 @@ function extractJson(raw: string): any | null {
   try { return JSON.parse(match[0]); } catch { return null; }
 }
 
-async function callGrok(messages: { role: string; content: string }[], maxTokens: number): Promise<string> {
-  const resp = await fetch(XAI_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${XAI_API_KEY}` },
-    body: JSON.stringify({ model: MODEL, messages, temperature: 0.7, max_tokens: maxTokens }),
-  });
-  if (!resp.ok) throw new Error(`LLM ${resp.status}: ${await resp.text()}`);
-  const data = await resp.json();
-  return data?.choices?.[0]?.message?.content ?? "";
+function callText(messages: { role: string; content: string }[], maxTokens: number): Promise<string> {
+  return callLLM(messages, { maxTokens, temperature: 0.7 });
 }
 
 async function extractAndStoreMemories(conversationId: string, callSessionId: string) {
@@ -66,22 +58,44 @@ async function extractAndStoreMemories(conversationId: string, callSessionId: st
 
   const transcript = turns.map((t) => `${t.role === "user" ? "User" : "You"}: ${t.content}`).join("\n");
 
-  const raw = await callGrok([
+  const raw = await callText([
     {
       role: "system",
       content:
-        "Extract NEW durable atomic facts worth permanently remembering from this voice call transcript, " +
-        "that are NOT already covered by the existing memories list you'll be given (numbered, one per " +
-        "line) — do not repeat anything already in that list, even reworded. If there's nothing new, " +
-        "return an empty array. Include BOTH sides:\n" +
-        "- USER facts: name, preferences, promises, key relationship moments.\n" +
+        "Extract NEW durable facts worth permanently remembering from this voice call transcript, that are " +
+        "NOT already covered by the existing memories list you'll be given (numbered, one per line, each " +
+        "tagged with when it was first/last noted). Favor identity, personality, and life facts — who " +
+        "someone IS (job, living situation, relationships, values, recurring habits, how they tend to feel " +
+        "or act) — over one-off day-to-day small talk that has no lasting relevance. This isn't a strict " +
+        "filter: a passing detail is still worth keeping if it's the kind of thing that should color how " +
+        "the character responds days later. If there's nothing worth keeping, return an empty array. " +
+        "Include BOTH sides:\n" +
+        "- USER facts: name, preferences, promises, key relationship moments, recurring patterns.\n" +
         "- CHARACTER facts: things the character herself established/committed to on this call — a pet " +
         "name she used, a boundary she set, a backstory detail she improvised that should stay consistent, " +
         "a promise she made. These matter just as much as the user's.\n\n" +
+        "RECURRENCE: if the new content restates or reinforces something an existing memory already says " +
+        "(even worded differently), do NOT add it as a separate new memory. Instead put a single MERGED " +
+        "replacement fact in newMemories that folds in the recurrence as an observed pattern (naming both " +
+        "dates), and put that existing memory's number in staleIndexes so the old single-instance version " +
+        "gets replaced by the merged one.\n\n" +
         "ALSO identify any existing memories (by their number) that this transcript now CONTRADICTS — e.g. " +
         "the user previously said they're a barista and now say they just started a nursing job. Return " +
         "those numbers in staleIndexes. If nothing is contradicted, return an empty array.\n\n" +
-        'Respond with ONLY this JSON shape, nothing else: {"newMemories":["fact one","fact two"],"staleIndexes":[0,2]}',
+        // is_pinned 2026-09-02'de eklendi ve chat/index.ts'in fold prompt'unda
+        // zaten vardı; burada yoktu, yani sesli aramadan çıkan hiçbir kimlik
+        // bilgisi pinlenmiyordu ve zamanla budanabiliyordu. Metin sohbetiyle
+        // aynı ölçüt kullanılıyor ki iki yol aynı hafızayı aynı şekilde doldursun.
+        "PINNING: mark each new memory with \"pinned\": true ONLY if it is an identity-level fact " +
+        "that should survive forever — the user's name, age, city, job, family members, pets, " +
+        "birthday, allergies or medical constraints, and the equivalent permanent facts the " +
+        "character has established about herself (the pet name she calls the user, a core " +
+        "backstory commitment). Everything softer — a passing mood, a plan for this week, a " +
+        "one-off preference — is \"pinned\": false. Pinned memories are never compressed away, so " +
+        "be strict: if you'd still want it known a year from now, pin it; otherwise don't.\n\n" +
+        'Respond with ONLY this JSON shape, nothing else: {"newMemories":' +
+        '[{"content":"fact one","pinned":true},{"content":"fact two","pinned":false}],' +
+        '"staleIndexes":[0,2]}',
     },
     {
       role: "user",
@@ -90,13 +104,30 @@ async function extractAndStoreMemories(conversationId: string, callSessionId: st
   ], 500);
 
   const parsed = extractJson(raw);
-  const newMemories: string[] = Array.isArray(parsed?.newMemories)
-    ? parsed.newMemories.filter((m: unknown): m is string => typeof m === "string" && m.trim().length > 0).map((m: string) => m.trim())
+  // Her iki şekli de kabul ediyor: prompt'un istediği {content, pinned}
+  // nesneleri ve model eski biçime dönerse düz string — string düşürülmüyor,
+  // sadece pinlenmemiş sayılıyor. chat/index.ts ile birebir aynı davranış.
+  const newMemories: NewMemory[] = Array.isArray(parsed?.newMemories)
+    ? parsed.newMemories
+        .map((m: unknown): NewMemory | null => {
+          if (typeof m === "string") {
+            return m.trim() ? { content: m.trim(), pinned: false } : null;
+          }
+          if (m && typeof m === "object") {
+            const content = (m as Record<string, unknown>).content;
+            if (typeof content === "string" && content.trim()) {
+              return { content: content.trim(), pinned: (m as Record<string, unknown>).pinned === true };
+            }
+          }
+          return null;
+        })
+        .filter((m: NewMemory | null): m is NewMemory => m !== null)
     : [];
   const staleIndexes: number[] = Array.isArray(parsed?.staleIndexes)
     ? parsed.staleIndexes.filter((i: unknown): i is number => typeof i === "number" && Number.isInteger(i))
     : [];
   await applyMemoryExtraction(db, conversationId, activeMemories, newMemories, staleIndexes);
+  await pruneMemoriesIfOverCap(db, conversationId, callText);
 }
 
 Deno.serve(async (req: Request) => {

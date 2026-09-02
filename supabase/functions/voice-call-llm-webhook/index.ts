@@ -16,7 +16,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const XAI_API_KEY = Deno.env.get("XAI_API_KEY") ?? "";
-const XAI_URL = "https://api.x.ai/v1/chat/completions";
+import { callLLM, callLLMStream } from "../_shared/llm.ts";
 const MODEL = "grok-4.3";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
@@ -91,13 +91,17 @@ Deno.serve(async (req: Request) => {
         }]
       : messages;
 
-    const upstream = await fetch(XAI_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${XAI_API_KEY}` },
-      body: JSON.stringify({ model: MODEL, messages: grokMessages, temperature: 0.9, max_tokens: 120, stream: true }),
-    });
-    if (!upstream.ok || !upstream.body) {
-      return new Response(JSON.stringify({ error: `xAI ${upstream.status}: ${await upstream.text()}` }), { status: 502 });
+    // callLLMStream ham upstream Response'u veriyor, govdesi tuketilmemis
+    // halde -- asagidaki tee() ve ElevenLabs'e iletim aynen calisiyor.
+    // DeepSeek de xAI de OpenAI bicimli SSE uretiyor, iletilen sozlesme ayni.
+    let upstream: Response;
+    try {
+      upstream = await callLLMStream(grokMessages, { maxTokens: 120, temperature: 0.9 });
+    } catch (e) {
+      return new Response(JSON.stringify({ error: String(e) }), { status: 502 });
+    }
+    if (!upstream.body) {
+      return new Response(JSON.stringify({ error: "empty stream body" }), { status: 502 });
     }
 
     // Tee the upstream SSE stream: one copy forwarded to ElevenLabs untouched

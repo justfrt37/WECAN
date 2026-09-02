@@ -7,29 +7,32 @@
 // higher = flatter, more consistent delivery. There is deliberately no
 // `style` knob here — the SDK's TTSOverrides doesn't expose one.
 
-const STABILITY_MAP: Record<string, number> = {
-  crazy: 0.25,
-  flirty: 0.35,
-  playful: 0.35,
-  devoted: 0.5,
-  ex: 0.5,
-  shy: 0.65,
-  distant: 0.7,
-};
+// 2026-09-02, eleven_v3_conversational'a geçişle birlikte tek değere indi.
+//
+// SEBEP ÖLÇÜLDÜ: v3'te stability sürekli bir eksen DEĞİL. API 0.25/0.3/0.7
+// gibi değerleri kabul ediyor (HTTP 200) ama kullanmıyor — sabit seed'le aynı
+// cümle üretildiğinde 0.25, 0.3 ve 0.5 BİREBİR aynı uzunlukta ses veriyor
+// (69.007 bayt), 0.0 ise 62.319, 1.0 ise 59.812. Yani sadece üç gerçek mod
+// var: 0.0 Creative, 0.5 Natural, 1.0 Robust. Eski haritadaki 0.25/0.35/0.4/
+// 0.65/0.7 değerlerinin BEŞİ de aynı moda (Natural) yuvarlanıyordu — yani rol
+// başına farklılaştırma zaten hiç çalışmıyordu, sadece öyle sanıyorduk.
+const STABILITY = 0.0; // Creative — ifade aralığı en geniş mod
 
-const DEFAULT_STABILITY = 0.4;
-
-export function stabilityFor(role: string): number {
-  return STABILITY_MAP[role] ?? DEFAULT_STABILITY;
+export function stabilityFor(_role: string): number {
+  return STABILITY;
 }
 
-// TTSOverrides are set ONCE per call (custom-LLM webhook only streams
-// text — no per-reply voice_settings channel exists in that contract, so
-// true per-TURN variance isn't architecturally possible here). This is the
-// honest achievable version: small random jitter applied once at call
-// start, so back-to-back calls with the same character don't sound
-// identically flat — not "changes mid-call," just "not robotically fixed
-// call after call."
+// Stability jitter'ı KALDIRILDI (2026-09-02). İki sebeple:
+//   1. İşe yaramıyordu. ±0.05'lik sapma v3'ün üç modu arasında zıplamıyor,
+//      hep aynı moda yuvarlanıyordu (yukarıdaki ölçüme bakın).
+//   2. Gerekli değil. Jitter'ın var oluş sebebi buradaki eski yorumun kendi
+//      itirafıydı: "gerçek tur-içi varyans mimari olarak mümkün değil, bu
+//      yüzden arama başında bir kez rastgele sapma uyguluyoruz" — yani
+//      yapamadığımız şeyin taklidiydi. v3'te varyans artık GERÇEKTEN tur
+//      içinde geliyor, çünkü model her cevapta ayrı [laughs]/[sighs]/
+//      [whispers] koyabiliyor. Taklide gerek kalmadı.
+// speed'te küçük sapma kaldı: konuşma hızı bir ifade kanalı değil, sadece
+// arka arkaya aramaların birebir aynı tempoda olmamasını sağlıyor.
 function jitter(base: number, spread: number, min: number, max: number): number {
   const value = base + (Math.random() * 2 - 1) * spread;
   return Math.min(max, Math.max(min, Math.round(value * 100) / 100));
@@ -37,7 +40,7 @@ function jitter(base: number, spread: number, min: number, max: number): number 
 
 export function callVoiceSettingsFor(role: string): { stability: number; speed: number } {
   return {
-    stability: jitter(stabilityFor(role), 0.05, 0.05, 0.95),
+    stability: stabilityFor(role),
     speed: jitter(1.0, 0.06, 0.85, 1.15),
   };
 }

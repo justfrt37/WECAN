@@ -9,6 +9,13 @@
 //   Cevap:  { ok: true }
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { embedText, pruneMemoriesIfOverCap } from "../_shared/directiveHelpers.ts";
+
+import { callLLM } from "../_shared/llm.ts";
+
+function callText(messages: { role: string; content: string }[], maxTokens: number): Promise<string> {
+  return callLLM(messages, { maxTokens, temperature: 0.7 });
+}
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -97,7 +104,9 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    // Konuşmayı bul ya da oluştur (kullanıcı + karakter) — chat fonksiyonuyla aynı desen.
+    // Konuşmayı bul ya da oluştur (kullanıcı + karakter). upsert, not insert —
+    // conversations(user_id, character_id) UNIQUE (bkz. chat/index.ts'deki
+    // aynı düzeltme, migration merge_duplicate_conversations_and_add_unique_constraint).
     let { data: convo } = await db
       .from("conversations")
       .select("id")
@@ -108,16 +117,26 @@ Deno.serve(async (req: Request) => {
     if (!convo) {
       const ins = await db
         .from("conversations")
-        .insert({ user_id: uid, character_id: characterId })
+        .upsert({ user_id: uid, character_id: characterId }, { onConflict: "user_id,character_id" })
         .select("id")
         .single();
       convo = ins.data!;
     }
     const conversationId: string = convo.id;
 
-    const table = kind === "memory" ? "memories" : "conversation_behaviors";
-    const { error: insErr } = await db.from(table).insert({ conversation_id: conversationId, content });
-    if (insErr) return json({ error: insErr.message }, 500);
+    if (kind === "memory") {
+      // embedding zorunlu — match_memories RPC benzerlik araması yapıyor,
+      // embedding'siz (null) satır fetchRelevantMemories'te asla eşleşmez,
+      // yani not kaydedilir ama modele hiç ulaşmazdı (sessiz no-op bug'ı).
+      let embedding: number[] | null = null;
+      try { embedding = await embedText(content); } catch (e) { console.error("embedText failed:", String(e)); }
+      const { error: insErr } = await db.from("memories").insert({ conversation_id: conversationId, content, embedding });
+      if (insErr) return json({ error: insErr.message }, 500);
+      await pruneMemoriesIfOverCap(db, conversationId, callText);
+    } else {
+      const { error: insErr } = await db.from("conversation_behaviors").insert({ conversation_id: conversationId, content });
+      if (insErr) return json({ error: insErr.message }, 500);
+    }
 
     return json({ ok: true });
   } catch (e) {

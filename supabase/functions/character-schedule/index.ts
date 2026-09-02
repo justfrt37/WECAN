@@ -16,7 +16,7 @@ const corsHeaders = {
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
-const XAI_API_KEY = Deno.env.get("XAI_API_KEY") ?? "";
+import { callLLM } from "../_shared/llm.ts";
 const XAI_URL = "https://api.x.ai/v1/chat/completions";
 const MODEL = "grok-4.3";
 
@@ -123,22 +123,16 @@ Deno.serve(async (req: Request) => {
     if (!characterId) return json({ error: "characterId required" }, 400);
     if (!systemPrompt) return json({ error: "systemPrompt required" }, 400);
 
-    const resp = await fetch(XAI_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${XAI_API_KEY}` },
-      body: JSON.stringify({
-        model: MODEL,
-        messages: [
-          { role: "system", content: `${systemPrompt}\n\n${buildScheduleInstructions(interests)}` },
-          { role: "user", content: "Generate the schedule JSON now." },
-        ],
-        temperature: 0.8,
-        max_tokens: 1500,
-      }),
-    });
-    if (!resp.ok) return json({ error: `LLM ${resp.status}: ${await resp.text()}` }, 502);
-    const data = await resp.json();
-    const raw: string = data?.choices?.[0]?.message?.content ?? "";
+    const raw: string = await callLLM(
+      [
+        { role: "system", content: `${systemPrompt}\n\n${buildScheduleInstructions(interests)}` },
+        { role: "user", content: "Generate the schedule JSON now." },
+      ],
+      // 0.8 -> 0.4: bu cagri JSON uretiyor, sicaklik sadece ayristirilamaz
+      // cikti riskini artiriyor. Program cesitliligi zaten
+      // buildScheduleInstructions icindeki varyasyondan geliyor.
+      { maxTokens: 1500, temperature: 0.4 },
+    );
     const match = raw.match(/\{[\s\S]*\}/);
     if (!match) return json({ error: "no_json_in_response" }, 502);
 

@@ -12,9 +12,24 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type",
 };
 
-const XAI_API_KEY = Deno.env.get("XAI_API_KEY") ?? "";
-const XAI_URL = "https://api.x.ai/v1/chat/completions";
-const MODEL = "grok-4.3";
+import { callLLM } from "../_shared/llm.ts";
+
+// Bu fonksiyonun JWT doğrulaması YOKTU — anon key'i bilen HERKES (uygulama
+// bundle'ında zaten public) sınırsız serbest-metin prompt gönderip xAI
+// kredisini tüketebiliyordu. Diğer TÜM fonksiyonlar gibi gerçek oturum JWT'si
+// zorunlu tutuluyor (bkz. GenerateService.swift — client zaten accessToken
+// varsa onu gönderiyordu, sadece sunucu tarafı hiç kontrol etmiyordu).
+function userIdFromJWT(authHeader: string | null): string | null {
+  if (!authHeader) return null;
+  const jwt = authHeader.replace("Bearer ", "").trim();
+  const parts = jwt.split(".");
+  if (parts.length < 2) return null;
+  try {
+    let b64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+    while (b64.length % 4) b64 += "=";
+    return JSON.parse(atob(b64)).sub ?? null;
+  } catch { return null; }
+}
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
@@ -27,30 +42,18 @@ Deno.serve(async (req: Request) => {
     });
 
   try {
+    const uid = userIdFromJWT(req.headers.get("Authorization"));
+    if (!uid) return json({ error: "unauthorized" }, 401);
+
     const body = await req.json();
     const prompt: string = body.prompt ?? "";
     const maxTokens: number = body.maxTokens ?? 220;
     if (!prompt.trim()) return json({ error: "prompt required" }, 400);
 
-    const resp = await fetch(XAI_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${XAI_API_KEY}`,
-      },
-      body: JSON.stringify({
-        model: MODEL,
-        messages: [{ role: "user", content: prompt }],
-        temperature: 1.0,
-        max_tokens: maxTokens,
-      }),
-    });
-    if (!resp.ok) {
-      const text = await resp.text();
-      return json({ error: `LLM ${resp.status}: ${text}` }, 500);
-    }
-    const data = await resp.json();
-    const text = data?.choices?.[0]?.message?.content ?? "";
+    const text = await callLLM(
+      [{ role: "user", content: prompt }],
+      { maxTokens, temperature: 1.0 },
+    );
     return json({ text });
   } catch (e) {
     return json({ error: String(e) }, 500);
