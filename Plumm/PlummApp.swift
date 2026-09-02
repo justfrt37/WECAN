@@ -77,7 +77,14 @@ struct PlummApp: App {
                 // olsun, yani log NİHAİ durumu göstersin.
                 PurchaseService.shared.logEntitlementState("launch")
                 ImageCache.shared.evictIfNeeded()
+                // First-run feature tips — no-op until onboarding is done and
+                // never in review mode (bkz. PlummTips.configureIfEligible).
+                PlummTips.configureIfEligible(onboardingCompleted: onboarding.isCompleted)
             }
+        }
+        .onChange(of: onboarding.isCompleted) { _, done in
+            // User finished onboarding this session — arm tips without a relaunch.
+            PlummTips.configureIfEligible(onboardingCompleted: done)
         }
         .onChange(of: scenePhase) { _, newPhase in
             switch newPhase {
