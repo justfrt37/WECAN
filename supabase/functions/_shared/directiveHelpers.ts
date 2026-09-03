@@ -152,6 +152,45 @@ export function numberedMemoryLines(memories: { content: string; created_at?: st
   }).join("\n");
 }
 
+// Dedup ran on cosine >= 0.75 alone until 2026-09-02, and that quietly
+// destroyed memory. Measured on real rows from one conversation, three facts
+// with NOTHING in common beyond the person they describe:
+//   "Kaan is 34 years old, lives in Izmir" ~ "User's name is Kaan"   0.907
+//   "Kaan is 34 years old, lives in Izmir" ~ "favorite food is mantı" 0.881
+//   "Kaan's favorite food is mantı"        ~ "User's name is Kaan"    0.878
+// gte-small packs short same-subject sentences into a narrow band, so 0.75
+// matched everything: a 6-turn chunk that correctly extracted name, age, city,
+// food, a seafood ALLERGY, a sister and a birthday wrote only three rows —
+// the rest were swallowed as "recurrences" of the identity memory, which is
+// why two rows carried mention_count 5 after the user said each thing once.
+//
+// Cosine alone can't separate these, so the gate is now BOTH: a high cosine
+// AND real word overlap. A genuine restatement ("likes coffee" / "enjoys
+// coffee") clears both; two unrelated facts about the same person share the
+// name and little else, so they fail the overlap test and get stored.
+const DEDUP_COSINE = 0.9;
+const DEDUP_WORD_OVERLAP = 0.5;
+
+// Jaccard over content words. Short function words carry no signal here and
+// would inflate the score between any two English sentences.
+const STOPWORDS = new Set([
+  "the", "a", "an", "is", "are", "was", "were", "and", "or", "of", "to", "in",
+  "on", "at", "for", "with", "has", "have", "had", "user", "users", "character",
+  "she", "he", "they", "her", "his", "their", "that", "this", "it", "its",
+]);
+function wordOverlap(a: string, b: string): number {
+  const words = (s: string) =>
+    new Set(
+      s.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, " ").split(/\s+/)
+        .filter((w) => w.length > 2 && !STOPWORDS.has(w)),
+    );
+  const A = words(a), B = words(b);
+  if (A.size === 0 || B.size === 0) return 0;
+  let shared = 0;
+  for (const w of A) if (B.has(w)) shared++;
+  return shared / Math.min(A.size, B.size);
+}
+
 async function findNearDuplicateMemory(
   db: DB,
   conversationId: string,
@@ -167,12 +206,14 @@ async function findNearDuplicateMemory(
   const { data, error } = await db.rpc("match_memories", {
     p_conversation_id: conversationId,
     p_query_embedding: embedding,
-    p_match_count: 1,
-    p_similarity_threshold: 0.75,
+    p_match_count: 3,
+    p_similarity_threshold: DEDUP_COSINE,
   });
   if (error || !data || data.length === 0) return null;
-  const row = data[0] as { id: string; mention_count: number };
-  return { id: row.id, mention_count: row.mention_count ?? 1 };
+  const rows = data as { id: string; content: string; mention_count: number }[];
+  const hit = rows.find((r) => wordOverlap(content, r.content ?? "") >= DEDUP_WORD_OVERLAP);
+  if (!hit) return null;
+  return { id: hit.id, mention_count: hit.mention_count ?? 1 };
 }
 
 export interface NewMemory {

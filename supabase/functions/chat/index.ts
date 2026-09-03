@@ -1718,14 +1718,56 @@ Deno.serve(async (req: Request) => {
               "by the separate memory extraction below, and repeating them wastes the character's attention.\n\n" +
               "Short bullet points. Keep prior summary content, fold in what's new, drop " +
               "anything superseded or no longer relevant.\n\n" +
-              "SEPARATELY, also extract any NEW durable facts worth permanently remembering that are NOT " +
+              'Respond with ONLY this JSON, nothing else: {"summary":"..."}',
+          },
+          {
+            role: "user",
+            content:
+              `Previous summary:\n${convo.summary || "(none)"}\n\n` +
+              `New conversation turns:\n${convoText}\n\nUpdated JSON:`,
+          },
+        ];
+
+        // Memory extraction is its own call as of 2026-09-02, and the reason is
+        // measured. It used to share ONE response with the summary, and the
+        // summary is emitted FIRST in that JSON — so on a conversation with a
+        // rich running summary the model spent the budget writing prose and had
+        // almost nothing left for newMemories. Live, a 6-turn chunk in which the
+        // user stated their name, age, city, favourite food, seafood allergy,
+        // sister, birthday and hobby produced exactly TWO memories; the allergy
+        // and the sister were simply dropped.
+        //
+        // Measured on that same chunk (8 durable facts available):
+        //   combined, temp 0.1 (what shipped) .... 7.0/8
+        //   combined, temp 0.9 ................... 7.7/8
+        //   combined, budget raised to 1500 ...... 7.3/8
+        //   SPLIT, extraction alone .............. 8.0/8  (at 0.1 AND 0.4)
+        // Temperature is a minor effect; the starvation is structural, so the
+        // fix is structural. The two calls run concurrently, so this costs
+        // latency only in tokens, not in wall-clock.
+        const extractPrompt: WireMessage[] = [
+          {
+            role: "system",
+            content:
+              "You extract durable facts worth permanently remembering from a chunk of conversation " +
+              "between a user and an AI companion character. Write them in English regardless of the " +
+              "language the conversation was in.\n" +
+              "ONE EXCEPTION to writing in English: keep every proper noun EXACTLY as the user spelled " +
+              "it — places, people, brands, dishes, venues. Write 'Roma' if they wrote Roma (not " +
+              "'Rome'), 'İstanbul' if they wrote İstanbul. Those are the words they will type again " +
+              "later, and literal spelling is what makes the memory findable.\n\n" +
+              "Extract any NEW durable facts that are NOT " +
               "already covered by the existing memories list you'll be given (numbered, one per line, each " +
               "tagged with when it was first/last noted). Favor identity, personality, and life facts — who " +
               "someone IS (job, living situation, relationships, values, recurring habits, how they tend to " +
               "feel or act) — over one-off day-to-day small talk that has no lasting relevance. This isn't a " +
               "strict filter: a passing detail is still worth keeping if it's the kind of thing that should " +
               "color how the character responds days later. If there's nothing worth keeping, return an " +
-              "empty array. Include BOTH sides:\n" +
+              "empty array.\n" +
+              "BE THOROUGH — this is the only pass over these turns. If the user stated a durable fact " +
+              "about themselves anywhere in this chunk, it belongs in the list. Silently dropping a " +
+              "stated allergy, family member, birthday or job is a failure, not brevity.\n" +
+              "Include BOTH sides:\n" +
               "- USER facts: name, preferences, promises, key relationship moments, recurring patterns.\n" +
               "- CHARACTER facts: things the character herself has established/committed to in this " +
               "conversation — a pet name she's adopted for the user, a boundary she's set, a backstory " +
@@ -1749,10 +1791,9 @@ Deno.serve(async (req: Request) => {
               "backstory commitment). Everything softer — a passing mood, a plan for this week, a " +
               "one-off preference — is \"pinned\": false. Pinned memories are never compressed away, so " +
               "be strict: if you'd still want it known a year from now, pin it; otherwise don't.\n\n" +
-              'Respond with ONLY this JSON shape, nothing else: {"summary":"...","newMemories":' +
+              'Respond with ONLY this JSON shape, nothing else: {"newMemories":' +
               '[{"content":"fact one","pinned":true},{"content":"fact two","pinned":false}],' +
-              '"staleIndexes":[0,2]} — `summary` is the full updated BOT-behaviour summary text, ' +
-              "`newMemories` and `staleIndexes` are the arrays described above (can be empty).",
+              '"staleIndexes":[0,2]} — both arrays can be empty.',
           },
           {
             role: "user",
@@ -1763,12 +1804,20 @@ Deno.serve(async (req: Request) => {
           },
         ];
         try {
-          // 900, not 500: this single response carries the running summary AND
-          // the extracted memories AND staleIndexes. The summary grows over the
-          // life of a conversation, so a tight budget truncates the JSON
-          // mid-string and makes it unparseable.
-          const raw = await callLLM(summaryPrompt, 900, undefined, "none", "precise");
-          const parsed = extractJson(raw);
+          // Concurrent, not sequential: the two calls are independent, so
+          // splitting them costs extra tokens but no extra wall-clock.
+          // Budgets are sized per job now rather than shared — 700 for the
+          // summary prose, 800 for the fact list, instead of one 900 that the
+          // summary could eat entirely.
+          const [rawSummary, rawExtract] = await Promise.all([
+            callLLM(summaryPrompt, 700, undefined, "none", "precise"),
+            // 0.4 rather than "precise" 0.1: extraction recall measured very
+            // slightly better with a little sampling room, and unlike the
+            // summary there is no prose quality to protect here.
+            callLLM(extractPrompt, 800, undefined, "none", "creative"),
+          ]);
+          const parsed = extractJson(rawSummary);
+          const parsedExtract = extractJson(rawExtract);
           // Bail out instead of writing through a failed parse. The previous
           // code fell back to `raw.trim()` as the summary and advanced
           // summarized_count regardless — so ONE transient failure (truncation,
@@ -1777,8 +1826,16 @@ Deno.serve(async (req: Request) => {
           // window, no memories were extracted from them, and the good summary
           // was overwritten with garbage. Leaving both fields untouched means
           // the same range is simply retried on the next turn.
-          if (!parsed || typeof parsed.summary !== "string") {
-            console.error("fold: unparseable extraction response, skipping fold this turn:", raw.slice(0, 200));
+          //
+          // BOTH calls must succeed before summarized_count advances. Advancing
+          // on a good summary alone would slide those turns out of the window
+          // with their facts unextracted — the exact permanent data loss this
+          // guard exists to prevent, just arriving through the other call.
+          if (!parsed || typeof parsed.summary !== "string" || !parsedExtract) {
+            console.error(
+              "fold: unparseable response, skipping fold this turn. summary:",
+              rawSummary.slice(0, 120), "| extract:", rawExtract.slice(0, 120),
+            );
             return json({ conversationId, reply, level: newLevel, levelProgress: newProgress, wentToSleep, tokenBalance: tokenBalanceAfterCharge, autoMedia, ...jealousyState });
           }
           const newSummary: string = parsed.summary;
@@ -1789,8 +1846,8 @@ Deno.serve(async (req: Request) => {
           // asks for, and a bare string (the pre-pinning format) in case the
           // model regresses to it — a bare string is simply treated as unpinned
           // rather than dropping the memory entirely.
-          const newMemories: NewMemory[] = Array.isArray(parsed?.newMemories)
-            ? parsed.newMemories
+          const newMemories: NewMemory[] = Array.isArray(parsedExtract?.newMemories)
+            ? parsedExtract.newMemories
                 .map((m: unknown): NewMemory | null => {
                   if (typeof m === "string") {
                     return m.trim() ? { content: m.trim(), pinned: false } : null;
@@ -1805,8 +1862,8 @@ Deno.serve(async (req: Request) => {
                 })
                 .filter((m: NewMemory | null): m is NewMemory => m !== null)
             : [];
-          const staleIndexes: number[] = Array.isArray(parsed?.staleIndexes)
-            ? parsed.staleIndexes.filter((i: unknown): i is number => typeof i === "number" && Number.isInteger(i))
+          const staleIndexes: number[] = Array.isArray(parsedExtract?.staleIndexes)
+            ? parsedExtract.staleIndexes.filter((i: unknown): i is number => typeof i === "number" && Number.isInteger(i))
             : [];
           await applyMemoryExtraction(db, conversationId, activeMemories, newMemories, staleIndexes);
           await pruneMemoriesIfOverCap(
