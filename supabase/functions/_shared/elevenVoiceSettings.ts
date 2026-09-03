@@ -31,16 +31,13 @@ export function stabilityFor(_role: string): number {
 //      yapamadığımız şeyin taklidiydi. v3'te varyans artık GERÇEKTEN tur
 //      içinde geliyor, çünkü model her cevapta ayrı [laughs]/[sighs]/
 //      [whispers] koyabiliyor. Taklide gerek kalmadı.
-// speed'te küçük sapma kaldı: konuşma hızı bir ifade kanalı değil, sadece
-// arka arkaya aramaların birebir aynı tempoda olmamasını sağlıyor.
-function jitter(base: number, spread: number, min: number, max: number): number {
-  const value = base + (Math.random() * 2 - 1) * spread;
-  return Math.min(max, Math.max(min, Math.round(value * 100) / 100));
-}
-
-export function callVoiceSettingsFor(role: string): { stability: number; speed: number } {
-  return {
-    stability: stabilityFor(role),
-    speed: jitter(1.0, 0.06, 0.85, 1.15),
-  };
+// speed de kaldırıldı ve bu sefer sebebi estetik değil, ARAMAYI KIRIYORDU:
+// ajanın override politikası tts.voice_id ve tts.stability'ye izin veriyor ama
+// tts.speed'e VERMİYOR. İstemci speed override'ı gönderince ElevenLabs soketi
+// 1008 "speed is not allowed by config" ile kapatıyordu, yani arama hiç
+// başlamıyordu. Politikayı açmak yerine göndermeyi bıraktık: değer zaten
+// yukarıdaki jitter'la aynı işi yapıyordu ve v3'ün tur-içi etiketleri geldiği
+// için taklide gerek kalmadı.
+export function callVoiceSettingsFor(role: string): { stability: number } {
+  return { stability: stabilityFor(role) };
 }

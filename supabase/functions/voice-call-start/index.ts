@@ -308,7 +308,16 @@ Deno.serve(async (req: Request) => {
     systemPrompt += languageRule(language);
 
     const voiceId = character?.voice_id || elevenVoiceIdFor(personalityRole, vibe, characterId);
-    const { stability, speed } = callVoiceSettingsFor(personalityRole);
+    // `speed` is NOT returned any more. The agent's override policy allows
+    // tts.voice_id and tts.stability but NOT tts.speed, so the client passing a
+    // speed override made ElevenLabs close the socket with 1008
+    // "speed is not allowed by config" — i.e. the call failed outright.
+    // Dropping it rather than opening the override up, because the value was
+    // only ever a cosmetic jitter: its own comment admitted it existed to fake
+    // variance that wasn't otherwise possible. Since the agent moved to
+    // eleven_v3_conversational that variance is real and per-turn, coming from
+    // the audio tags, so the hack has nothing left to do.
+    const { stability } = callVoiceSettingsFor(personalityRole);
     const firstMessage = await generateFirstMessage(systemPrompt, recentChatGapMinutes);
 
     const { data: session, error } = await db.from("call_sessions").insert({
@@ -338,7 +347,6 @@ Deno.serve(async (req: Request) => {
       systemPrompt,
       voiceId,
       stability,
-      speed,
       firstMessage,
     });
   } catch (e) {
