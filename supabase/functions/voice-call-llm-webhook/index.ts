@@ -59,9 +59,28 @@ Deno.serve(async (req: Request) => {
   try {
     const body = await req.json();
     const messages: WireMessage[] = body.messages ?? [];
-    const callSessionId: string | undefined = body.elevenlabs_extra_body?.callSessionId;
+    // The client sends this as `custom_llm_extra_body` in the conversation
+    // initiation payload; we only ever read `elevenlabs_extra_body`, so if
+    // ElevenLabs forwards it under the name the client used — or flattens it —
+    // the id went missing and every turn was rejected with 400. That is what
+    // the caller sees as "custom_llm_error: Failed to generate response from
+    // custom LLM", and the edge log showed three consecutive
+    // `POST | 400 | .../voice-call-llm-webhook/chat/completions`.
+    // (Note the /chat/completions suffix: ElevenLabs treats the configured URL
+    // as an OpenAI-compatible BASE url and appends the path itself.)
+    // Accept every shape rather than guess which one is current.
+    const extra = body.elevenlabs_extra_body ?? body.custom_llm_extra_body ?? {};
+    const callSessionId: string | undefined = extra.callSessionId ?? body.callSessionId;
 
     if (!callSessionId) {
+      // Log the envelope's shape, never its contents — this is the only way to
+      // see what ElevenLabs actually sends without guessing again.
+      console.error(
+        "voice webhook: no callSessionId. top-level keys:",
+        Object.keys(body ?? {}).join(","),
+        "| extra keys:",
+        Object.keys(extra ?? {}).join(","),
+      );
       return new Response(JSON.stringify({ error: "missing callSessionId" }), { status: 400 });
     }
     const { data: session } = await db.from("call_sessions")
