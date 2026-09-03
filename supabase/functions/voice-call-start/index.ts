@@ -165,6 +165,22 @@ function openerInstruction(recentChatGapMinutes: number | null): string {
 // same system prompt so it matches personality/relationship level. Falls
 // back to a plain greeting if Grok fails, since a missing first message
 // isn't worth failing the whole call start over.
+// The opener is the one reply on the call path that is NOT streamed — it is
+// generated here and returned as a plain string — so it is the one place an
+// invented audio tag can still be caught. Observed live: a generated opener
+// began with "[surprised but happy]", which is not in V3_AUDIO_TAGS, and the
+// first thing the user would hear on picking up is whatever v3 decides to do
+// with it. Every mid-call reply goes out as an SSE stream that is teed
+// straight to ElevenLabs, where no such interception point exists — there the
+// closed tag list in VOICE_CALL_STYLE_RULE is the only defence.
+function stripUnknownAudioTags(text: string): string {
+  return text
+    .replace(/\[([^\]\n]{1,40})\]/g, (whole, inner: string) =>
+      (V3_AUDIO_TAGS as readonly string[]).includes(inner.trim().toLowerCase()) ? whole : " ")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
 async function generateFirstMessage(systemPrompt: string, recentChatGapMinutes: number | null): Promise<string> {
   const fallback = "Hey!";
   try {
@@ -179,7 +195,7 @@ async function generateFirstMessage(systemPrompt: string, recentChatGapMinutes: 
       ],
       { maxTokens: 40, temperature: 0.9 },
     )).trim();
-    return text || fallback;
+    return stripUnknownAudioTags(text) || fallback;
   } catch {
     return fallback;
   }
@@ -308,16 +324,12 @@ Deno.serve(async (req: Request) => {
     systemPrompt += languageRule(language);
 
     const voiceId = character?.voice_id || elevenVoiceIdFor(personalityRole, vibe, characterId);
-    // `speed` is NOT returned any more. The agent's override policy allows
-    // tts.voice_id and tts.stability but NOT tts.speed, so the client passing a
-    // speed override made ElevenLabs close the socket with 1008
-    // "speed is not allowed by config" — i.e. the call failed outright.
-    // Dropping it rather than opening the override up, because the value was
-    // only ever a cosmetic jitter: its own comment admitted it existed to fake
-    // variance that wasn't otherwise possible. Since the agent moved to
-    // eleven_v3_conversational that variance is real and per-turn, coming from
-    // the audio tags, so the hack has nothing left to do.
-    const { stability } = callVoiceSettingsFor(personalityRole);
+    // `speed` stays in the response on purpose — see elevenVoiceSettings.ts.
+    // Short version: the agent used to reject a speed override (1008), so it
+    // was removed from here; that broke the iOS client's decoding of this
+    // response and killed the call even earlier. tts.speed is now allowed on
+    // the agent and the value is a constant 1.0.
+    const { stability, speed } = callVoiceSettingsFor(personalityRole);
     const firstMessage = await generateFirstMessage(systemPrompt, recentChatGapMinutes);
 
     const { data: session, error } = await db.from("call_sessions").insert({
@@ -347,6 +359,7 @@ Deno.serve(async (req: Request) => {
       systemPrompt,
       voiceId,
       stability,
+      speed,
       firstMessage,
     });
   } catch (e) {

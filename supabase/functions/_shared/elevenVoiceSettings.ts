@@ -31,13 +31,22 @@ export function stabilityFor(_role: string): number {
 //      yapamadığımız şeyin taklidiydi. v3'te varyans artık GERÇEKTEN tur
 //      içinde geliyor, çünkü model her cevapta ayrı [laughs]/[sighs]/
 //      [whispers] koyabiliyor. Taklide gerek kalmadı.
-// speed de kaldırıldı ve bu sefer sebebi estetik değil, ARAMAYI KIRIYORDU:
-// ajanın override politikası tts.voice_id ve tts.stability'ye izin veriyor ama
-// tts.speed'e VERMİYOR. İstemci speed override'ı gönderince ElevenLabs soketi
-// 1008 "speed is not allowed by config" ile kapatıyordu, yani arama hiç
-// başlamıyordu. Politikayı açmak yerine göndermeyi bıraktık: değer zaten
-// yukarıdaki jitter'la aynı işi yapıyordu ve v3'ün tur-içi etiketleri geldiği
-// için taklide gerek kalmadı.
-export function callVoiceSettingsFor(role: string): { stability: number } {
-  return { stability: stabilityFor(role) };
+// speed'in JİTTER'ı kaldırıldı, ALANIN KENDİSİ kaldırılmadı — ikisini
+// karıştırmak bir tur canlı aramayı kırdı, o yüzden sebebi yazıyorum.
+//
+// Önce alan komple çıkarıldı, çünkü ajanın override politikası tts.speed'e
+// izin vermiyordu ve istemcinin gönderdiği override ElevenLabs soketini 1008
+// "speed is not allowed by config" ile kapatıyordu. Ama alanı cevaptan
+// çıkarmak istemciyi DAHA ERKEN kırdı: iOS tarafı voice-call-start cevabını
+// çözerken takıldı ve arama ElevenLabs'e hiç ulaşmadan sessizce kapandı
+// (ElevenLabs tarafında o denemeye ait konuşma kaydı bile oluşmadı).
+//
+// Doğru çözüm ikisi birden: ajan politikasında tts.speed açıldı VE alan geri
+// kondu. Değer artık sabit 1.0; jitter'ın işi kalmadı çünkü tur-içi varyans
+// eleven_v3_conversational'ın etiketlerinden geliyor. Sabit bir değer
+// göndermek istemcinin sözleşmesini bozmadan aynı sonucu veriyor.
+const CALL_SPEED = 1.0;
+
+export function callVoiceSettingsFor(role: string): { stability: number; speed: number } {
+  return { stability: stabilityFor(role), speed: CALL_SPEED };
 }
