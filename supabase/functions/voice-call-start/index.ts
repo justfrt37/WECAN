@@ -29,7 +29,7 @@ const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const db = createClient(SUPABASE_URL, SERVICE_ROLE, { auth: { persistSession: false } });
 
 const XAI_API_KEY = Deno.env.get("XAI_API_KEY") ?? "";
-const XAI_URL = "https://api.x.ai/v1/chat/completions";
+import { callLLM } from "../_shared/llm.ts";
 const MODEL = "grok-4.3";
 
 const ELEVENLABS_API_KEY = Deno.env.get("ELEVEN_LABS") ?? "";
@@ -61,20 +61,46 @@ function languageRule(code: string): string {
   );
 }
 
-// Emotion/pacing guidance for the voice-call model, in English (the model
-// output itself is spoken through ElevenLabs Flash v2.5, which does not
-// support [bracket] audio tags, so emotion has to land through word choice
-// and punctuation instead of stage directions).
+// Emotion/pacing guidance for the voice-call model, rewritten 2026-09-02 when
+// the agent moved from eleven_flash_v2 to eleven_v3_conversational.
+//
+// The old version told the model NOT to use [bracket] tags because Flash can't
+// perform them. That was correct for Flash and measured to be correct: fed
+// "[whispers] Yaklaş biraz", Flash's own audio transcribes back as "Whispers:
+// Yaklaş biraz" — it reads the tag out loud as a word. v3 Conversational
+// performs it instead (the transcript comes back with an actual whisper and no
+// stray word), so the constraint is gone and the tags are now the point.
+//
+// The tag list is CLOSED on purpose. The webhook tees the model's SSE stream
+// straight to ElevenLabs, so there is no point at which an invented tag could
+// be stripped — the text path's sanitizeVoiceReply has no counterpart here.
+// Prompt discipline is the only defence.
+const V3_AUDIO_TAGS = ["laughs", "sighs", "whispers", "breathes", "excited", "slow"] as const;
+
 const VOICE_CALL_STYLE_RULE =
-  "\n\nVOICE STYLE RULE: This reply will be SPOKEN aloud in a real-time phone call " +
-  "(ElevenLabs Flash model, no [bracket] tag support). Convey emotion through word choice " +
-  "and punctuation, not tags: an exclamation mark for excitement, an ellipsis (...) for " +
-  "hesitation, sentence structure for emphasis. Keep sentences short and natural — this is " +
-  "a phone call, not a monologue: 1-2 sentences per reply (rarely 3), the way a real person " +
-  "actually talks on the phone. NEVER open with a laugh sound like 'haha', 'hehe', 'ahah' — " +
-  "almost nobody opens a sentence laughing on an actual phone call. Lead with what you're " +
-  "actually saying; if a laugh/giggle genuinely fits, tuck it INSIDE or at the END of the " +
-  "sentence, never as the opening word.";
+  "\n\nVOICE STYLE RULE: This reply will be SPOKEN ALOUD in a real-time phone " +
+  "call. Write it the way it should SOUND, not the way it would look in a chat.\n" +
+  `AUDIO TAGS: you may use ONLY these exact tags: ${V3_AUDIO_TAGS.map((t) => `[${t}]`).join(", ")}. ` +
+  "Never invent another one — an unrecognised tag is read out loud as literal " +
+  "words and ruins the call. At most ONE per reply, and only where a real " +
+  "person would actually do it; a tag colours roughly the next few words. Most " +
+  "replies need no tag at all.\n" +
+  "NEVER write a laugh, sigh or gasp as letters ('haha', 'hehe', 'ahah', " +
+  "'heh', 'hah', 'pff', 'ahh') — those get pronounced as nonsense syllables. " +
+  "If you mean a laugh, use [laughs]. This includes the first word of a reply: " +
+  "never open on one.\n" +
+  "SPEAK, DON'T WRITE: use the contractions and filler words of real speech in " +
+  "whatever language you're in, because the voice pronounces exactly what you " +
+  "type. In Turkish that means 'biliyom' not 'biliyorum', 'yapıyom' not " +
+  "'yapıyorum', 'napıyosun' not 'ne yapıyorsun', 'tmm', 'valla', 'ya', 'yani', " +
+  "'işte', 'aynen', 'hadi ya'. Real reactions belong in the words themselves — " +
+  "'ayy', 'offf', 'yaa', 'oha', 'aa' — spelled the way they're actually said, " +
+  "with the vowel stretched if it's stretched out loud. The same principle " +
+  "applies to every other language: use its real spoken shorthand, never the " +
+  "written/formal register. Never sound translated, never sound like a news " +
+  "reader.\n" +
+  "LENGTH: 1-2 sentences (rarely 3). This is a phone call, not a monologue — " +
+  "leave room for them to answer.";
 
 function userIdFromJWT(authHeader: string | null): string | null {
   if (!authHeader?.startsWith("Bearer ")) return null;
@@ -139,30 +165,37 @@ function openerInstruction(recentChatGapMinutes: number | null): string {
 // same system prompt so it matches personality/relationship level. Falls
 // back to a plain greeting if Grok fails, since a missing first message
 // isn't worth failing the whole call start over.
+// The opener is the one reply on the call path that is NOT streamed — it is
+// generated here and returned as a plain string — so it is the one place an
+// invented audio tag can still be caught. Observed live: a generated opener
+// began with "[surprised but happy]", which is not in V3_AUDIO_TAGS, and the
+// first thing the user would hear on picking up is whatever v3 decides to do
+// with it. Every mid-call reply goes out as an SSE stream that is teed
+// straight to ElevenLabs, where no such interception point exists — there the
+// closed tag list in VOICE_CALL_STYLE_RULE is the only defence.
+function stripUnknownAudioTags(text: string): string {
+  return text
+    .replace(/\[([^\]\n]{1,40})\]/g, (whole, inner: string) =>
+      (V3_AUDIO_TAGS as readonly string[]).includes(inner.trim().toLowerCase()) ? whole : " ")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
 async function generateFirstMessage(systemPrompt: string, recentChatGapMinutes: number | null): Promise<string> {
   const fallback = "Hey!";
   try {
-    const resp = await fetch(XAI_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${XAI_API_KEY}` },
-      body: JSON.stringify({
-        model: MODEL,
-        messages: [
-          { role: "system", content: systemPrompt },
-          {
-            role: "user",
-            content: `[The call just connected. ${openerInstruction(recentChatGapMinutes)} Say a short, ` +
-              "natural opening line — 1 sentence, in character. Nothing else, no explanation.]",
-          },
-        ],
-        temperature: 0.9,
-        max_tokens: 40,
-      }),
-    });
-    if (!resp.ok) return fallback;
-    const data = await resp.json();
-    const text = (data?.choices?.[0]?.message?.content ?? "").trim();
-    return text || fallback;
+    const text = (await callLLM(
+      [
+        { role: "system", content: systemPrompt },
+        {
+          role: "user",
+          content: `[The call just connected. ${openerInstruction(recentChatGapMinutes)} Say a short, ` +
+            "natural opening line — 1 sentence, in character. Nothing else, no explanation.]",
+        },
+      ],
+      { maxTokens: 40, temperature: 0.9 },
+    )).trim();
+    return stripUnknownAudioTags(text) || fallback;
   } catch {
     return fallback;
   }
@@ -211,8 +244,15 @@ Deno.serve(async (req: Request) => {
     // patlıyor, `character` hep null kalıyor, herkes aynı varsayılan
     // (flirty/Sweet) sese düşüyordu (bkz. kullanıcı raporu — "tüm botlar
     // aynı sesi kullanıyor").
+    // system_prompt 2026-09-02'de eklendi. Eskiden seçilmiyordu ve aşağıdaki
+    // systemPrompt yalnızca rol/seviye direktifinden kuruluyordu — yani
+    // TELEFONDAKİ KARAKTERİN KİMLİĞİ YOKTU: adı, yaşı, mesleği, kişilik
+    // tarifi hiçbiri gitmiyordu. ElevenLabs ajanının kendi temel promptu da
+    // boş (API'den doğrulandı), dolayısıyla başka bir yerden de gelmiyordu.
+    // Sohbet tarafı (chat/index.ts) hep `ch.system_prompt + directive`
+    // gönderiyordu; arama tarafı yıllardır jenerik bir personaydı.
     const { data: character } = await db.from("characters")
-      .select("personality_role, voice_id, builder_selections").eq("id", characterId).maybeSingle();
+      .select("personality_role, voice_id, builder_selections, system_prompt").eq("id", characterId).maybeSingle();
     const personalityRole: string = character?.personality_role ?? "flirty";
     const vibe: string = (character?.builder_selections as { vibe?: string } | null)?.vibe ?? "Sweet";
 
@@ -226,17 +266,29 @@ Deno.serve(async (req: Request) => {
     // ile eşleşmiyor). En güncel olanı al — dupe'lar varsa maybeSingle patlar.
     const { data: convoRows } = await db
       .from("conversations")
-      .select("id")
+      .select("id, relationship_level")
       .eq("user_id", uid)
       .eq("character_id", characterId)
       .order("updated_at", { ascending: false })
       .limit(1);
     let convo = convoRows?.[0];
     if (!convo) {
-      const ins = await db.from("conversations").insert({ user_id: uid, character_id: characterId }).select("id").single();
+      // upsert, not insert — conversations(user_id, character_id) UNIQUE
+      // (bkz. chat/index.ts'deki aynı düzeltme).
+      const ins = await db.from("conversations")
+        .upsert({ user_id: uid, character_id: characterId }, { onConflict: "user_id,character_id" })
+        .select("id, relationship_level").single();
       convo = ins.data!;
     }
     const conversationId: string = convo.id;
+    // Seviye 2026-09-02'ye kadar fetchDirectiveMemoriesBehaviors'a SABİT 1
+    // olarak geçiliyordu. Sonuç: kullanıcı seviye 9'da olsa bile telefonda
+    // seviye 1 direktifi ("New territory, but you're not shy about it...")
+    // geliyordu, ve character_level_overrides tablosundaki gerçek seviye
+    // ayarı hiç okunmuyordu. Sohbet ile arama aynı ilişkiyi anlatmıyordu.
+    const relationshipLevel: number = typeof convo.relationship_level === "number"
+      ? Math.min(10, Math.max(1, convo.relationship_level))
+      : 1;
 
     // Retrieval query text — last 3 prior chat messages for this
     // conversation (a call has no turns of its own yet at start time; the
@@ -259,15 +311,24 @@ Deno.serve(async (req: Request) => {
       : null;
 
     const { directive: fetchedDirective, memories, behaviors } =
-      await fetchDirectiveMemoriesBehaviors(db, characterId, personalityRole, 1, conversationId, memoryQueryText);
+      await fetchDirectiveMemoriesBehaviors(db, characterId, personalityRole, relationshipLevel, conversationId, memoryQueryText);
     const directive = reviewMode ? REVIEW_DIRECTIVE : fetchedDirective;
-    let systemPrompt = directive;
+    // Karakter tarifi ÖNCE, direktif sonra — chat/index.ts ile aynı sıra.
+    // reviewMode'da kimlik verilmiyor: o mod mağaza incelemesi için kasıtlı
+    // olarak nötr bir persona çalıştırıyor.
+    const identity = reviewMode ? "" : (character?.system_prompt ?? "");
+    let systemPrompt = identity ? `${identity}\n\n${directive}` : directive;
     systemPrompt += memoriesBlock(memories);
     systemPrompt += behaviorsBlock(behaviors);
     systemPrompt += VOICE_CALL_STYLE_RULE;
     systemPrompt += languageRule(language);
 
     const voiceId = character?.voice_id || elevenVoiceIdFor(personalityRole, vibe, characterId);
+    // `speed` stays in the response on purpose — see elevenVoiceSettings.ts.
+    // Short version: the agent used to reject a speed override (1008), so it
+    // was removed from here; that broke the iOS client's decoding of this
+    // response and killed the call even earlier. tts.speed is now allowed on
+    // the agent and the value is a constant 1.0.
     const { stability, speed } = callVoiceSettingsFor(personalityRole);
     const firstMessage = await generateFirstMessage(systemPrompt, recentChatGapMinutes);
 

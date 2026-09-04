@@ -158,7 +158,9 @@ final class CallViewModel {
             return
         }
 
-        soundPlayer.stopRinging()
+        // deactivate: false — the SDK now owns this audio session. Tearing it
+        // down here is what silenced the call the moment it connected.
+        soundPlayer.stopRinging(deactivate: false)
         callStartedAt = Date()
         state = .listening
         startCheckpointLoop()

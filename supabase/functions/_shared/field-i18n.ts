@@ -16,8 +16,7 @@
 
 const SUPPORTED_LOCALES = ["en", "tr", "de", "es", "fr", "it", "pt"] as const;
 
-const XAI_URL = "https://api.x.ai/v1/chat/completions";
-const MODEL = "grok-4.3";
+import { callLLM } from "./llm.ts";
 
 export interface CharacterFields {
   tagline: string;
@@ -38,7 +37,6 @@ export interface TranslatedFields {
 /// character creation never blocks on translation.
 export async function translateCharacterFields(
   fields: CharacterFields,
-  xaiApiKey: string,
 ): Promise<TranslatedFields> {
   const targets = SUPPORTED_LOCALES.filter((locale) => locale !== "en");
   const interestsList = fields.interests.map((i) => `"${i}"`).join(", ");
@@ -54,19 +52,10 @@ export async function translateCharacterFields(
     `Profession (en): ${fields.profession ?? ""}\n` +
     `Interests (en): [${interestsList}]`;
 
-  const r = await fetch(XAI_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${xaiApiKey}` },
-    body: JSON.stringify({
-      model: MODEL,
-      messages: [{ role: "user", content: prompt }],
-      temperature: 0.3,
-      max_tokens: 1500,
-    }),
-  });
-  if (!r.ok) throw new Error(`LLM ${r.status}: ${await r.text()}`);
-  const d = await r.json();
-  const raw: string = d?.choices?.[0]?.message?.content ?? "{}";
+  const raw: string = await callLLM(
+    [{ role: "user", content: prompt }],
+    { maxTokens: 1500, temperature: 0.3 },
+  ) || "{}";
   const jsonMatch = raw.match(/\{[\s\S]*\}/);
   const parsed = JSON.parse(jsonMatch ? jsonMatch[0] : raw);
 
