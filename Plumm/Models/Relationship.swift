@@ -37,7 +37,7 @@ enum Relationship {
             case 7:     return String(localized: "Opened Up")
             case 8:     return String(localized: "Warm")
             case 9:     return String(localized: "Deeply In")
-            default:    return String(localized: "Sweet Love")
+            default:    return String(localized: "Wholehearted")
             }
         case "playful":
             switch level {
@@ -47,7 +47,7 @@ enum Relationship {
             case 4:     return String(localized: "Teasing")
             case 5:     return String(localized: "Flirty Jokes")
             case 6:     return String(localized: "It's Showing")
-            case 7:     return String(localized: "Playful Love")
+            case 7:     return String(localized: "Smitten")
             case 8:     return String(localized: "Laughs & Kisses")
             case 9:     return String(localized: "Joyful Bond")
             default:    return String(localized: "Joking But Real")
@@ -59,9 +59,9 @@ enum Relationship {
             case 3:     return String(localized: "Devoted")
             case 4:     return String(localized: "Deep Bond")
             case 5:     return String(localized: "Loyal")
-            case 6:     return String(localized: "Obsessive Love")
+            case 6:     return String(localized: "Devotion Deepens")
             case 7:     return String(localized: "Jealousy")
-            case 8:     return String(localized: "My Everything")
+            case 8:     return String(localized: "Fiercely Attached")
             case 9:     return String(localized: "Deep Connection")
             default:    return String(localized: "Soulmate")
             }
@@ -75,7 +75,7 @@ enum Relationship {
             case 6:     return String(localized: "Jealousy")
             case 7:     return String(localized: "Drama")
             case 8:     return String(localized: "Emotional Storm")
-            case 9:     return String(localized: "Crazy Love")
+            case 9:     return String(localized: "Consumed")
             default:    return String(localized: "Obsessive")
             }
         case "ex":
@@ -89,7 +89,7 @@ enum Relationship {
             case 7:     return String(localized: "Warming Up")
             case 8:     return String(localized: "Mask Slipping")
             case 9:     return String(localized: "Confession")
-            default:    return String(localized: "Back Together")
+            default:    return String(localized: "Reconciled")
             }
         default: // flirty
             switch level {
@@ -99,11 +99,29 @@ enum Relationship {
             case 4:     return String(localized: "Close Friends")
             case 5:     return String(localized: "Flirting Begins")
             case 6:     return String(localized: "Flirting")
-            case 7:     return String(localized: "Potential Partner")
-            case 8:     return String(localized: "Partner")
-            case 9:     return String(localized: "Serious Relationship")
+            case 7:     return String(localized: "Something More")
+            case 8:     return String(localized: "Inseparable")
+            case 9:     return String(localized: "Deeply Bonded")
             default:    return String(localized: "Soulmate")
             }
+        }
+    }
+
+    /// Role-agnostic one-liner describing how deep the bond is at `level`.
+    /// The role supplies the flavor via `stageName`; this stays neutral —
+    /// no marriage / engagement / civil-status framing.
+    static func stageBlurb(_ level: Int) -> String {
+        switch level {
+        case ..<2:  return String(localized: "You've just met. Everything's still first impressions.")
+        case 2:     return String(localized: "The awkwardness is fading. You're finding a rhythm.")
+        case 3:     return String(localized: "There's real familiarity now — you look forward to talking.")
+        case 4:     return String(localized: "You trust each other with the everyday stuff.")
+        case 5:     return String(localized: "The tone is shifting. Something warmer is starting to show.")
+        case 6:     return String(localized: "You're openly close, and it colors how you talk.")
+        case 7:     return String(localized: "You let each other in past the surface.")
+        case 8:     return String(localized: "You share things you don't tell anyone else.")
+        case 9:     return String(localized: "You've become a fixed point for each other.")
+        default:    return String(localized: "About as close as two people get.")
         }
     }
 }

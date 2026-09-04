@@ -225,11 +225,13 @@ struct FeedView: View {
                 character: current,
                 prefillText: isNew ? IcebreakerPool.next() : ""
             )
+            EventLogger.shared.log("character_liked", ["character_id": current.id])
         } else {
             // Kartı `passed` olarak işaretle. Desteyi HEMEN yeniden kurmuyoruz —
             // aksi halde animasyon bitmeden üstteki kart bir sonrakine sıçrardı.
             // Yeniden kurma animasyon sonunda (asyncAfter) yapılır.
             PassedCharactersStore.pass(current.id)
+            EventLogger.shared.log("character_passed", ["character_id": current.id])
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.36) {
             dragOffset = .zero
@@ -253,7 +255,6 @@ private struct FeedCard: View {
     let safeTop: CGFloat
     let safeBottom: CGFloat
 
-    @State private var showGallery = false
     @State private var showProfile = false
 
     private let tabBarSpace: CGFloat = 72
@@ -286,9 +287,6 @@ private struct FeedCard: View {
                         .padding(.horizontal, 16)
                 }
                 .padding(.bottom, safeBottom + tabBarSpace + 35)
-            }
-            .fullScreenCover(isPresented: $showGallery) {
-                GalleryView(character: character)
             }
             .fullScreenCover(isPresented: $showProfile) {
                 CharacterProfileView(character: character)
@@ -361,7 +359,10 @@ private struct FeedCard: View {
 
     private var actionRow: some View {
         HStack(spacing: 12) {
-            bigActionButton(icon: "photo.fill", label: "Gallery") { showGallery = true }
+            // "Gallery" düğmesi artık ayrı bir sayfa açmıyor — chat/"See All"
+            // ile AYNI "About Me" sayfasına gider (bkz. CharacterProfileView,
+            // kullanıcı talebi: 3 giriş noktası da aynı sayfayı göstermeli).
+            bigActionButton(icon: "photo.fill", label: "Gallery") { showProfile = true }
 
             NavigationLink(value: character) {
                 bigActionLabel(icon: "bubble.left.and.bubble.right.fill", label: "Chat")
@@ -400,78 +401,6 @@ private struct FeedCard: View {
                 .font(.system(size: 80))
                 .foregroundStyle(.white.opacity(0.3))
         }
-    }
-}
-
-
-/// Beğeniden sonra "tanışmak ister misin?" onayı — evet derse sohbete geçer,
-/// hazır bir açılış mesajı ("prefillText") mesaj kutusuna önceden yazılır.
-private struct MeetConfirmOverlay: View {
-    let character: Character
-    let onYes: () -> Void
-    let onNo: () -> Void
-
-    @State private var dontShowAgain = false
-
-    var body: some View {
-        ZStack {
-            Color.black.opacity(0.6).ignoresSafeArea()
-
-            VStack(spacing: 18) {
-                Text("Want to meet \(character.name)?")
-                    .font(.system(size: 19, weight: .bold))
-                    .foregroundStyle(.white)
-                    .multilineTextAlignment(.center)
-
-                HStack(spacing: 12) {
-                    Button {
-                        persistPreference()
-                        onNo()
-                    } label: {
-                        Text("Cancel")
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.85))
-                            .frame(maxWidth: .infinity).frame(height: 48)
-                            .background(.white.opacity(0.12), in: Capsule())
-                    }
-                    .buttonStyle(.plain)
-
-                    Button {
-                        persistPreference()
-                        onYes()
-                    } label: {
-                        Text("Let's meet")
-                            .font(.system(size: 15, weight: .bold))
-                            .foregroundStyle(.white)
-                            .frame(maxWidth: .infinity).frame(height: 48)
-                            .background(LinearGradient(colors: [AppColor.pink, AppColor.amber],
-                                                       startPoint: .leading, endPoint: .trailing), in: Capsule())
-                    }
-                    .buttonStyle(.plain)
-                }
-
-                Button {
-                    dontShowAgain.toggle()
-                } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: dontShowAgain ? "checkmark.square.fill" : "square")
-                            .foregroundStyle(dontShowAgain ? AppColor.pink : .white.opacity(0.5))
-                        Text("Don't show again")
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.7))
-                    }
-                }
-                .buttonStyle(.plain)
-            }
-            .padding(24)
-            .background(AppColor.bg2, in: RoundedRectangle(cornerRadius: 24))
-            .padding(.horizontal, 32)
-        }
-        .transition(.opacity)
-    }
-
-    private func persistPreference() {
-        if dontShowAgain { UserDefaultsManager.shared.skipMeetConfirm = true }
     }
 }
 

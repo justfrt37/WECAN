@@ -1,0 +1,10 @@
+- [project_overview.md](project_overview.md) — WECAN/Plumm is an AI companion chat app, Deno/Supabase + Grok backend, SwiftUI client
+- [plumm_rebrand.md](plumm_rebrand.md) — main renamed aiGirlfriend/→Plumm/ + RevenueCat + review mode (07-27); further diverged + merged 07-28
+- [feature_process.md](feature_process.md) — user wants full brainstorm→spec→plan→execute flow; ok with autonomous multi-spec execution once approved
+- [merge_conflict_policy.md](merge_conflict_policy.md) — on conflicts with main, preserve main's changes, build on top; autonomous after first confirmation
+- [spec_plan_location.md](spec_plan_location.md) — design docs/plans live under docs/superpowers/specs|plans/
+- [semantic_code_search.md](semantic_code_search.md) — claude-context MCP configured (Zilliz Cloud + OpenRouter embeddings); use it instead of cold exploration
+- [unverified_merge_2026_07_28.md](unverified_merge_2026_07_28.md) — merge 3da8f69's client code never build-verified, backend deploy verified
+- [supabase_access.md](supabase_access.md) — project ref, npx supabase auth/deploy flow for this repo
+- [level_perks_rls_gap.md](level_perks_rls_gap.md) — level_perks/conversation_perk_unlocks live, RLS off + anon full CRUD, fix deferred
+- [anon_signup_captcha_broken.md](anon_signup_captcha_broken.md) — RESOLVED 08-26: anon-signin edge function bypasses captcha via service_role, web unaffected

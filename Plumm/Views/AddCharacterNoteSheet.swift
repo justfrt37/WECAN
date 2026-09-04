@@ -10,13 +10,24 @@ import SwiftUI
 enum NoteKind: String, Identifiable {
     case memory
     case behavior
+    /// Pro+/Max only (bkz. ChatView gear menu entitlement check before
+    /// opening this sheet, set-nickname edge function). `.characterNickname`
+    /// is purely cosmetic display; `.userNickname` flows into chat/index.ts's
+    /// system prompt.
+    case characterNickname
+    case userNickname
 
     var id: String { rawValue }
 
+    /// `.characterNickname` needs the character's name in the title (see
+    /// `AddCharacterNoteSheet.navTitle`, which special-cases it) — this
+    /// generic title is only used as its fallback / for the other kinds.
     var title: String {
         switch self {
         case .memory: return String(localized: "Add Memory")
         case .behavior: return String(localized: "Add Behavior")
+        case .characterNickname: return String(localized: "Rename")
+        case .userNickname: return String(localized: "Nickname for You")
         }
     }
 }
@@ -24,6 +35,10 @@ enum NoteKind: String, Identifiable {
 struct AddCharacterNoteSheet: View {
     let character: Character
     let kind: NoteKind
+    /// Only meaningful for `.characterNickname`/`.userNickname` — the
+    /// currently-set nickname, so the sheet opens pre-filled for editing
+    /// (Add Memory/Add Behavior are additive lists, don't need this).
+    var initialText: String = ""
 
     @Environment(\.dismiss) private var dismiss
     @State private var text = ""
@@ -38,20 +53,17 @@ struct AddCharacterNoteSheet: View {
                 AppColor.bg.ignoresSafeArea()
                 VStack(spacing: 16) {
                     Group {
-                        if kind == .memory {
-                            Text("\(character.name) should remember this:")
-                        } else {
-                            Text("\(character.name) should behave like this:")
+                        switch kind {
+                        case .memory: Text("\(character.name) should remember this:")
+                        case .behavior: Text("\(character.name) should behave like this:")
+                        case .characterNickname: Text("What should we call \(character.name) instead?")
+                        case .userNickname: Text("What should \(character.name) call you?")
                         }
                     }
                         .font(.system(size: 15))
                         .foregroundStyle(.white.opacity(0.8))
                         .frame(maxWidth: .infinity, alignment: .leading)
-                    TextField("", text: $text,
-                              prompt: (kind == .memory
-                                        ? Text("e.g. my birthday is May 5th")
-                                        : Text("e.g. always call me 'babe'"))
-                                .foregroundColor(.white.opacity(0.4)), axis: .vertical)
+                    TextField("", text: $text, prompt: promptText.foregroundColor(.white.opacity(0.4)), axis: .vertical)
                         .lineLimit(3...6)
                         .foregroundStyle(.white).tint(AppColor.pink)
                         .padding(12)
@@ -79,24 +91,58 @@ struct AddCharacterNoteSheet: View {
                     }
                 )
             }
-            .navigationTitle(kind.title)
+            .navigationTitle(navTitle)
             .navigationBarTitleDisplayMode(.inline)
         }
         // Ölçülen içerik + inline nav bar payı (~56) kadar yükseklik.
         .presentationDetents([.height(contentHeight + 56)])
         .presentationDragIndicator(.visible)
+        .onAppear { text = initialText }
     }
 
-    /// Rejections (Grok injection detection) or network errors are swallowed
-    /// silently — the sheet is already dismissed by then (product decision).
+    private var navTitle: String {
+        kind == .characterNickname ? String(localized: "Rename \(character.name)") : kind.title
+    }
+
+    private var promptText: Text {
+        switch kind {
+        case .memory: return Text("e.g. my birthday is May 5th")
+        case .behavior: return Text("e.g. always call me 'babe'")
+        case .characterNickname: return Text("e.g. Boo")
+        case .userNickname: return Text("e.g. Boo")
+        }
+    }
+
+    /// Rejections (Grok injection detection, or Pro+/Max entitlement for the
+    /// nickname kinds) or network errors are swallowed silently — the sheet
+    /// is already dismissed by then (product decision, matches Add Memory/
+    /// Add Behavior — the gear menu already checked entitlement before
+    /// offering this sheet at all, so a 403 here is a rare stale-cache edge
+    /// case, not a normal path worth surfacing).
     private func save() {
         let content = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !content.isEmpty {
-            let apiKind = kind == .memory ? "memory" : "behavior"
-            let characterId = character.id
-            Task {
-                _ = try? await service.addCharacterNote(characterId: characterId, kind: apiKind, content: content)
+        let characterId = character.id
+        switch kind {
+        case .memory, .behavior:
+            // Additive lists — an empty save is a no-op, nothing to clear.
+            if !content.isEmpty {
+                let apiKind = kind == .memory ? "memory" : "behavior"
+                EventLogger.shared.log("feature_used", ["feature": kind == .memory ? "memory_add" : "behavior_add"])
+                Task { _ = try? await service.addCharacterNote(characterId: characterId, kind: apiKind, content: content) }
             }
+        case .characterNickname, .userNickname:
+            // Single field — an empty save CLEARS the nickname (bkz.
+            // set-nickname edge function), so always send, even empty.
+            // Bellek-içi anlık güncelleme — chat header/list ağ cevabını
+            // beklemeden yeni ismi göstersin (bkz. injectProactive'deki aynı desen).
+            if var stored = LocalConversationStore.shared.load(for: characterId) {
+                if kind == .characterNickname { stored.characterNickname = content.isEmpty ? nil : content }
+                else { stored.userNickname = content.isEmpty ? nil : content }
+                LocalConversationStore.shared.save(stored, for: characterId)
+            }
+            let apiKind = kind == .characterNickname ? "character" : "user"
+            EventLogger.shared.log("feature_used", ["feature": kind == .characterNickname ? "nickname_character" : "nickname_user"])
+            Task { _ = try? await service.setNickname(characterId: characterId, kind: apiKind, content: content) }
         }
         dismiss()
     }

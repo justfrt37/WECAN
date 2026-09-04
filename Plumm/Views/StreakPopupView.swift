@@ -157,8 +157,3 @@ struct StreakPopupView: View {
         .padding(.top, 18)
     }
 }
-
-struct IdentifiableStreakResult: Identifiable {
-    let id = UUID()
-    let result: StreakClaimResult
-}

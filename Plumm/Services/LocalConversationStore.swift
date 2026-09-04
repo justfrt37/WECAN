@@ -32,7 +32,7 @@ final class LocalConversationStore {
         var summary: String           // özetlenmiş eski mesajlar
         var summarizedCount: Int      // kaç mesaj özetlendi
         var msgCounter: Int = 0       // terfi eşiği için mesaj sayacı (istemci taraflı)
-        var levelProgress: Double = 0 // güncel seviyenin ne kadarı tamamlandı (0...1), bkz. RelationshipXP
+        var levelProgress: Double = 0 // güncel seviyenin ne kadarı tamamlandı (0...1), sunucudan gelir
         /// Sohbetin GERÇEKTE hangi dilde geçtiğine dair son tahmin ("tr"/"en") —
         /// bildirim içeriği (JealousyContent vb.) bunu kullanır. Bkz. ConversationLanguage.
         var detectedLanguage: String?
@@ -54,17 +54,38 @@ final class LocalConversationStore {
         /// level-up) — kullanıcı tekrar yazana kadar sessiz kalır (bkz.
         /// NotificationScheduler.noteUserSent, orada `nil`lenir).
         var ghostedAt: Date?
+        /// Kıskançlık durum makinesi (bkz. NotificationScheduler jealousy
+        /// bölümü, chat/index.ts JEALOUS_MOOD_RULE) — sunucu tek doğru kaynak,
+        /// her hydrateConversations'ta tazelenir (ghostedAt gibi, existing'e
+        /// düşmez). `jealousyStage`: 0 boşta/çözüldü, 1 ilk mesaj cevapsız
+        /// (eskalasyon bekliyor), 2 eskalasyon cevapsız. `jealousySentAt`: en
+        /// son kıskançlık bildiriminin (hangi aşama olursa olsun) zamanı —
+        /// hem eskalasyonun ne zaman ateşleneceğini hem de yeni bir döngü için
+        /// 6 saatlik bekleme süresini hesaplamakta kullanılır. `jealousyMoodTurnsLeft`:
+        /// eskalasyona cevap verildikten sonra kalan "hâlâ biraz kıskanç" tur sayısı.
+        var jealousyStage: Int = 0
+        var jealousySentAt: Date?
+        var jealousyMoodTurnsLeft: Int = 0
+        /// Pro+/Max nickname'ler (bkz. set-nickname edge function) — sunucu
+        /// tek doğru kaynak. `characterNickname` doluyken UI karakterin gerçek
+        /// adı yerine bunu gösterir (bkz. ChatView header, chat list satırı);
+        /// `userNickname` chat/index.ts'nin sistem promptuna girer.
+        var characterNickname: String?
+        var userNickname: String?
 
         enum CodingKeys: String, CodingKey {
             case messages, xp, level, summary, summarizedCount, msgCounter, levelProgress,
-                 detectedLanguage, schedule, wokenUpAt, manualSleepAt, ghostedAt
+                 detectedLanguage, schedule, wokenUpAt, manualSleepAt, ghostedAt,
+                 jealousyStage, jealousySentAt, jealousyMoodTurnsLeft,
+                 characterNickname, userNickname
         }
 
         init(
             messages: [Message], xp: Int, level: Int, summary: String, summarizedCount: Int,
             msgCounter: Int = 0, levelProgress: Double = 0, detectedLanguage: String? = nil,
             schedule: CharacterSchedule? = nil, wokenUpAt: Date? = nil, manualSleepAt: Date? = nil,
-            ghostedAt: Date? = nil
+            ghostedAt: Date? = nil, jealousyStage: Int = 0, jealousySentAt: Date? = nil,
+            jealousyMoodTurnsLeft: Int = 0, characterNickname: String? = nil, userNickname: String? = nil
         ) {
             self.messages = messages
             self.xp = xp
@@ -78,6 +99,11 @@ final class LocalConversationStore {
             self.wokenUpAt = wokenUpAt
             self.manualSleepAt = manualSleepAt
             self.ghostedAt = ghostedAt
+            self.jealousyStage = jealousyStage
+            self.jealousySentAt = jealousySentAt
+            self.jealousyMoodTurnsLeft = jealousyMoodTurnsLeft
+            self.characterNickname = characterNickname
+            self.userNickname = userNickname
         }
 
         init(from decoder: Decoder) throws {
@@ -95,6 +121,11 @@ final class LocalConversationStore {
             wokenUpAt = try? c.decodeIfPresent(Date.self, forKey: .wokenUpAt)
             manualSleepAt = try? c.decodeIfPresent(Date.self, forKey: .manualSleepAt)
             ghostedAt = try? c.decodeIfPresent(Date.self, forKey: .ghostedAt)
+            jealousyStage = (try? c.decode(Int.self, forKey: .jealousyStage)) ?? 0
+            jealousySentAt = try? c.decodeIfPresent(Date.self, forKey: .jealousySentAt)
+            jealousyMoodTurnsLeft = (try? c.decode(Int.self, forKey: .jealousyMoodTurnsLeft)) ?? 0
+            characterNickname = try? c.decodeIfPresent(String.self, forKey: .characterNickname)
+            userNickname = try? c.decodeIfPresent(String.self, forKey: .userNickname)
         }
 
         func encode(to encoder: Encoder) throws {
@@ -111,6 +142,11 @@ final class LocalConversationStore {
             try c.encodeIfPresent(wokenUpAt, forKey: .wokenUpAt)
             try c.encodeIfPresent(ghostedAt, forKey: .ghostedAt)
             try c.encodeIfPresent(manualSleepAt, forKey: .manualSleepAt)
+            try c.encode(jealousyStage, forKey: .jealousyStage)
+            try c.encodeIfPresent(jealousySentAt, forKey: .jealousySentAt)
+            try c.encode(jealousyMoodTurnsLeft, forKey: .jealousyMoodTurnsLeft)
+            try c.encodeIfPresent(characterNickname, forKey: .characterNickname)
+            try c.encodeIfPresent(userNickname, forKey: .userNickname)
         }
     }
 
@@ -194,20 +230,6 @@ final class LocalConversationStore {
         let key = userKey()
         guard let idx = mem[key]?[characterId]?.messages.firstIndex(where: { $0.id == id }) else { return }
         mutate(&mem[key]![characterId]!.messages[idx])
-    }
-
-    /// Seviye/ilerleme/mesaj-sayacı alanlarını yerinde günceller — mesaj
-    /// dizisine dokunmaz. Kayıt yoksa hiçbir şey yapmaz (bu üç alan sadece
-    /// `applyPostReplyEffects`'ten, yani bir mesaj zaten eklenmiş bir turun
-    /// sonunda çağrılır — kayıt bu noktada zaten var olmalı).
-    func updateFields(for id: UUID, level: Int, levelProgress: Double, msgCounter: Int) {
-        lock.lock(); defer { lock.unlock() }
-        let key = userKey()
-        guard mem[key]?[id] != nil else { return }
-        mem[key]?[id]?.level = level
-        mem[key]?[id]?.levelProgress = levelProgress
-        mem[key]?[id]?.msgCounter = msgCounter
-        RelationshipLevelStore.set(id, level: level, progress: levelProgress)
     }
 
     /// `detectedLanguage`'ı en son asistan mesajından yeniden hesaplar

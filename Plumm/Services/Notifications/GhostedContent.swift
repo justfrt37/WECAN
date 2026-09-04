@@ -2279,17 +2279,8 @@ enum GhostedContent {
     ]
 
     static func randomLine(language: String, role: String, vibe: String, level: Int) -> String {
-        let tier: String
-        switch level {
-        case ..<4: tier = "low"
-        case 4..<7: tier = "mid"
-        default: tier = "high"
-        }
-        let resolvedLanguage = byLanguageRoleVibeTier[language] != nil ? language : "en"
-        let byRoleVibeTier = byLanguageRoleVibeTier[resolvedLanguage]!
-        let resolvedRole = byRoleVibeTier[role] != nil ? role : "flirty"
-        let vibeTable = byRoleVibeTier[resolvedRole]!
-        let resolvedVibe = vibeTable[vibe] != nil ? vibe : "Sweet"
-        return vibeTable[resolvedVibe]![tier]!.randomElement()!
+        NotificationContentLookup.randomLine(
+            in: byLanguageRoleVibeTier, language: language, role: role, vibe: vibe, level: level
+        )
     }
 }

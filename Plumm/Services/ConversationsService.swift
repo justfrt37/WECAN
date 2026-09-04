@@ -77,6 +77,11 @@ struct ConversationState: Codable {
     let ghostedAt: String?
     let detectedLanguage: String?
     let updatedAt: String?
+    let jealousyStage: Int?
+    let jealousySentAt: String?
+    let jealousyMoodTurnsLeft: Int?
+    let characterNickname: String?
+    let userNickname: String?
 
     private enum CodingKeys: String, CodingKey {
         case id
@@ -91,6 +96,11 @@ struct ConversationState: Codable {
         case ghostedAt = "ghosted_at"
         case detectedLanguage = "detected_language"
         case updatedAt = "updated_at"
+        case jealousyStage = "jealousy_stage"
+        case jealousySentAt = "jealousy_sent_at"
+        case jealousyMoodTurnsLeft = "jealousy_mood_turns_left"
+        case characterNickname = "character_nickname"
+        case userNickname = "user_nickname"
     }
 }
 
@@ -104,7 +114,7 @@ struct ConversationsService {
     /// Tüm konuşma DURUMLARI (seviye/ilerleme/özet/rutin/uyku/dil) — bellek-içi
     /// önbelleği sunucudan tazelemek için (bkz. CharacterStore.hydrateConversations).
     func fetchConversationStates() async -> [ConversationState] {
-        let url = "\(Config.supabaseURL)/rest/v1/conversations?select=id,character_id,relationship_level,level_progress,summary,summarized_count,schedule,woken_up_at,manual_sleep_at,ghosted_at,detected_language,updated_at&order=updated_at.desc"
+        let url = "\(Config.supabaseURL)/rest/v1/conversations?select=id,character_id,relationship_level,level_progress,summary,summarized_count,schedule,woken_up_at,manual_sleep_at,ghosted_at,detected_language,updated_at,jealousy_stage,jealousy_sent_at,jealousy_mood_turns_left,character_nickname,user_nickname&order=updated_at.desc"
         return await get(url) ?? []
     }
 
@@ -116,11 +126,7 @@ struct ConversationsService {
 
     private func get<T: Decodable>(_ endpoint: String, retrying: Bool = true) async -> T? {
         guard let url = URL(string: endpoint) else { return nil }
-        var request = URLRequest(url: url)
-        request.timeoutInterval = 20
-        let bearer = UserDefaultsManager.shared.accessToken ?? Config.supabaseAnonKey
-        request.setValue(Config.supabaseAnonKey, forHTTPHeaderField: "apikey")
-        request.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
+        let request = SupabaseRequest.authorized(url: url, bearer: SupabaseRequest.sessionBearer, timeout: 20)
         guard let (data, response) = try? await URLSession.shared.data(for: request),
               let http = response as? HTTPURLResponse
         else { return nil }

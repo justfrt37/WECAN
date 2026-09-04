@@ -27,10 +27,7 @@ struct GeneratedPhotoService {
         // Bearer'ı her denemede tazele — recover() sonrası yeni token gelir.
         guard let accessToken = UserDefaultsManager.shared.accessToken else { return [] }
 
-        var request = URLRequest(url: url)
-        request.timeoutInterval = 20
-        request.setValue(Config.supabaseAnonKey, forHTTPHeaderField: "apikey")
-        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        let request = SupabaseRequest.authorized(url: url, bearer: accessToken, timeout: 20)
 
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse else {

@@ -4,9 +4,8 @@
 //  Uygulama, auth + karakter kataloğu yüklendikten sonra `isCompleted` false
 //  ise bu view'ı gösterir (bkz. PlummApp).
 //
-//  Şu an implement edilenler: ONB1 (isim). ONB2 (social proof), ONB3
-//  (karakter seçimi + sorular) ve sonrası "yakında" placeholder'ı ile
-//  temsil edilir; akış oradan uygulamaya girer.
+//  Adımlar (bkz. OnboardingStore.Step): isim → social proof → karakter seçimi
+//  → sorular → final tease → paywall; sonrasında akış uygulamaya girer.
 //
 
 import SwiftUI
@@ -22,66 +21,32 @@ struct OnboardingFlowView: View {
             case .name:
                 OnboardingNameView()
                     .transition(.opacity)
+                    .onAppear { logStepViewed("name", 0) }
             case .socialProof:
                 OnboardingSocialProofView()
                     .transition(.opacity)
+                    .onAppear { logStepViewed("social_proof", 1) }
             case .characterSelect:
                 OnboardingCharacterSelectView()
                     .transition(.opacity)
+                    .onAppear { logStepViewed("character_select", 2) }
             case .questions:
                 OnboardingQuestionsView()
                     .transition(.opacity)
+                    .onAppear { logStepViewed("questions", 3) }
             case .finalTease:
                 OnboardingReadyView()
                     .transition(.opacity)
+                    .onAppear { logStepViewed("final_tease", 4) }
             case .paywall:
                 OnboardingPaywallView()
                     .transition(.opacity)
+                    .onAppear { logStepViewed("paywall", 5) }
             }
         }
     }
-}
 
-/// Henüz yapılmamış adımlar için geçici ekran. ONB1'den sonra akışın
-/// devam ettiğini gösterir ve uygulamaya girmek için bir çıkış sağlar.
-private struct OnboardingComingSoonView: View {
-    @Environment(OnboardingStore.self) private var onboarding
-
-    var body: some View {
-        VStack(spacing: 20) {
-            Spacer()
-            OBBrandMark(size: 26)
-
-            Text(greeting)
-                .font(.system(size: 22, weight: .heavy))
-                .foregroundStyle(.white)
-                .multilineTextAlignment(.center)
-
-            Text("Next steps (social proof, character selection) coming soon.")
-                .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(.white.opacity(0.6))
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 40)
-
-            Spacer()
-
-            Button {
-                onboarding.complete()
-            } label: {
-                Text("Enter the app")
-                    .font(.system(size: 18, weight: .bold))
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 56)
-                    .background(OBTheme.buttonGradient, in: RoundedRectangle(cornerRadius: 16))
-            }
-            .padding(.horizontal, 28)
-            .padding(.bottom, 24)
-        }
-    }
-
-    private var greeting: String {
-        let name = onboarding.userName.trimmingCharacters(in: .whitespacesAndNewlines)
-        return name.isEmpty ? "Welcome!" : "Welcome, \(name)!"
+    private func logStepViewed(_ step: String, _ index: Int) {
+        EventLogger.shared.log("onboarding_step_viewed", ["step": step, "step_index": index])
     }
 }

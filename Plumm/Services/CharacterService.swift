@@ -14,12 +14,9 @@ struct CharacterService {
         let endpoint = "\(Config.supabaseURL)/rest/v1/\(table)?select=*&order=id.asc"
         guard let url = URL(string: endpoint) else { throw URLError(.badURL) }
 
-        var request = URLRequest(url: url)
-        request.setValue(Config.supabaseAnonKey, forHTTPHeaderField: "apikey")
         // Use user JWT so RLS filters user-created characters correctly.
         // Falls back to anon key if not signed in (anon can only see system chars).
-        let bearer = UserDefaultsManager.shared.accessToken ?? Config.supabaseAnonKey
-        request.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
+        let request = SupabaseRequest.authorized(url: url, bearer: SupabaseRequest.sessionBearer)
 
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {

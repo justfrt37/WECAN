@@ -6,6 +6,7 @@
 import SwiftUI
 import Photos
 import PhotosUI
+import TipKit
 import UIKit
 import Combine
 
@@ -120,6 +121,10 @@ struct ChatView: View {
         .onAppear { viewModel.isVisible = true }
         .onDisappear {
             viewModel.isVisible = false
+            EventLogger.shared.log("chat_closed", [
+                "character_id": viewModel.character.id,
+                "messages_sent_this_session": viewModel.messagesSentThisSession,
+            ])
             // Sohbetten çıkınca ses çalmaya / mikrofon açık kalmaya devam etmesin —
             // oynatıcıyı durdur (ses oturumunu da bırakır) ve kaydı iptal et.
             voice.stop()
@@ -168,8 +173,11 @@ struct ChatView: View {
                 }
             }
         }
-        .sheet(item: $addSheetKind) { kind in
-            AddCharacterNoteSheet(character: viewModel.character, kind: kind)
+        .sheet(item: $addSheetKind, onDismiss: { viewModel.refreshNicknameFromCache() }) { kind in
+            let stored = LocalConversationStore.shared.load(for: viewModel.character.id)
+            let initial = kind == .characterNickname ? (stored?.characterNickname ?? "")
+                : kind == .userNickname ? (stored?.userNickname ?? "") : ""
+            AddCharacterNoteSheet(character: viewModel.character, kind: kind, initialText: initial)
         }
         .sheet(isPresented: $showClearChatOptions) {
             ClearChatOptionsSheet(character: viewModel.character) { keepLevel, keepMemories, keepBehaviors in
@@ -289,7 +297,7 @@ struct ChatView: View {
                     HStack(spacing: 10) {
                         avatarWithLevel
                         VStack(alignment: .leading, spacing: 1) {
-                            Text(viewModel.character.name)
+                            Text(viewModel.displayName)
                                 .font(.system(size: 17, weight: .bold))
                                 .foregroundStyle(.white)
                             // Engellenmişse durum/aktivite HİÇ gösterilmez — çevrimiçi
@@ -331,7 +339,9 @@ struct ChatView: View {
                         viewModel.showPaywall = true
                     }
                 })
+                .popoverTip(VoiceCallTip(), arrowEdge: .top)
                 TokenBadge(tokenStore: tokenStore) { showTokenStore = true }
+                    .popoverTip(TokenBadgeTip(), arrowEdge: .top)
                 headerButton("gearshape.fill", menu: true)
             }
         }
@@ -384,6 +394,8 @@ struct ChatView: View {
                 Button { showProfile = true } label: { Label("View Profile", systemImage: "person.circle") }
                 Button { addSheetKind = .memory } label: { Label("Add Memory", systemImage: "sparkles") }
                 Button { addSheetKind = .behavior } label: { Label("Add Behavior", systemImage: "face.smiling") }
+                Button { openNicknameSheet(.characterNickname) } label: { Label("Rename \(viewModel.character.name)", systemImage: "pencil") }
+                Button { openNicknameSheet(.userNickname) } label: { Label("Nickname for You", systemImage: "tag") }
                 Button(role: .destructive) { showClearChatOptions = true } label: { Label("Clear Chat", systemImage: "trash") }
                 if isBlocked {
                     Button {
@@ -398,6 +410,20 @@ struct ChatView: View {
             }
         } else {
             Button(action: action) { headerIcon(icon) }
+        }
+    }
+
+    /// Nickname rows are visible to everyone (bkz. kullanıcı talebi); tapping
+    /// gates on Pro+/Max — eligible opens the entry sheet, otherwise bounces
+    /// to the Pro+ paywall with an explanation. Exact same gate pattern as
+    /// the voice-call header button above (`PurchaseService.shared.canUseVoice`).
+    private func openNicknameSheet(_ kind: NoteKind) {
+        if PurchaseService.shared.tier.rank >= SubscriptionTier.proPlus.rank {
+            addSheetKind = kind
+        } else {
+            viewModel.errorMessage = String(localized: "Only Pro+ and Max members can set nicknames.")
+            viewModel.paywallTier = .proPlus
+            viewModel.showPaywall = true
         }
     }
 
@@ -529,7 +555,7 @@ struct ChatView: View {
             .onChange(of: viewModel.messages.count) {
                 guard readyToAutoScroll else {
                     // İlk yükleme (geçmiş): animasyonsuz dibe konumlan.
-                    scrollToBottomInstant(proxy)
+                    scrollToBottom(proxy, animated: false)
                     return
                 }
                 // Kullanıcı geçmişe bakmak için yukarı kaymışsa dibe ZORLAMA.
@@ -550,9 +576,9 @@ struct ChatView: View {
                         if !viewModel.messages.isEmpty { break }
                         try? await Task.sleep(nanoseconds: 40_000_000)
                     }
-                    scrollToBottomInstant(proxy)
+                    scrollToBottom(proxy, animated: false)
                     try? await Task.sleep(nanoseconds: 50_000_000)
-                    scrollToBottomInstant(proxy)   // layout oturduktan sonra kesin dibe
+                    scrollToBottom(proxy, animated: false)   // layout oturduktan sonra kesin dibe
                     withAnimation(.easeOut(duration: 0.2)) { readyToAutoScroll = true }
                 }
             }
@@ -560,16 +586,15 @@ struct ChatView: View {
         }
     }
 
-    private func scrollToBottomInstant(_ proxy: ScrollViewProxy) {
-        proxy.scrollTo("bottomAnchor", anchor: .bottom)
-    }
-
-    private func scrollToBottom(_ proxy: ScrollViewProxy) {
-        withAnimation {
-            // Padding'in ALTINDAki görünmez çapaya hizala — son mesaj/typing
-            // balonu 45pt boşlukla birlikte görünür kalsın (bkz. bottomAnchor).
+    /// Padding'in ALTINDAki görünmez çapaya hizalar — son mesaj/typing balonu
+    /// 45pt boşlukla birlikte görünür kalsın (bkz. bottomAnchor). Açılışta
+    /// animasyonsuz (`animated: false`), sonraki mesajlarda animasyonlu.
+    private func scrollToBottom(_ proxy: ScrollViewProxy, animated: Bool = true) {
+        guard animated else {
             proxy.scrollTo("bottomAnchor", anchor: .bottom)
+            return
         }
+        withAnimation { proxy.scrollTo("bottomAnchor", anchor: .bottom) }
     }
 
     // MARK: Mod düğmeleri
@@ -579,20 +604,24 @@ struct ChatView: View {
             modeButton(
                 icon: viewModel.isVoiceArmed ? "waveform.circle.fill" : "waveform.circle",
                 label: String(localized: "Send me a voice"),
+                costTokens: TokenCosts.voiceMessage,
                 isArmed: viewModel.isVoiceArmed
             ) {
                 viewModel.isVoiceArmed.toggle()
                 if viewModel.isVoiceArmed { viewModel.isImageArmed = false }
             }
+            .popoverTip(VoiceMessageTip(), arrowEdge: .bottom)
 
             modeButton(
                 icon: viewModel.isImageArmed ? "camera.circle.fill" : "camera.circle",
                 label: String(localized: "Send me a photo"),
+                costTokens: TokenCosts.photo,
                 isArmed: viewModel.isImageArmed
             ) {
                 viewModel.isImageArmed.toggle()
                 if viewModel.isImageArmed { viewModel.isVoiceArmed = false }
             }
+            .popoverTip(RequestPhotoTip(), arrowEdge: .bottom)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
@@ -603,9 +632,15 @@ struct ChatView: View {
         )
     }
 
-    private func modeButton(icon: String, label: String, isArmed: Bool, action: @escaping () -> Void) -> some View {
+    private func modeButton(icon: String, label: String, costTokens: Int? = nil, isArmed: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Text(label).font(.system(size: 13, weight: .semibold))
+            HStack(spacing: 5) {
+                Text(label).font(.system(size: 13, weight: .semibold))
+                if let costTokens {
+                    Text("\(costTokens)").font(.system(size: 12, weight: .bold))
+                    CoinIcon(size: 11)
+                }
+            }
             .lineLimit(1)
             .minimumScaleFactor(0.6)
             .foregroundStyle(isArmed ? AppColor.amber : .white.opacity(0.85))
@@ -720,6 +755,7 @@ struct ChatView: View {
         .padding(.top, 10)
         .padding(.bottom, 10 + bottomInset)
         .background(AppColor.card.opacity(0.9))
+        .popoverTip(SendFirstMessageTip(), arrowEdge: .bottom)
     }
 
     /// Mikrofon: kaydı başlat/durdur. ARTIK OTOMATIK GÖNDERMEZ — durunca
@@ -1000,10 +1036,6 @@ private struct VoicePendingIndicator: View {
     }
 }
 
-/// Just a loading bar — no icon, no "Generating photo…" text (product
-/// decision: the photo itself arrives blurred behind a "Tap to view" prompt,
-/// see `ChatBubble`'s `imageURL` case, so this indicator doesn't need to
-/// announce anything either).
 // MARK: - Ödeme bekleyen foto/ses balonları
 
 /// Botun fotoğrafı — ilk halde HİÇ üretilmemiş, sadece tarif metni saklı
@@ -1155,9 +1187,11 @@ private struct IncomingVoiceWave: View {
     }
 }
 
+/// Spinner only — no icon, no "Generating photo…" text (product decision: the
+/// photo itself arrives blurred behind a "Tap to view" prompt, see
+/// `ChatBubble`'s `imageURL` case, so this indicator doesn't announce anything).
 private struct ImagePendingIndicator: View {
     var body: some View {
-        // Düz bar yerine dönen daire (spinner).
         ProgressView()
             .progressViewStyle(.circular)
             .tint(.white)

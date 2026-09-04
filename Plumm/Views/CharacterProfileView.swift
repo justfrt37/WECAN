@@ -5,6 +5,7 @@
 //
 
 import SwiftUI
+import TipKit
 
 struct CharacterProfileView: View {
     let character: Character
@@ -14,6 +15,8 @@ struct CharacterProfileView: View {
     @State private var page = 0
     @State private var showPaywall = false
     @State private var showLevels = false
+    @State private var showTokenStore = false
+    @Environment(TokenStore.self) private var tokenStore
     /// Bu kullanıcının bu karakterle olan gerçek seviyesi/ilerlemesi. `character.
     /// relationshipLevel` eski/global bir alan (bkz. gotchas); bunun yerine CANLI
     /// `CharacterStore.levelCache`'ten okunur (chat her mesajda günceller → profil
@@ -60,19 +63,20 @@ struct CharacterProfileView: View {
             : character.galleryURLs
     }
 
-    /// Kilitli (PRO olmayan) foto için UCUZ "buzlu cam" yer tutucu. Eskiden
-    /// kilitli fotolar tam çözünürlükte İNDİRİLİP hem hero (520, blur 22) hem
-    /// grid'de (240, blur 18) Gaussian blur uygulanıyordu → aynı görsel iki kez
-    /// çözülüyor + tam-res blur RAM/CPU yiyordu. Kilitli zaten görünmez olacağı
-    /// için görseli hiç indirmeden obscured bir zemin çiziyoruz (görsel eşdeğer).
-    private var frostedLockedFill: some View {
-        Rectangle()
-            .fill(AppColor.card)
-            .overlay(
-                LinearGradient(colors: [AppColor.pink.opacity(0.12), AppColor.card.opacity(0.9)],
-                               startPoint: .topLeading, endPoint: .bottomTrailing)
-            )
-            .overlay(.ultraThinMaterial)
+    /// Kilitli (PRO olmayan) foto — gerçek görsel İNDİRİLİP bulanıklaştırılır
+    /// (bkz. kullanıcı talebi: "actually load that photo and blur it, that
+    /// would make it more realistic" — önceki "buzlu cam" yer tutucu bunun
+    /// yerine kullanılıyordu, indirme maliyetinden kaçınmak için). `scaleEffect`
+    /// blur'un kenarlarda şeffaf/bulanık taşma bırakmasını `clipped()` ile
+    /// birlikte engeller.
+    private func blurredLockedImage(url: URL?) -> some View {
+        CachedImage(url: url) { image in
+            image.resizable().scaledToFill()
+                .blur(radius: 22, opaque: true)
+                .scaleEffect(1.08)
+        } placeholder: {
+            AppColor.card
+        }
     }
 
     var body: some View {
@@ -84,6 +88,9 @@ struct CharacterProfileView: View {
                     VStack(alignment: .leading, spacing: 0) {
                         hero
                         about
+                            .padding(.horizontal, 24)
+                            .padding(.top, 22)
+                        relationshipSection
                             .padding(.horizontal, 24)
                             .padding(.top, 22)
                         interestsSection
@@ -108,37 +115,47 @@ struct CharacterProfileView: View {
         }
         // PRO gerektiren her yerde onboarding paywall'ı (alttan fullscreen) açılır.
         .fullScreenCover(isPresented: $showPaywall) { OnboardingPaywallView() }
+        .fullScreenCover(isPresented: $showTokenStore) { TokenStoreView(tokenStore: tokenStore) }
         .sheet(isPresented: $showLevels) {
-            RelationshipLevelsView(currentLevel: userLevel)
+            RelationshipLevelsView(characterId: character.id, role: character.personalityRole, currentLevel: userLevel, tokenBalance: tokenStore.balance) { newLevel, newBalance in
+                characterStore?.setLevel(character.id, level: newLevel, progress: 0)
+                if var stored = LocalConversationStore.shared.load(for: character.id) {
+                    stored.level = newLevel
+                    stored.levelProgress = 0
+                    LocalConversationStore.shared.save(stored, for: character.id)
+                }
+                tokenStore.setBalance(newBalance)
+            } onInsufficientTokens: {
+                // ChatViewModel.presentInsufficientTokensPaywall ile aynı mantık:
+                // PRO ise coin mağazası, değilse paywall.
+                if PurchaseService.shared.isPro { showTokenStore = true }
+                else { showPaywall = true }
+            }
         }
-        .task { await ImageCache.shared.prefetch(unlockedImages) }
-    }
-
-    /// `images` filtered to what's actually downloadable — mirrors the per-index
-    /// lock check in `hero`/`photosSection` (idx 0 always unlocked, rest require PRO)
-    /// so locked photos are never prefetched/downloaded.
-    private var unlockedImages: [URL] {
-        images.enumerated()
-            .filter { idx, _ in idx == 0 || PurchaseService.shared.isPro }
-            .map(\.element)
+        // Locked photos are now blurred-in-place (bkz. blurredLockedImage) —
+        // they're actually visible (just illegible), so prefetch ALL of them,
+        // not just the unlocked ones.
+        .task { await ImageCache.shared.prefetch(images) }
+        .onAppear {
+            EventLogger.shared.log("character_profile_viewed", [
+                "character_id": character.id, "source": showsChatButton ? "browse" : "chat",
+            ])
+        }
     }
 
     // MARK: Hero (kaydırılabilir resimler + isim + seviye)
 
     private var hero: some View {
         ZStack(alignment: .bottom) {
-            // Kaydırılabilir resimler — hazır galeri fotoğrafları (pre-made)
-            // SADECE burada gösteriliyor (bkz. GalleryView, "More Photos" oradan
-            // kaldırıldı). İlk foto (ana profil fotosu) her zaman açık — geri
-            // kalanı PRO olmayanlar için bulanık/kilitli kalır.
+            // Kaydırılabilir resimler — hazır galeri fotoğrafları (pre-made).
+            // İlk foto (ana profil fotosu) her zaman açık — geri kalanı PRO
+            // olmayanlar için bulanık kalır (bkz. blurredLockedImage).
             TabView(selection: $page) {
                 ForEach(Array(images.enumerated()), id: \.offset) { idx, url in
                     let locked = idx > 0 && !PurchaseService.shared.isPro
                     ZStack {
-                        // Kilitli: tam-res görseli indirip bulanıklaştırma yerine
-                        // ucuz buzlu-cam yer tutucu (bkz. frostedLockedFill).
                         if locked {
-                            frostedLockedFill
+                            blurredLockedImage(url: url)
                         } else {
                             CachedImage(url: url) { image in
                                 image.resizable().scaledToFill()
@@ -146,18 +163,10 @@ struct CharacterProfileView: View {
                                 AppColor.card
                             }
                         }
-
-                        if locked {
-                            Color.black.opacity(0.25)
-                            Button { showPaywall = true } label: {
-                                Image(systemName: "lock.fill")
-                                    .font(.system(size: 34))
-                                    .foregroundStyle(.white)
-                                    .shadow(color: .black.opacity(0.5), radius: 8, y: 4)
-                            }
-                            .buttonStyle(.plain)
-                        }
                     }
+                    .clipped()
+                    .contentShape(Rectangle())
+                    .onTapGesture { if locked { showPaywall = true } }
                     .tag(idx)
                 }
             }
@@ -233,8 +242,18 @@ struct CharacterProfileView: View {
     /// Kalp + LV N, ring seviyenin İÇİNDEKİ ilerlemeyle (levelProgress) orantılı dolar (0 → boş).
     /// Dokununca İlişki Seviyeleri ekranı açılır.
     private var levelCircle: some View {
-        Button { showLevels = true } label: { levelCircleContent }
-            .buttonStyle(.plain)
+        VStack(spacing: 4) {
+            Button {
+                showLevels = true
+                EventLogger.shared.log("feature_used", [
+                    "feature": "relationship_levels_opened", "source": "hero_circle",
+                ])
+            } label: { levelCircleContent }
+                .buttonStyle(.plain)
+            Text("Tap for levels")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(.white.opacity(0.6))
+        }
     }
 
     /// Daire, hero fotonun üstünde durduğu için soluk kalıyordu — kaynak
@@ -300,25 +319,12 @@ struct CharacterProfileView: View {
                         .frame(maxWidth: .infinity)
                         .frame(height: 240)
                         .overlay {
-                            // Kilitli: tam-res indir+blur yerine buzlu yer tutucu
-                            // (bkz. frostedLockedFill) → çift çözme + tam-res blur yok.
                             if locked {
-                                frostedLockedFill
+                                blurredLockedImage(url: url)
                             } else {
                                 CachedImage(url: url) { image in
                                     image.resizable().scaledToFill()
                                 } placeholder: { AppColor.card }
-                            }
-                        }
-                        .overlay {
-                            if locked {
-                                ZStack {
-                                    Color.black.opacity(0.25)
-                                    Image(systemName: "lock.fill")
-                                        .font(.system(size: 26))
-                                        .foregroundStyle(.white)
-                                        .shadow(color: .black.opacity(0.5), radius: 6, y: 3)
-                                }
                             }
                         }
                         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
@@ -328,6 +334,45 @@ struct CharacterProfileView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    // MARK: İlişki
+
+    /// Profil gövdesinde görünür, etiketli seviye bölümü — hero'daki küçük
+    /// çemberden çok daha keşfedilebilir. "İlerlemeyi Gör" aynı sheet'i açar.
+    private var relationshipSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("RELATIONSHIP")
+                .font(.system(size: 13, weight: .bold))
+                .tracking(0.5)
+                .foregroundStyle(.white.opacity(0.8))
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Level \(userLevel) · \(Relationship.stageName(userLevel, role: character.personalityRole))")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(.white)
+                    ProgressView(value: userLevelProgress)
+                        .tint(AppColor.pink)
+                        .frame(maxWidth: 180)
+                }
+                Spacer()
+                Button {
+                    showLevels = true
+                    EventLogger.shared.log("feature_used", [
+                        "feature": "relationship_levels_opened", "source": "profile_section",
+                    ])
+                } label: {
+                    Text("View progress")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 14).padding(.vertical, 8)
+                        .background(AppColor.pink.opacity(0.9), in: Capsule())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .popoverTip(LevelSectionTip(), arrowEdge: .top)
     }
 
     // MARK: Hakkımda

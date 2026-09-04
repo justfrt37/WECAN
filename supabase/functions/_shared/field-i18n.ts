@@ -1,8 +1,8 @@
 // supabase/functions/_shared/field-i18n.ts
 //
 // Character taglines, professions, and interests are always authored in
-// ENGLISH (see the bio-generation prompts in create-character/
-// dev-create-character) but the app's UI ships in 7 languages
+// ENGLISH (see the bio-generation prompt in create-character/index.ts)
+// but the app's UI ships in 7 languages
 // (Plumm/Localizable.xcstrings, mirrored by ConversationLanguage.supported
 // in the client — though only en/tr are fully maintained today, see
 // Plumm/Services/AppLanguage.swift). This translates all three fields once

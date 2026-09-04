@@ -16,7 +16,7 @@ final class UserDefaultsManager {
         static let userId = "auth.userId"
         static let accessToken = "auth.accessToken"
         static let refreshToken = "auth.refreshToken"
-        static let skipMeetConfirm = "feed.skipMeetConfirm"
+        static let deviceId = "analytics.deviceId"
     }
 
     // userId/accessToken/refreshToken used to live in UserDefaults, which is
@@ -44,6 +44,16 @@ final class UserDefaultsManager {
         set { Keychain.write(Keys.refreshToken, newValue) }
     }
 
+    /// Kalıcı, reinstall'a dayanıklı cihaz kimliği (bkz. EventLogger.swift) —
+    /// aynı fiziksel cihazın farklı anonim kimliklerini (her reinstall yeni
+    /// bir `userId` üretir) birbirine bağlamak için. Yoksa ilk okumada üretilir.
+    var deviceId: String {
+        if let existing = migratedRead(Keys.deviceId) { return existing }
+        let generated = UUID().uuidString
+        Keychain.write(Keys.deviceId, generated)
+        return generated
+    }
+
     /// Keychain first; if empty, this install predates the Keychain switch —
     /// fall back to the old UserDefaults value ONCE, copy it into Keychain,
     /// and wipe the UserDefaults copy. Without this, flipping storage
@@ -55,13 +65,6 @@ final class UserDefaultsManager {
         Keychain.write(key, legacy)
         defaults.removeObject(forKey: key)
         return legacy
-    }
-
-    /// Kullanıcı "bir daha gösterme" kutucuğunu işaretlediyse, Keşfet'te beğenince
-    /// artık "tanışmak ister misin?" onayı sorulmaz.
-    var skipMeetConfirm: Bool {
-        get { defaults.bool(forKey: Keys.skipMeetConfirm) }
-        set { defaults.set(newValue, forKey: Keys.skipMeetConfirm) }
     }
 }
 

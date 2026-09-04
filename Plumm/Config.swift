@@ -48,24 +48,22 @@ enum Config {
         URL(string: "\(supabaseURL)/functions/v1/character-schedule")!
     }
 
-    // MARK: DEV-only curated character creator (bkz. DevAccess, DevCharacterService)
-    // TEMPORARY — DELETE alongside these Edge Functions once curated-character
-    // creation is retired.
-
-    static var devUploadImageFunctionURL: URL {
-        URL(string: "\(supabaseURL)/functions/v1/dev-upload-image")!
+    /// Genel amaçlı kısa metin üretimi (prompt-in/text-out) — kıskançlık
+    /// eskalasyon satırı bunu kullanır (bkz. NotificationScheduler
+    /// rescheduleJealousyEscalation).
+    static var generateFunctionURL: URL {
+        URL(string: "\(supabaseURL)/functions/v1/generate")!
     }
 
-    static var devListVoicesFunctionURL: URL {
-        URL(string: "\(supabaseURL)/functions/v1/dev-list-voices")!
+    /// Pro+/Max nickname'leri (karakteri yeniden adlandırma / karakterin
+    /// kullanıcıya hitabı) — bkz. AddCharacterNoteSheet, ChatService.setNickname.
+    static var setNicknameFunctionURL: URL {
+        URL(string: "\(supabaseURL)/functions/v1/set-nickname")!
     }
 
-    static var devCreateCharacterFunctionURL: URL {
-        URL(string: "\(supabaseURL)/functions/v1/dev-create-character")!
-    }
-
-    static var devUpdateCharacterFunctionURL: URL {
-        URL(string: "\(supabaseURL)/functions/v1/dev-update-character")!
+    /// Token karşılığı anında +1 ilişki seviyesi — bkz. RelationshipLevelsView.
+    static var levelBoostFunctionURL: URL {
+        URL(string: "\(supabaseURL)/functions/v1/level-boost")!
     }
 
     // MARK: Real-time voice call (bkz. CallService, CallViewModel)

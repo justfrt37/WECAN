@@ -34,9 +34,7 @@ final class TokenStore {
         guard let accessToken = UserDefaultsManager.shared.accessToken,
               let url = URL(string: "\(Config.supabaseURL)/rest/v1/token_balances?select=balance")
         else { return }
-        var request = URLRequest(url: url)
-        request.setValue(Config.supabaseAnonKey, forHTTPHeaderField: "apikey")
-        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        let request = SupabaseRequest.authorized(url: url, bearer: accessToken)
         guard let (data, response) = try? await URLSession.shared.data(for: request),
               let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode)
         else { return }

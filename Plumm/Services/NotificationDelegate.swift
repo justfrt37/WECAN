@@ -18,7 +18,7 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
     /// A tap that arrived before `CharacterStore.characters` finished loading (cold
     /// launch races the notification delegate against the async character fetch).
     /// Replayed once the store finishes loading — see `replayPendingTapIfNeeded()`.
-    private static var pendingTap: (kind: NotificationKind, characterID: UUID, level: Int?)?
+    private static var pendingTap: (kind: NotificationKind, characterID: UUID, level: Int?, body: String?)?
 
     nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter,
@@ -37,7 +37,7 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
         Task { @MainActor in
             // Zaten teslim edilmiş sayılır — sonraki catch-up taramasında tekrar işlenmesin.
             center.removeDeliveredNotifications(withIdentifiers: [request.identifier])
-            handleTap(kind: kind, characterID: characterID, level: userInfo["level"] as? Int, navigate: true)
+            handleTap(kind: kind, characterID: characterID, level: userInfo["level"] as? Int, body: request.content.body, navigate: true)
             completionHandler()
         }
     }
@@ -47,7 +47,7 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
     func replayPendingTapIfNeeded() {
         guard let pending = Self.pendingTap else { return }
         Self.pendingTap = nil
-        handleTap(kind: pending.kind, characterID: pending.characterID, level: pending.level, navigate: true)
+        handleTap(kind: pending.kind, characterID: pending.characterID, level: pending.level, body: pending.body, navigate: true)
     }
 
     /// Uygulama her ön plana geldiğinde çağrılır — kullanıcı bildirime hiç
@@ -75,7 +75,7 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
                     // Silmeyip bırakırsak bir sonraki catch-up taramasında (karakterler
                     // yüklendikten sonra) tekrar işlenir; başarıda silindiği için çift
                     // enjeksiyon olmaz.
-                    let handled = self.handleTap(kind: kind, characterID: characterID, level: userInfo["level"] as? Int, navigate: false)
+                    let handled = self.handleTap(kind: kind, characterID: characterID, level: userInfo["level"] as? Int, body: request.content.body, navigate: false)
                     if handled {
                         UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [request.identifier])
                     }
@@ -87,9 +87,9 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
     /// Döndürdüğü Bool: karakter yüklüydü ve işlem tamamlandı mı? (catch-up
     /// yolu bununla teslim edilmiş bildirimi silip silmeyeceğine karar verir.)
     @discardableResult
-    private func handleTap(kind: NotificationKind, characterID: UUID, level: Int?, navigate: Bool) -> Bool {
+    private func handleTap(kind: NotificationKind, characterID: UUID, level: Int?, body: String?, navigate: Bool) -> Bool {
         guard let character = store.characters.first(where: { $0.id == characterID }) else {
-            if navigate { Self.pendingTap = (kind, characterID, level) }
+            if navigate { Self.pendingTap = (kind, characterID, level, body) }
             return false
         }
 
@@ -110,6 +110,10 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
             line = GhostedContent.randomLine(language: language, role: character.personalityRole, vibe: character.vibe, level: resolvedLevel)
         case .jealousy:
             line = JealousyContent.randomLine(language: language, role: character.personalityRole, vibe: character.vibe)
+        case .jealousyEscalation:
+            // Grok-generated at schedule time (bkz. NotificationScheduler.escalationLine) —
+            // baked into the notification's own body, no local dictionary to draw from.
+            line = body?.isEmpty == false ? body : JealousyContent.randomLine(language: language, role: character.personalityRole, vibe: character.vibe)
         case .levelUp:
             line = nil
         case .sleepyQuestion:
@@ -137,6 +141,10 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
 
         guard navigate else { return true }
 
+        if kind == .jealousy || kind == .jealousyEscalation {
+            EventLogger.shared.log("feature_used", ["feature": "jealousy_notification_tap"])
+        }
+
         // Level-up dışındaki bot bildirimleri sadece ilgili sekmeye yönlendirir —
         // doğrudan o botun sohbetini açmaz. "Liked You" artık Beğeniler
         // sekmesine gider (bkz. LikedByStore/LikesView), diğerleri Sohbetler'e.
@@ -145,7 +153,7 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
             store.pendingMeetRequest = MeetRequest(character: character, prefillText: "")
         case .liked:
             store.pendingTab = .likes
-        case .ghosted, .jealousy, .sleepyQuestion, .sleepyGoodbye, .bedtime, .missedYou, .goodMorning:
+        case .ghosted, .jealousy, .jealousyEscalation, .sleepyQuestion, .sleepyGoodbye, .bedtime, .missedYou, .goodMorning:
             store.pendingTab = .chat
         }
         return true
@@ -178,6 +186,10 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
             if kind == .ghosted { stored.ghostedAt = Date() }
             // sleepyGoodbye → uyandırma override'ı temizlenir (karakter yine uyur).
             if kind == .sleepyGoodbye { stored.wokenUpAt = nil }
+            // jealousy/jealousyEscalation → kıskançlık durum makinesi (bkz.
+            // NotificationScheduler jealousy bölümü, chat/index.ts injectProactive).
+            if kind == .jealousy { stored.jealousyStage = 1; stored.jealousySentAt = Date() }
+            if kind == .jealousyEscalation { stored.jealousyStage = 2; stored.jealousySentAt = Date() }
             LocalConversationStore.shared.save(stored, for: characterID)
             store.chatCache[characterID] = stored.messages
             store.conversationsVersion += 1

@@ -95,6 +95,7 @@ final class OnboardingStore {
 
     func complete() {
         isCompleted = true
+        EventLogger.shared.log("onboarding_completed")
     }
 
     private enum Keys {

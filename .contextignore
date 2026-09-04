@@ -1,0 +1,25 @@
+# claude-context indexing excludes
+*.xcstrings
+*.pbxproj
+*.xcworkspacedata
+*.xcscheme
+*.plist
+*.lockb
+*.lock
+Pods/
+DerivedData/
+.build/
+build/
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.pdf
+*.mp4
+*.mov
+*.zip
+*.xcassets/
+supabase/.branches/
+supabase/.temp/
+node_modules/
+dist/
