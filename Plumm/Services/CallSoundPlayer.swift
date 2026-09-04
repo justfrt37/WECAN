@@ -23,9 +23,14 @@ final class CallSoundPlayer: NSObject {
         player = p
     }
 
-    func stopRinging() {
+    /// - Parameter deactivate: pass `false` when the ringback is stopping
+    ///   because the call just went LIVE. Deactivating here tore down the very
+    ///   session the ElevenLabs SDK had just taken over, so the call connected
+    ///   and then lost its audio immediately. Every other caller — the error
+    ///   paths and hangup — really is finished with audio and keeps the default.
+    func stopRinging(deactivate: Bool = true) {
         stopPlayback()
-        deactivateSession()
+        if deactivate { deactivateSession() }
     }
 
     /// Fire-and-forget — deactivates the audio session itself once playback
@@ -45,9 +50,31 @@ final class CallSoundPlayer: NSObject {
         player = nil
     }
 
+    /// `.playAndRecord`, not `.playback` — and that is the whole reason calls
+    /// had no audio in either direction.
+    ///
+    /// The ringback starts first (CallViewModel.startCall → startRinging) and
+    /// activates the session, and it was activating it as `.playback`, which is
+    /// an OUTPUT-ONLY category. The ElevenLabs SDK then tried to open the mic on
+    /// top of that session and AVAudioEngine refused with error -3001. The SDK
+    /// fell back to a text-only conversation, which fails as well because
+    /// text-only needs a public agent id or a signed WebSocket URL while we
+    /// hand it a WebRTC conversation token. Net effect on the device: no mic
+    /// captured, no agent audio played, only the debug log showing replies.
+    ///
+    /// The session is still live when the SDK starts, so the category it finds
+    /// has to be one that can record. `.voiceChat` mode is what the SDK expects
+    /// for a call; `.defaultToSpeaker` keeps it off the earpiece, since
+    /// `.voiceChat` routes there by default and users hold the phone away from
+    /// their ear on this screen.
     private func activateSession() {
-        try? AVAudioSession.sharedInstance().setCategory(.playback, options: .duckOthers)
-        try? AVAudioSession.sharedInstance().setActive(true)
+        let session = AVAudioSession.sharedInstance()
+        try? session.setCategory(
+            .playAndRecord,
+            mode: .voiceChat,
+            options: [.defaultToSpeaker, .allowBluetooth, .duckOthers],
+        )
+        try? session.setActive(true)
     }
 
     private func deactivateSession() {
