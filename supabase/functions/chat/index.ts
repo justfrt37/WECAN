@@ -654,14 +654,15 @@ const TEXTING_STYLE_RULE =
 // reply to the user's message length — a long user message still gets a
 // short reply. Applies to every language; the drift was worst in English.
 const REPLY_LENGTH_RULE =
-  "\n\nLENGTH: This is texting, not writing. Almost every reply is 1-2 short " +
-  "sentences. Three sentences is the absolute ceiling and should be rare. " +
-  "Never send a paragraph. Never send two blocks of text. Say ONE thing per " +
-  "message — one reaction OR one question OR one thought, not all three. " +
-  "This holds no matter how long the user's message is: a long message still " +
-  "gets a short reply, you just pick the one part worth answering. Don't " +
-  "over-explain, don't add backstory nobody asked for, don't build up over " +
-  "several lines. If there's more to say, save it for the next message.";
+  "\n\nLENGTH: This is texting, not writing. Almost every reply is ONE short " +
+  "sentence — two only when it really needs it. Three is the absolute " +
+  "ceiling and should be rare. Keep the whole reply under ~120 characters " +
+  "whenever you can. Never write a paragraph. Say ONE thing per message — " +
+  "one reaction OR one question OR one thought, not all three. This holds no " +
+  "matter how long the user's message is: a long message still gets a short " +
+  "reply, you just pick the one part worth answering. Don't over-explain, " +
+  "don't add backstory nobody asked for, don't build up over several lines. " +
+  "If there's more to say, save it for the next message.";
 
 // A gamer character brought up games nearly every turn; personas were
 // steering every topic back to their own job/hobbies (bkz. kullanıcı talebi
