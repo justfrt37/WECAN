@@ -822,14 +822,20 @@ final class ChatViewModel {
         Task {
             await handleWakeUpIfAsleep()
             await pause(TypingTiming.randomStartDelay())
-            showsTypingBubble = true
-            store?.setTyping(character.id, true)
-            await pause(Double.random(in: 1...3))
-            showsTypingBubble = false
-            store?.setTyping(character.id, false)
+            await typingPause()
             withAnimation(.spring(response: 0.45, dampingFraction: 0.72)) { drop() }
             isAwaitingMediaBubble = false
         }
+    }
+
+    /// "Yazıyor" balonunu gösterir, rastgele 1-3 sn bekler, kapatır — gerçek bir
+    /// mesajdan önceki gibi (bkz. eşlik mesajları + kilitli balon).
+    private func typingPause() async {
+        showsTypingBubble = true
+        store?.setTyping(character.id, true)
+        await pause(Double.random(in: 1...3))
+        showsTypingBubble = false
+        store?.setTyping(character.id, false)
     }
 
     /// Düğme etiketini yerel bir kullanıcı mesajı olarak ekler — ekranda görünür
@@ -1025,11 +1031,24 @@ final class ChatViewModel {
         appendLocalMediaRequestLine(String(localized: "Send me a photo"))
         // Kısa eşlik mesajı — kutudan ÖNCE ("bi saniye…") ya da foto açıldıktan
         // SONRA ("işte 😊"), ikisi birden değil (bkz. PhotoAccompanyContent).
+        // Her biri GERÇEK bir mesaj gibi: yazıyor balonu → rastgele 1-3 sn →
+        // metin balonu (bkz. kullanıcı talebi 2026-09-05).
         let accompany = PhotoAccompanyContent.random()
-        dropMediaBubbleAfterTyping { [self] in
-            if accompany.before { appendBotLine(accompany.text) }
-            let pendingID = appendPendingImageBubble(prompt: "a photo of you right now")
+        isAwaitingMediaBubble = true
+        Task {
+            await handleWakeUpIfAsleep()
+            await pause(TypingTiming.randomStartDelay())
+            if accompany.before {
+                await typingPause()
+                withAnimation(.spring(response: 0.4, dampingFraction: 0.75)) { appendBotLine(accompany.text) }
+            }
+            await typingPause()
+            var pendingID = UUID()
+            withAnimation(.spring(response: 0.45, dampingFraction: 0.72)) {
+                pendingID = appendPendingImageBubble(prompt: "a photo of you right now")
+            }
             if !accompany.before { pendingPhotoAfterLines[pendingID] = accompany.text }
+            isAwaitingMediaBubble = false
         }
     }
 
@@ -1170,8 +1189,8 @@ final class ChatViewModel {
                 // içeriğiyle çelişmez. IMAGE_CAPTION_RULE (AI üretimli caption)
                 // hâlâ kaldırılmış durumda (kullanıcı talebi 2026-08-26).
                 if let afterLine = pendingPhotoAfterLines.removeValue(forKey: messageID) {
-                    await pause(Double.random(in: 0.6...1.6))
-                    appendBotLine(afterLine)
+                    await typingPause()
+                    withAnimation(.spring(response: 0.4, dampingFraction: 0.75)) { appendBotLine(afterLine) }
                 }
                 isSendingImageReply = false
                 applyPostReplyEffects(gotPhoto: imageResult.url, stored: stored)
