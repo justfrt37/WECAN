@@ -601,23 +601,16 @@ struct ChatView: View {
 
     private var quickReplyRow: some View {
         HStack(spacing: 10) {
-            modeButton(
-                icon: viewModel.isVoiceArmed ? "waveform.circle.fill" : "waveform.circle",
-                label: String(localized: "Send me a voice"),
-                isArmed: viewModel.isVoiceArmed
-            ) {
-                viewModel.isVoiceArmed.toggle()
-                if viewModel.isVoiceArmed { viewModel.isImageArmed = false }
+            // Tek dokunuş: metin isteği YOK — düğme direkt kilitli sesli/foto
+            // balonunu düşürür, üretim + tahsil o balona dokununca olur
+            // (bkz. sendVoiceRequest / sendImageRequest / kullanıcı talebi).
+            modeButton(label: String(localized: "Send me a voice")) {
+                viewModel.sendVoiceRequest()
             }
             .popoverTip(VoiceMessageTip(), arrowEdge: .bottom)
 
-            modeButton(
-                icon: viewModel.isImageArmed ? "camera.circle.fill" : "camera.circle",
-                label: String(localized: "Send me a photo"),
-                isArmed: viewModel.isImageArmed
-            ) {
-                viewModel.isImageArmed.toggle()
-                if viewModel.isImageArmed { viewModel.isVoiceArmed = false }
+            modeButton(label: String(localized: "Send me a photo")) {
+                viewModel.sendImageRequest()
             }
             .popoverTip(RequestPhotoTip(), arrowEdge: .bottom)
         }
@@ -630,21 +623,18 @@ struct ChatView: View {
         )
     }
 
-    /// `costTokens` parametresi kaldırıldı: butonların yanındaki token sayısı +
-    /// kalp ikonu artık gösterilmiyor (bkz. kullanıcı talebi). Maliyetler
-    /// Settings > Token Costs ekranında duruyor.
-    private func modeButton(icon: String, label: String, isArmed: Bool, action: @escaping () -> Void) -> some View {
+    /// Artık bir "mod" değil — düz düğme. Dokununca istek anında gönderilir
+    /// (bkz. quickReplyRow / kullanıcı talebi: metinli istek akışı kaldırıldı).
+    private func modeButton(label: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            HStack(spacing: 5) {
-                Text(label).font(.system(size: 13, weight: .semibold))
-            }
-            .lineLimit(1)
-            .minimumScaleFactor(0.6)
-            .foregroundStyle(isArmed ? AppColor.amber : .white.opacity(0.85))
-            .padding(.horizontal, 14).frame(height: 34)
-            .frame(maxWidth: .infinity)
-            .background(isArmed ? AppColor.amber.opacity(0.15) : .white.opacity(0.08), in: Capsule())
-            .overlay(Capsule().strokeBorder(isArmed ? AppColor.amber.opacity(0.5) : .white.opacity(0.12), lineWidth: 1))
+            Text(label).font(.system(size: 13, weight: .semibold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+                .foregroundStyle(.white.opacity(0.85))
+                .padding(.horizontal, 14).frame(height: 34)
+                .frame(maxWidth: .infinity)
+                .background(.white.opacity(0.08), in: Capsule())
+                .overlay(Capsule().strokeBorder(.white.opacity(0.12), lineWidth: 1))
         }
         .buttonStyle(.plain)
         .disabled(viewModel.isSending || viewModel.isLoadingHistory)
@@ -687,9 +677,7 @@ struct ChatView: View {
     // MARK: Input
 
     private var inputPlaceholder: String {
-        if viewModel.isImageArmed { return String(localized: "Describe the photo…") }
-        if viewModel.isVoiceArmed { return String(localized: "What do you want to hear?") }
-        return String(localized: "Message…")
+        String(localized: "Message…")
     }
 
     private var inputBar: some View {
@@ -722,18 +710,12 @@ struct ChatView: View {
             .padding(.horizontal, 14).frame(minHeight: 46)
             .background(.white.opacity(0.1), in: Capsule())
             .overlay(Capsule().strokeBorder(
-                (recognizer.isRecording || viewModel.isVoiceArmed || viewModel.isImageArmed) ? AppColor.pink.opacity(0.6) : .white.opacity(0.1),
-                lineWidth: (viewModel.isVoiceArmed || viewModel.isImageArmed) ? 2 : 1
+                recognizer.isRecording ? AppColor.pink.opacity(0.6) : .white.opacity(0.1),
+                lineWidth: 1
             ))
 
             Button {
-                if viewModel.isImageArmed {
-                    viewModel.sendImageRequest()
-                } else if viewModel.isVoiceArmed {
-                    viewModel.sendVoiceRequest()
-                } else {
-                    viewModel.send()
-                }
+                viewModel.send()
             } label: {
                 Image(systemName: "paperplane.fill")
                     .font(.system(size: 18, weight: .semibold))

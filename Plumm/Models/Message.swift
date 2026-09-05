@@ -43,6 +43,16 @@ struct Message: Identifiable, Codable, Hashable {
     /// isteği (bkz. ChatViewModel.generatePendingVoice). Metin tarifi tutmaz —
     /// asıl bot cevabı da dokunulunca üretilir, o anki sohbet geçmişinden gelir.
     var pendingVoiceRequest: Bool?
+    /// Bu pending ses balonunu SUNUCUDA oluştururken kullanılan `requestText`
+    /// (kind=voice_pending satırının `content`'i). Üretim bitince sunucudaki
+    /// pending satırını gerçek sese çevirmek AYNI metinle eşleştirmeye dayanır
+    /// (bkz. chat/index.ts voiceMessage). Düğme akışında bu = kullanıcının
+    /// eklediği metin, otomatik ([[SEND_VOICE]]) akışta ise sabit "Send me a
+    /// voice" — ikisi generatePendingVoice'ın hesapladığı "önceki kullanıcı
+    /// mesajı"ndan farklı olabilir, bu yüzden ayrıca saklanır (yoksa eşleşme
+    /// tutmaz, sunucu yeni bir `voice` satırı ekler → yinelenen balon + öksüz
+    /// kilitli balon hatası). Eski kayıtlarda/rows'ta nil.
+    var pendingVoiceRequestText: String?
     /// true ise bu mesajın gönderimi başarısız oldu (ağ hatası vb., 402 hariç —
     /// bkz. ChatViewModel.isInsufficientTokensError) — balon üzerinde bir hata
     /// göstergesi gösterilir, dokununca yeniden denenir (bkz. ChatViewModel.retrySend).
@@ -57,6 +67,7 @@ struct Message: Identifiable, Codable, Hashable {
         imageURL: URL? = nil, voiceLocalPath: String? = nil, voiceDuration: Double? = nil,
         voiceRemoteURL: URL? = nil,
         localImagePath: String? = nil, pendingImagePrompt: String? = nil, pendingVoiceRequest: Bool? = nil,
+        pendingVoiceRequestText: String? = nil,
         failed: Bool? = nil, isExpiredUserPhoto: Bool? = nil
     ) {
         self.id = id
@@ -70,6 +81,7 @@ struct Message: Identifiable, Codable, Hashable {
         self.localImagePath = localImagePath
         self.pendingImagePrompt = pendingImagePrompt
         self.pendingVoiceRequest = pendingVoiceRequest
+        self.pendingVoiceRequestText = pendingVoiceRequestText
         self.failed = failed
         self.isExpiredUserPhoto = isExpiredUserPhoto
     }
@@ -97,7 +109,11 @@ struct Message: Identifiable, Codable, Hashable {
         }
         // "Açılmamış/kilitli" ses isteği — reload'da yine pending (kilitli) balon.
         if kind == "voice_pending" {
-            return Message(role: r, content: "", createdAt: createdAt, pendingVoiceRequest: true)
+            // `content` = pending satırı oluşturulurken kullanılan requestText —
+            // üretim bitince sunucudaki eşleştirme bununla yapılır, bu yüzden
+            // balonda saklanır (bkz. pendingVoiceRequestText).
+            return Message(role: r, content: "", createdAt: createdAt,
+                           pendingVoiceRequest: true, pendingVoiceRequestText: content)
         }
         // Kullanıcının bota gönderdiği, sunucuda KALICI hale getirilmiş fotoğraf
         // (bkz. chat/index.ts persistUserPhoto) — content = imzalı Storage URL,

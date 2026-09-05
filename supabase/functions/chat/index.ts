@@ -1307,9 +1307,20 @@ Deno.serve(async (req: Request) => {
       const reqText: string = String(body.voiceMessage.requestText ?? "");
       const url: string | null = typeof body.voiceMessage.url === "string" ? body.voiceMessage.url : null;
       if (url) {
-        const { data: pend } = await db.from("messages")
+        // Önce requestText ile birebir eşleşen kilitli satırı ara. Bulunamazsa
+        // (ör. otomatik [[SEND_VOICE]] akışı balonu "Send me a voice" ile
+        // oluşturur ama istemci tamamlarken önceki kullanıcı mesajını gönderir)
+        // konuşmadaki EN SON voice_pending satırına düş — yeni bir `voice`
+        // satırı eklemek yerine onu çevir. Aksi hâlde öksüz bir kilitli balon +
+        // yinelenen ses balonu kalıyordu.
+        let { data: pend } = await db.from("messages")
           .select("id").eq("conversation_id", convo.id).eq("kind", "voice_pending").eq("content", reqText)
           .order("created_at", { ascending: false }).limit(1);
+        if (!pend || !pend[0]) {
+          ({ data: pend } = await db.from("messages")
+            .select("id").eq("conversation_id", convo.id).eq("kind", "voice_pending")
+            .order("created_at", { ascending: false }).limit(1));
+        }
         if (pend && pend[0]) {
           await db.from("messages").update({ content: url, kind: "voice" }).eq("id", pend[0].id);
         } else {

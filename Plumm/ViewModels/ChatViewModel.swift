@@ -101,8 +101,7 @@ final class ChatViewModel {
     var isVisible = false
     private var hasSyntheticOpening = false
     /// PRO gerektiren bir gönderim denendiğinde açılır (bkz. PurchaseService.isPro) —
-    /// düğmelere basmak SERBEST (isVoiceArmed/isImageArmed, kamera/mikrofon açma),
-    /// sadece gerçek GÖNDERIM anında kontrol edilir.
+    /// düğmelere basmak SERBEST, sadece gerçek GÖNDERIM anında kontrol edilir.
     var showPaywall = false
     /// `showPaywall` hangi tier'ı satmalı — voice gate'leri Pro+ ister, foto/
     /// mesaj gate'leri Pro yeterli. Bunsuz paywall hep Pro'ya açılıyordu; zaten
@@ -296,9 +295,7 @@ final class ChatViewModel {
 
     var canSend: Bool {
         let hasText = !inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        // Sesli/foto modunda metin ZORUNLU değil — boşsa varsayılan "Sesli mesaj
-        // gönder"/"Fotoğraf gönder" metniyle gönderilir (bkz. sendVoiceRequest/sendImageRequest).
-        return (hasText || isVoiceArmed || isImageArmed) && !isSending && !isLoadingHistory
+        return hasText && !isSending && !isLoadingHistory
     }
 
     // MARK: - Geçmişi yükle
@@ -645,9 +642,7 @@ final class ChatViewModel {
     /// isteme (`sendVoiceRequest`) ile KARIŞTIRILMASIN, bu farklı bir şey:
     /// kullanıcı konuştu, transkript metin olarak Grok'a gider (ücretsiz —
     /// cihaz üstü konuşma tanıma), ses SADECE cihazda oynatılabilir bir
-    /// balon olarak kalır. `isVoiceArmed`/`isImageArmed` varsa temizlenir —
-    /// kullanıcının kendi girdisi öncelikli, botun ayrı bir medya üretmesini
-    /// İSTEMEZ (bkz. plan: "arm-system composition").
+    /// balon olarak kalır.
     func sendUserVoice(transcript: String, audioURL: URL) {
         let trimmed = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, !isSending, !isLoadingHistory else { return }
@@ -671,8 +666,6 @@ final class ChatViewModel {
         NotificationScheduler.shared.noteUserSent(character: character)
         messagesSentThisSession += 1
         EventLogger.shared.log("message_sent", ["character_id": character.id, "kind": "voice"])
-        isVoiceArmed = false
-        isImageArmed = false
         isSending = true
         errorMessage = nil
         deductBadgeOptimistically(cost)
@@ -730,8 +723,6 @@ final class ChatViewModel {
         LocalConversationStore.shared.appendMessage(userMsg, for: character.id, defaultLevel: relationshipLevel, defaultLevelProgress: levelProgress)
         store?.chatCache[character.id] = realMessages()
         NotificationScheduler.shared.noteUserSent(character: character)
-        isVoiceArmed = false
-        isImageArmed = false
         isSending = true
         errorMessage = nil
 
@@ -773,19 +764,10 @@ final class ChatViewModel {
         }
     }
 
-    /// Sesli mesaj isteği bayrağı — `quickReplyRow`'daki dalga formu düğmesiyle
-    /// açılır/kapanır (bkz. ChatView). Açıkken gönder butonu `sendVoiceRequest()`e yönlenir.
-    var isVoiceArmed: Bool = false
-
     /// `showsTypingBubble` açıkken hangi bekleme balonunun gösterileceğini
     /// ayırt eder — sesli mesaj beklerken normal "yazıyor" 3-nokta balonuyla
     /// AYNI görünmesin diye (bkz. ChatView.messagesList).
     var isSendingVoiceReply: Bool = false
-
-    /// Fotoğraf isteği bayrağı — `quickReplyRow`'daki kamera düğmesiyle açılır/
-    /// kapanır (bkz. ChatView). `isVoiceArmed` ile karşılıklı dışlayıcı: biri
-    /// açılınca diğeri kapanır, gönder butonu ikisinden en fazla birine yönelir.
-    var isImageArmed: Bool = false
 
     /// `showsTypingBubble`/pending state ayrımı — fotoğraf üretimi beklenirken
     /// normal "yazıyor" balonuyla AYNI görünmesin diye (bkz. ChatView.messagesList).
@@ -816,23 +798,17 @@ final class ChatViewModel {
     /// ekler (bkz. Message.pendingVoiceRequest). Asıl bot cevabı + TTS + token
     /// tahsili SADECE o balona dokununca olur (bkz. generatePendingVoice) —
     /// bu sayede kullanıcı önce token maliyetini görüp sonra karar verir.
+    /// "Send me a voice" düğmesi — tek dokunuş. Metinli istek YOK (kullanıcı
+    /// talebi): kullanıcı mesajı eklenmez, sadece kilitli sesli mesaj balonu
+    /// düşer; üretim + tahsil o balona dokununca (bkz. generatePendingVoice).
     func sendVoiceRequest() {
         guard !isSending, !isLoadingHistory else { return }
         // Ses, Pro+ ve Pro Max hakkı (Pro'da YOK, bkz. entitlements.ts) — hakkı
         // olmayana (kredi yetse bile) paywall aç, üretme.
         guard PurchaseService.shared.canUseVoice else { paywallTier = .proPlus; showPaywall = true; return }
-        let typed = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
-        // Kullanıcı bir şey yazmadıysa varsayılan metin: "Sesli mesaj gönder"
-        // (buton etiketiyle aynı) — mesaj balonunda bu görünür.
-        let text = typed.isEmpty ? String(localized: "Send me a voice") : typed
-        let userMsg = Message(role: .user, content: text)
-        messages.append(userMsg)
-        LocalConversationStore.shared.appendMessage(userMsg, for: character.id, defaultLevel: relationshipLevel, defaultLevelProgress: levelProgress)
         NotificationScheduler.shared.noteUserSent(character: character)
-        inputText = ""
-        isVoiceArmed = false
         errorMessage = nil
-        appendPendingVoiceBubble(requestText: text)
+        appendPendingVoiceBubble(requestText: String(localized: "Send me a voice"))
     }
 
     /// Kilitli sesli mesaj balonunu ekler — hem düğme akışı (`sendVoiceRequest`,
@@ -843,7 +819,8 @@ final class ChatViewModel {
     /// generatePendingVoice) TEK yerde, iki yol arasında fark yok.
     private func appendPendingVoiceBubble(requestText: String) {
         let pendingID = UUID()
-        let pendingMsg = Message(id: pendingID, role: .assistant, content: "", pendingVoiceRequest: true)
+        let pendingMsg = Message(id: pendingID, role: .assistant, content: "",
+                                 pendingVoiceRequest: true, pendingVoiceRequestText: requestText)
         messages.append(pendingMsg)
         LocalConversationStore.shared.appendMessage(pendingMsg, for: character.id, defaultLevel: relationshipLevel, defaultLevelProgress: levelProgress)
         store?.chatCache[character.id] = realMessages()
@@ -882,6 +859,13 @@ final class ChatViewModel {
         guard hasTokensOrPaywall(cost: 12) else { return }
         deductBadgeOptimistically(12)
         let text = messages[userMessageIdx].content
+        // Sunucudaki kilitli (voice_pending) satırı gerçek sese çevirmek için
+        // AYNI requestText gerekir — bu, pending balonu oluşturulurken sunucuya
+        // yazılan metin (bkz. appendPendingVoiceBubble / Message.fromServer).
+        // Otomatik [[SEND_VOICE]] akışında bu "Send me a voice"dır, `text` ise
+        // önceki gerçek kullanıcı mesajı — eşleşmezse sunucu yeni bir `voice`
+        // satırı ekler (yinelenen balon hatası). Eski/eksik kayıtlar için `text`e düş.
+        let serverRequestText = messages[idx].pendingVoiceRequestText ?? text
         let lastMessageAt = userMessageIdx > 0 ? messages[userMessageIdx - 1].createdAt : nil
 
         // Bu pending balon YERİNDE güncellenir (kendi "üretiliyor" durumunu
@@ -965,12 +949,14 @@ final class ChatViewModel {
                     messages[finalIdx].voiceDuration = duration
                     messages[finalIdx].voiceRemoteURL = voiceRemoteURL
                     messages[finalIdx].pendingVoiceRequest = nil
+                    messages[finalIdx].pendingVoiceRequestText = nil
                 }
                 LocalConversationStore.shared.updateMessage(id: messageID, for: character.id) { msg in
                     msg.content = cleanedReply
                     msg.voiceLocalPath = savedPath
                     msg.voiceDuration = duration
                     msg.pendingVoiceRequest = nil
+                    msg.pendingVoiceRequestText = nil
                 }
                 LocalConversationStore.shared.refreshDetectedLanguage(for: character.id)
                 store?.chatCache[character.id] = realMessages()
@@ -980,7 +966,7 @@ final class ChatViewModel {
                 // Sesi SUNUCUDA sakla: aynı requestText'li "kilitli" (voice_pending)
                 // satır gerçek sese (kind=voice, content=URL) çevrilir. Böylece chate
                 // tekrar girince METİN değil SES balonu görünür (foto ile simetrik).
-                await service.saveVoiceMessage(character: character, requestText: text, url: voiceRemoteURL?.absoluteString)
+                await service.saveVoiceMessage(character: character, requestText: serverRequestText, url: voiceRemoteURL?.absoluteString)
 
                 applyPostReplyEffects(gotPhoto: nil, stored: stored)
             } catch {
@@ -1003,25 +989,20 @@ final class ChatViewModel {
     /// GÖRSELİ AÇMAK (balona dokunma) 25 jetondur (bkz. generatePendingImage).
     /// Kullanıcı bir TARİF yazdıysa o mesaj olarak görünür + seçim istemi olur;
     /// boşsa hiç kullanıcı-metni gösterilmez.
+    /// "Send me a photo" düğmesi — tek dokunuş. Metinli/tarifli istek YOK
+    /// (kullanıcı talebi): kullanıcı mesajı eklenmez, sadece bulanık kilitli
+    /// foto balonu düşer; üretim + tahsil o balona dokununca
+    /// (bkz. generatePendingImage). Prompt her zaman içsel varsayılan.
     func sendImageRequest() {
         guard !isSending, !isLoadingHistory else { return }
         // Foto PRO özelliği — PRO değilse (kredi yetse bile) PRO paywall aç.
         guard PurchaseService.shared.isPro else { paywallTier = .pro; showPaywall = true; return }
-        let typed = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
-        // Seçim istemi: kullanıcı yazdıysa onu, yazmadıysa içsel bir varsayılan
-        // (kullanıcıya GÖSTERİLMEZ) — "Fotoğraf gönder" placeholder'ı balonda çıkmasın.
-        let prompt = typed.isEmpty ? "a photo of you right now" : typed
-        // Kullanıcı GERÇEK bir tarif yazdıysa mesajı göster; boşsa gösterme.
-        if !typed.isEmpty { messages.append(Message(role: .user, content: typed)) }
-        updateCache()
         NotificationScheduler.shared.noteUserSent(character: character)
         messagesSentThisSession += 1
         EventLogger.shared.log("message_sent", ["character_id": character.id, "kind": "image_request"])
         EventLogger.shared.log("feature_used", ["feature": "photo_request"])
-        inputText = ""
-        isImageArmed = false
         errorMessage = nil
-        appendPendingImageBubble(prompt: prompt)
+        appendPendingImageBubble(prompt: "a photo of you right now")
     }
 
     /// Kilitli foto balonunu ekler — hem düğme akışı (`sendImageRequest`) hem
