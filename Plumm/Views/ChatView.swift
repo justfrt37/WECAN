@@ -604,7 +604,6 @@ struct ChatView: View {
             modeButton(
                 icon: viewModel.isVoiceArmed ? "waveform.circle.fill" : "waveform.circle",
                 label: String(localized: "Send me a voice"),
-                costTokens: TokenCosts.voiceMessage,
                 isArmed: viewModel.isVoiceArmed
             ) {
                 viewModel.isVoiceArmed.toggle()
@@ -615,7 +614,6 @@ struct ChatView: View {
             modeButton(
                 icon: viewModel.isImageArmed ? "camera.circle.fill" : "camera.circle",
                 label: String(localized: "Send me a photo"),
-                costTokens: TokenCosts.photo,
                 isArmed: viewModel.isImageArmed
             ) {
                 viewModel.isImageArmed.toggle()
@@ -632,14 +630,13 @@ struct ChatView: View {
         )
     }
 
-    private func modeButton(icon: String, label: String, costTokens: Int? = nil, isArmed: Bool, action: @escaping () -> Void) -> some View {
+    /// `costTokens` parametresi kaldırıldı: butonların yanındaki token sayısı +
+    /// kalp ikonu artık gösterilmiyor (bkz. kullanıcı talebi). Maliyetler
+    /// Settings > Token Costs ekranında duruyor.
+    private func modeButton(icon: String, label: String, isArmed: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack(spacing: 5) {
                 Text(label).font(.system(size: 13, weight: .semibold))
-                if let costTokens {
-                    Text("\(costTokens)").font(.system(size: 12, weight: .bold))
-                    CoinIcon(size: 11)
-                }
             }
             .lineLimit(1)
             .minimumScaleFactor(0.6)
