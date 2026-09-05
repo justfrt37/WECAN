@@ -1023,9 +1023,29 @@ final class ChatViewModel {
         guard PurchaseService.shared.isPro else { paywallTier = .pro; showPaywall = true; return }
         EventLogger.shared.log("feature_used", ["feature": "photo_request"])
         appendLocalMediaRequestLine(String(localized: "Send me a photo"))
+        // Kısa eşlik mesajı — kutudan ÖNCE ("bi saniye…") ya da foto açıldıktan
+        // SONRA ("işte 😊"), ikisi birden değil (bkz. PhotoAccompanyContent).
+        let accompany = PhotoAccompanyContent.random()
         dropMediaBubbleAfterTyping { [self] in
-            appendPendingImageBubble(prompt: "a photo of you right now")
+            if accompany.before { appendBotLine(accompany.text) }
+            let pendingID = appendPendingImageBubble(prompt: "a photo of you right now")
+            if !accompany.before { pendingPhotoAfterLines[pendingID] = accompany.text }
         }
+    }
+
+    /// "Send me a photo" düğmesiyle düşen kilitli balonlar için, foto açıldıktan
+    /// SONRA gönderilecek eşlik mesajı (bkz. PhotoAccompanyContent, before=false).
+    /// Kalıcı değil — uygulama yeniden açılırsa kaybolur (kabul edilebilir).
+    private var pendingPhotoAfterLines: [UUID: String] = [:]
+
+    /// Botun sohbete düşürdüğü kısa yerel mesaj — ekranda görünür ve
+    /// LocalConversationStore'a yazılır (geçmiş bağlamına dahil), sunucuya
+    /// ayrı bir istek gitmez.
+    private func appendBotLine(_ text: String) {
+        let msg = Message(role: .assistant, content: text)
+        messages.append(msg)
+        LocalConversationStore.shared.appendMessage(msg, for: character.id, defaultLevel: relationshipLevel, defaultLevelProgress: levelProgress)
+        updateCache()
     }
 
     /// Kilitli foto balonunu ekler — hem düğme akışı (`sendImageRequest`) hem
@@ -1060,9 +1080,11 @@ final class ChatViewModel {
     /// gösterip sonra balonu düşürür. Tek-dokunuş düğme akışında (kullanıcı
     /// talebi) balon ANINDA eklenir — art arda hızlı dokunuşlarda kutuların
     /// gecikmeli/hiç görünmemesi buradan (Task + await + çakışan withAnimation).
-    private func appendPendingImageBubble(prompt: String, withTypingPreamble: Bool = false) {
+    @discardableResult
+    private func appendPendingImageBubble(prompt: String, withTypingPreamble: Bool = false) -> UUID {
+        let pendingID = UUID()
         func drop() {
-            messages.append(Message(role: .assistant, content: "", pendingImagePrompt: prompt))
+            messages.append(Message(id: pendingID, role: .assistant, content: "", pendingImagePrompt: prompt))
             updateCache()
             Task {
                 // Açılmamış (kilitli) foto'yu SUNUCUDA sakla — üretmeden çıkıp
@@ -1070,7 +1092,7 @@ final class ChatViewModel {
                 await service.savePhotoMessage(character: character, prompt: prompt, url: nil)
             }
         }
-        guard withTypingPreamble else { drop(); return }
+        guard withTypingPreamble else { drop(); return pendingID }
         Task {
             await handleWakeUpIfAsleep()
             await pause(TypingTiming.randomStartDelay())
@@ -1081,6 +1103,7 @@ final class ChatViewModel {
             store?.setTyping(character.id, false)
             withAnimation(.spring(response: 0.45, dampingFraction: 0.72)) { drop() }
         }
+        return pendingID
     }
 
     /// Bir "ödeme bekleyen" foto balonuna dokununca — 25 token tahsil edip
@@ -1141,9 +1164,15 @@ final class ChatViewModel {
                     character: character, prompt: prompt, url: imageResult.url.absoluteString
                 )
 
-                // Foto-sonrası metin tepkisi (IMAGE_CAPTION_RULE) KALDIRILDI —
-                // kullanıcı talebi 2026-08-26: "weird", istenmiyor. Foto reveal
-                // artık başka hiçbir mesaj eklemeden burada biter.
+                // "Send me a photo" düğmesiyle düşen bir kutuysa ve eşlik mesajı
+                // FOTO SONRASI seçildiyse ("işte 😊") şimdi gönder (bkz.
+                // PhotoAccompanyContent). AI değil, sabit havuzdan; fotoğrafın
+                // içeriğiyle çelişmez. IMAGE_CAPTION_RULE (AI üretimli caption)
+                // hâlâ kaldırılmış durumda (kullanıcı talebi 2026-08-26).
+                if let afterLine = pendingPhotoAfterLines.removeValue(forKey: messageID) {
+                    await pause(Double.random(in: 0.6...1.6))
+                    appendBotLine(afterLine)
+                }
                 isSendingImageReply = false
                 applyPostReplyEffects(gotPhoto: imageResult.url, stored: stored)
             } catch {
