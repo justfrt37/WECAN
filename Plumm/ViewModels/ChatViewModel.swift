@@ -793,22 +793,15 @@ final class ChatViewModel {
     /// blok yok (chat header bu durumda "Online" göstermeye devam eder).
     var currentActivity: (label: String, detail: String)?
 
-    /// `send()`'in sesli-mesaj karşılığı — ama artık HEMEN üretmez: kullanıcının
-    /// metnini gönderir ve karşılığında "ödeme bekleyen" bir sesli mesaj balonu
-    /// ekler (bkz. Message.pendingVoiceRequest). Asıl bot cevabı + TTS + token
-    /// tahsili SADECE o balona dokununca olur (bkz. generatePendingVoice) —
-    /// bu sayede kullanıcı önce token maliyetini görüp sonra karar verir.
-    /// "Send me a voice" düğmesi — tek dokunuş. Metinli istek YOK (kullanıcı
-    /// talebi): kullanıcı mesajı eklenmez, sadece kilitli sesli mesaj balonu
-    /// düşer; üretim + tahsil o balona dokununca (bkz. generatePendingVoice).
+    /// "Send me a voice" düğmesi — tek dokunuş. Düğme metni normal bir kullanıcı
+    /// mesajı olarak gönderilir (kullanıcı talebi 2026-09-05: "kullanıcı bunu
+    /// görsün"), bot metinle cevap verir + [[SEND_VOICE]] işareti döndürür →
+    /// `triggerAutoMediaIfNeeded` kilitli ses balonunu düşürür. Sesli MESAJ
+    /// Pro hakkı (sesli ARAMA Pro+ — ayrı, bkz. voice-call-start).
     func sendVoiceRequest() {
         guard !isSending, !isLoadingHistory else { return }
-        // Ses, Pro+ ve Pro Max hakkı (Pro'da YOK, bkz. entitlements.ts) — hakkı
-        // olmayana (kredi yetse bile) paywall aç, üretme.
-        guard PurchaseService.shared.canUseVoice else { paywallTier = .proPlus; showPaywall = true; return }
-        NotificationScheduler.shared.noteUserSent(character: character)
-        errorMessage = nil
-        appendPendingVoiceBubble(requestText: String(localized: "Send me a voice"))
+        guard PurchaseService.shared.isPro else { paywallTier = .pro; showPaywall = true; return }
+        send(String(localized: "Send me a voice"))
     }
 
     /// Kilitli sesli mesaj balonunu ekler — hem düğme akışı (`sendVoiceRequest`,
@@ -845,8 +838,8 @@ final class ChatViewModel {
     /// ile seslendirir (12 token, bkz. voice-message-tts). Ses tam olarak
     /// cihaza kaydedilene KADAR balon "üretiliyor" durumunda kalır.
     func generatePendingVoice(for messageID: UUID) {
-        // Ses, Pro+ ve Pro Max hakkı (Pro'da YOK) — hakkı yoksa üretme, paywall aç.
-        guard PurchaseService.shared.canUseVoice else { paywallTier = .proPlus; showPaywall = true; return }
+        // Sesli MESAJ Pro hakkı (sesli ARAMA Pro+ — ayrı) — yoksa üretme, paywall aç.
+        guard PurchaseService.shared.isPro else { paywallTier = .pro; showPaywall = true; return }
         guard let idx = messages.firstIndex(where: { $0.id == messageID }),
               messages[idx].isPendingVoice,
               !generatingVoiceMessageIDs.contains(messageID),
@@ -981,27 +974,15 @@ final class ChatViewModel {
         }
     }
 
-    /// Fotoğraf İSTEĞİ. Kullanıcı talebi: foto düğmesine basınca karakter METİN
-    /// cevabı VERMEZ (özellikle boş girdide "fotoğraf gönder" metnini gönderip
-    /// "düğmeye bas" gibi tuhaf cevap alma sorunu) — bunun yerine kısa bir
-    /// "yazıyor" gösterilir, sonra bulanık "ödeme bekleyen" foto balonu gelir.
-    /// GÖRSELİ AÇMAK (balona dokunma) 25 jetondur (bkz. generatePendingImage).
-    /// Kullanıcı bir TARİF yazdıysa o mesaj olarak görünür + seçim istemi olur;
-    /// boşsa hiç kullanıcı-metni gösterilmez.
-    /// "Send me a photo" düğmesi — tek dokunuş. Metinli/tarifli istek YOK
-    /// (kullanıcı talebi): kullanıcı mesajı eklenmez, sadece bulanık kilitli
-    /// foto balonu düşer; üretim + tahsil o balona dokununca
-    /// (bkz. generatePendingImage). Prompt her zaman içsel varsayılan.
+    /// "Send me a photo" düğmesi — tek dokunuş. Düğme metni normal bir kullanıcı
+    /// mesajı olarak gönderilir (kullanıcı talebi 2026-09-05: "kullanıcı bunu
+    /// görsün"), bot metinle cevap verir + [[SEND_PHOTO]] işareti döndürür →
+    /// `triggerAutoMediaIfNeeded` kilitli foto balonunu düşürür. Foto Pro hakkı.
     func sendImageRequest() {
         guard !isSending, !isLoadingHistory else { return }
-        // Foto PRO özelliği — PRO değilse (kredi yetse bile) PRO paywall aç.
         guard PurchaseService.shared.isPro else { paywallTier = .pro; showPaywall = true; return }
-        NotificationScheduler.shared.noteUserSent(character: character)
-        messagesSentThisSession += 1
-        EventLogger.shared.log("message_sent", ["character_id": character.id, "kind": "image_request"])
         EventLogger.shared.log("feature_used", ["feature": "photo_request"])
-        errorMessage = nil
-        appendPendingImageBubble(prompt: "a photo of you right now")
+        send(String(localized: "Send me a photo"))
     }
 
     /// Kilitli foto balonunu ekler — hem düğme akışı (`sendImageRequest`) hem
@@ -1024,7 +1005,8 @@ final class ChatViewModel {
             guard PurchaseService.shared.isPro else { return }
             appendPendingImageBubble(prompt: media.prompt ?? "a photo of you right now", withTypingPreamble: true)
         case "voice":
-            guard PurchaseService.shared.canUseVoice else { return }
+            // Sesli MESAJ Pro hakkı (sesli ARAMA Pro+ — ayrı).
+            guard PurchaseService.shared.isPro else { return }
             appendPendingVoiceBubble(requestText: String(localized: "Send me a voice"))
         default:
             break

@@ -656,7 +656,28 @@ Deno.serve(async (req: Request) => {
     // işaretlediyse ONLARI kullan; hiç işaretlenmemişse (ör. Brooke — 36 açıklamalı
     // katalog fotosu var ama show_in_chat=false) TÜM katalog havuzunu kullan.
     const designated = (catalogPhotos ?? []).filter((p: { show_in_chat?: boolean }) => p.show_in_chat === true);
-    const pool = (designated.length ? designated : (catalogPhotos ?? [])) as CuratedPhoto[];
+    const fullPool = (designated.length ? designated : (catalogPhotos ?? [])) as CuratedPhoto[];
+
+    // NEVER send the same photo twice in a conversation (bkz. kullanıcı talebi
+    // 2026-09-05). Exclude every url already delivered here; once the whole
+    // pool has been sent, reset and allow repeats again (least-bad fallback).
+    const { data: convoForSent } = await db.from("conversations")
+      .select("id").eq("user_id", uid).eq("character_id", characterId)
+      .order("updated_at", { ascending: false }).limit(1);
+    const sentConvoId: string | undefined = convoForSent?.[0]?.id;
+    let sentUrls = new Set<string>();
+    if (sentConvoId) {
+      const { data: sent } = await db.from("messages")
+        .select("content").eq("conversation_id", sentConvoId).eq("kind", "image");
+      sentUrls = new Set((sent ?? []).map((m: { content: string }) => m.content));
+    }
+    const unsent = fullPool.filter((p) => !sentUrls.has(p.url));
+    // Shuffle so the ORDER isn't fixed — a generic "Send me a photo" prompt
+    // would otherwise let the matcher settle on the same first entry every time.
+    const pool = (unsent.length ? unsent : fullPool)
+      .map((p) => ({ p, k: Math.random() }))
+      .sort((a, b) => a.k - b.k)
+      .map(({ p }) => p);
     const curatedMatch = pool.length ? await pickCuratedPhoto(userPrompt, pool) : null;
 
     // Kullanıcı talebi: Grok'tan foto ÜRETME. SADECE havuzdan seç; havuzda

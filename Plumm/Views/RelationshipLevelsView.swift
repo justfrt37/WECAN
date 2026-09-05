@@ -241,8 +241,11 @@ struct RelationshipLevelsView: View {
                 VStack(spacing: 1) {
                     Text("Boost").font(.system(size: 12, weight: .bold))
                     if showsCost {
-                        Text("\(TokenCosts.levelBoost(toLevel: targetLevel)) 🪙")
-                            .font(.system(size: 10, weight: .semibold))
+                        HStack(spacing: 3) {
+                            Text("\(TokenCosts.levelBoost(toLevel: targetLevel))")
+                                .font(.system(size: 10, weight: .semibold))
+                            CoinIcon(size: 10)
+                        }
                     }
                 }
                 .foregroundStyle(.white)

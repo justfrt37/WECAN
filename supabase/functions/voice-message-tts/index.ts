@@ -13,7 +13,7 @@
 import { voiceNameFor } from "./voiceMap.ts";
 import { elevenVoiceIdFor } from "../_shared/elevenVoiceMap.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { requireVoiceEntitlement } from "../_shared/entitlements.ts";
+import { activeTier } from "../_shared/entitlements.ts";
 import { uploadToR2 } from "../_shared/r2.ts";
 
 const corsHeaders = {
@@ -94,13 +94,16 @@ Deno.serve(async (req) => {
         status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
-    // Ses, Pro+ ve Pro Max hakkı (bkz. _shared/entitlements.ts) — Pro'da yok.
-    // Token'dan ÖNCE kontrol edilir: yetkisi olmayandan jeton düşülmesin.
-    const voiceGate = await requireVoiceEntitlement(db, uid);
-    if (voiceGate) {
-      return new Response(JSON.stringify(voiceGate.body), {
-        status: voiceGate.status, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+    // Sesli MESAJ artık herhangi bir abonelikle (Pro dahil) kullanılabilir —
+    // sesli ARAMA hâlâ Pro+ (bkz. voice-call-start / kullanıcı talebi
+    // 2026-09-05). Token'dan ÖNCE kontrol edilir: aboneliği olmayandan jeton
+    // düşülmesin.
+    const tier = await activeTier(db, uid);
+    if (tier === "none") {
+      return new Response(
+        JSON.stringify({ error: "voice_requires_pro", tier, required_tier: "pro" }),
+        { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
     }
 
     // Ucuz ön-kontrol — gerçek TTS çağrısını boşuna yapmamak için. Asıl
