@@ -426,16 +426,13 @@ struct CreateCharacterView: View {
         }
     }
 
-    /// Reuses the 4 existing vibe photos (Sweet/Mysterious/Energetic/Elegant) — every
-    /// personality maps to one, so no card art is missing. Two labels on top of the photo:
-    /// the personality name (bottom, matches every other image card in this wizard) and a
-    /// small vibe tag (top) so the reused photo's mood is still legible on its own — both
-    /// sit on a ~40%-opaque colored plate rather than relying on the photo's own contrast,
-    /// since the same 4 photos now appear under very different personalities/crops.
+    /// Each personality prefers its own dedicated photo (BuilderImages "mood" key,
+    /// by option id); options without one fall back to the generic vibe photo
+    /// (Sweet/Mysterious/Energetic/Elegant), so no card art is ever missing.
     private func moodCard(_ p: PersonalityOption, selected: Bool) -> some View {
         let height = cardHeight(for: "vibe")
         return ZStack(alignment: .bottomLeading) {
-            if let asset = BuilderImages.asset("vibe", p.vibe) {
+            if let asset = BuilderImages.asset("mood", p.id) ?? BuilderImages.asset("vibe", p.vibe) {
                 Image(asset).resizable().scaledToFill()
                     .frame(maxWidth: .infinity).frame(height: height).clipped()
             } else {
@@ -730,14 +727,15 @@ struct CreateCharacterView: View {
                     // roleOptions/professionOptions above, without a
                     // separate struct since there's no other per-item data).
                     Text(LocalizedStringKey(hobby))
-                        .font(.system(size: 12, weight: on ? .semibold : .medium))
-                        .foregroundStyle(on ? AppColor.pinkSoft : Color.white.opacity(0.85))
+                        .font(.system(size: 12, weight: on ? .bold : .medium))
+                        .foregroundStyle(on ? Color.white : Color.white.opacity(0.85))
                         .lineLimit(1).minimumScaleFactor(0.8)
                         .frame(maxWidth: .infinity).frame(height: 40)
-                        .background(on ? AppColor.pink.opacity(0.15) : Color.white.opacity(0.06),
+                        .background(on ? AnyShapeStyle(AppColor.pink) : AnyShapeStyle(Color.white.opacity(0.06)),
                                     in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                         .overlay(RoundedRectangle(cornerRadius: 12)
-                            .strokeBorder(on ? AppColor.pink.opacity(0.4) : .white.opacity(0.12), lineWidth: 1))
+                            .strokeBorder(on ? AppColor.pink : .white.opacity(0.12), lineWidth: on ? 2 : 1))
+                        .shadow(color: on ? AppColor.pink.opacity(0.45) : .clear, radius: 6)
                         .opacity(!on && atMax ? 0.4 : 1)
                 }
                 .buttonStyle(.plain)
@@ -901,23 +899,16 @@ struct CreateCharacterView: View {
                     .blur(radius: photoRevealed ? 0 : 28)
                     .clipShape(RoundedRectangle(cornerRadius: 24))
 
-                    // Bulanık foto üstünde maliyet + dokunma göstergesi — chat'teki
-                    // kilitli foto balonuyla AYNI görsel dil (beyaz kare içinde
-                    // "50 ♥" + metin, bkz. PendingImageBubble / kullanıcı talebi).
+                    // Bulanık foto üstünde dokunma göstergesi — chat'teki kilitli
+                    // foto balonuyla AYNI görsel dil. Fiyat gösterilmiyor; tüm
+                    // token fiyatları yalnızca Token Store listesinde
+                    // (bkz. TokenCostsView / kullanıcı talebi).
                     if !photoRevealed && !generating {
-                        VStack(spacing: 6) {
-                            HStack(spacing: 4) {
-                                Text("\(CreateCharacterView.creationCost)")
-                                    .font(.system(size: 13, weight: .heavy))
-                                    .foregroundStyle(.black)
-                                CoinIcon(size: 14)
-                            }
-                            Text("Tap to see")
-                                .font(.system(size: 14, weight: .bold))
-                                .foregroundStyle(.black)
-                        }
-                        .padding(.horizontal, 16).padding(.vertical, 10)
-                        .background(.white, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        Text("Tap to see")
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundStyle(.black)
+                            .padding(.horizontal, 16).padding(.vertical, 10)
+                            .background(.white, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                     }
                 }
                 .frame(height: 380).frame(maxWidth: .infinity)

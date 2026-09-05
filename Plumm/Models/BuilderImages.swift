@@ -83,5 +83,13 @@ enum BuilderImages {
         "vibe|Energetic": "b_vibe_Energetic",
         "vibe|Mysterious": "b_vibe_Mysterious",
         "vibe|Sweet": "b_vibe_Sweet",
+        // Per-personality mood art (keyed by PersonalityOption.id). Falls back to
+        // the generic vibe photo above when an id has no dedicated image.
+        "mood|flirty_elegant": "b_mood_flirty_elegant",
+        "mood|distant_elegant": "b_mood_distant_elegant",
+        "mood|shy_mysterious": "b_mood_shy_mysterious",
+        "mood|playful_mysterious": "b_mood_playful_mysterious",
+        "mood|ex": "b_mood_ex",
+        "mood|shy_sweet": "b_mood_shy_sweet",
     ]
 }

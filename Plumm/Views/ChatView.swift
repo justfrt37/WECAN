@@ -604,7 +604,6 @@ struct ChatView: View {
             modeButton(
                 icon: viewModel.isVoiceArmed ? "waveform.circle.fill" : "waveform.circle",
                 label: String(localized: "Send me a voice"),
-                costTokens: TokenCosts.voiceMessage,
                 isArmed: viewModel.isVoiceArmed
             ) {
                 viewModel.isVoiceArmed.toggle()
@@ -615,7 +614,6 @@ struct ChatView: View {
             modeButton(
                 icon: viewModel.isImageArmed ? "camera.circle.fill" : "camera.circle",
                 label: String(localized: "Send me a photo"),
-                costTokens: TokenCosts.photo,
                 isArmed: viewModel.isImageArmed
             ) {
                 viewModel.isImageArmed.toggle()
@@ -632,14 +630,10 @@ struct ChatView: View {
         )
     }
 
-    private func modeButton(icon: String, label: String, costTokens: Int? = nil, isArmed: Bool, action: @escaping () -> Void) -> some View {
+    private func modeButton(icon: String, label: String, isArmed: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack(spacing: 5) {
                 Text(label).font(.system(size: 13, weight: .semibold))
-                if let costTokens {
-                    Text("\(costTokens)").font(.system(size: 12, weight: .bold))
-                    CoinIcon(size: 11)
-                }
             }
             .lineLimit(1)
             .minimumScaleFactor(0.6)
@@ -1068,21 +1062,13 @@ private struct PendingImageBubble: View {
             if isGenerating {
                 ImagePendingIndicator()
             } else {
-                // "25 ♥" + "Görmek için dokun" AYNI beyaz dikdörtgen içinde
-                // (bkz. kullanıcı talebi). Maliyet üstte, metin altta; hepsi siyah.
-                VStack(spacing: 6) {
-                    HStack(spacing: 4) {
-                        Text("25")
-                            .font(.system(size: 13, weight: .heavy))
-                            .foregroundStyle(.black)
-                        CoinIcon(size: 14)
-                    }
-                    Text("Tap to view")
-                        .font(.system(size: 14, weight: .bold))
-                        .foregroundStyle(.black)
-                }
-                .padding(.horizontal, 16).padding(.vertical, 10)
-                .background(.white, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                // Fiyat artık burada gösterilmiyor — tüm token fiyatları yalnızca
+                // Token Store'daki listede (bkz. TokenCostsView / kullanıcı talebi).
+                Text("Tap to view")
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(.black)
+                    .padding(.horizontal, 16).padding(.vertical, 10)
+                    .background(.white, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
         }
         .frame(width: 220, height: 390)
@@ -1103,10 +1089,6 @@ private struct PendingVoiceBubble: View {
     let isPreparing: Bool
     let isGenerating: Bool
     let onTap: () -> Void
-
-    /// Sesli mesaj maliyeti (token). Sunucudaki tahsille (voice-message-tts)
-    /// aynı — orası kaynak-doğru; burada gösterim için ayna.
-    private let coinCost = 12
 
     /// Hazırlanırken/üretilirken yanıp sönen kayıt ikonu için.
     @State private var blink = false
@@ -1129,17 +1111,12 @@ private struct PendingVoiceBubble: View {
                         }
                         .onDisappear { blink = false }
                 } else {
-                    // Maliyet rozeti — beyaz zemin, sayı + coin.
-                    HStack(spacing: 3) {
-                        Text("\(coinCost)")
-                            .font(.system(size: 14, weight: .heavy))
-                            .foregroundStyle(.black)
-                        CoinIcon(size: 15)
-                    }
-                    .padding(.horizontal, 9)
-                    .frame(height: 30)
-                    .background(.white, in: Capsule())
-                    .transition(.scale(scale: 0.5).combined(with: .opacity))
+                    // Kilitli sesli mesaj — statik mikrofon (fiyat gösterilmiyor;
+                    // tüm token fiyatları yalnızca Token Store listesinde).
+                    Image(systemName: "mic.fill")
+                        .font(.system(size: 22))
+                        .foregroundStyle(.white.opacity(0.85))
+                        .transition(.scale(scale: 0.5).combined(with: .opacity))
                 }
             }
             .frame(width: isPreparing ? nil : 58, alignment: .leading)

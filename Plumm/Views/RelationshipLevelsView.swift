@@ -212,19 +212,17 @@ struct RelationshipLevelsView: View {
     }
 
     private func boostButton(targetLevel: Int) -> some View {
-        let cost = TokenCosts.levelBoost(toLevel: targetLevel)
-        return Button { boost() } label: {
+        Button { boost() } label: {
             if isBoosting {
                 ProgressView().tint(.white).frame(width: 60, height: 30)
             } else {
-                VStack(spacing: 1) {
-                    Text("Boost").font(.system(size: 11, weight: .bold))
-                    Text("\(cost) 🪙").font(.system(size: 10, weight: .semibold))
-                }
-                .foregroundStyle(.white)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .background(LinearGradient(colors: [coral, gold], startPoint: .leading, endPoint: .trailing), in: Capsule())
+                // Fiyat gösterilmiyor — tüm token fiyatları yalnızca Token Store
+                // listesinde (bkz. TokenCostsView / kullanıcı talebi).
+                Text("Boost").font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 7)
+                    .background(LinearGradient(colors: [coral, gold], startPoint: .leading, endPoint: .trailing), in: Capsule())
             }
         }
         .buttonStyle(.plain)

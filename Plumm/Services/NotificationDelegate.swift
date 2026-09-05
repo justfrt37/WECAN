@@ -104,7 +104,11 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
         let line: String?
         switch kind {
         case .liked:
-            line = LikedYouContent.opener(language: language, forRole: character.personalityRole)
+            // İlk temas — henüz konuşma yok, dolayısıyla algılanacak bir sohbet
+            // dili de yok. Bu ön-tanımlı açılış mesajı UYGULAMA diline uymalı
+            // (bkz. kullanıcı talebi: boş yeni sohbetteki hazır mesajlar app
+            // dilinde), ConversationLanguage'ın cihaz-dili fallback'ine değil.
+            line = LikedYouContent.opener(language: AppLanguage.uiCode, forRole: character.personalityRole)
         case .ghosted:
             let resolvedLevel = level ?? LocalConversationStore.shared.load(for: characterID)?.level ?? 1
             line = GhostedContent.randomLine(language: language, role: character.personalityRole, vibe: character.vibe, level: resolvedLevel)
