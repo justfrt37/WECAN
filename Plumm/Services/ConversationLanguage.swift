@@ -45,14 +45,17 @@ enum ConversationLanguage {
         return supported.contains(deviceCode) ? deviceCode : "en"
     }
 
-    /// Bildirim dokunuşu anında bir karakter için kullanılacak dil — kayıtlı
-    /// tahmin varsa onu kullanır, hiç sohbet yoksa (ör. "Liked You" — henüz
-    /// konuşulmamış bot) cihaz diline düşer.
+    /// Bir karakterle konuşmanın GERÇEK dili — sesli arama ve bildirim içeriği
+    /// bunu kullanır. Öncelik: (1) kaydedilmiş tahmin, (2) YOKSA son asistan
+    /// mesajından canlı tespit, (3) o da olmazsa (hiç sohbet yok) cihaz dili.
+    /// Cihaz dili yalnızca SON çare — sohbet İngilizce arayüzde Türkçe geçmişse
+    /// arama da Türkçe olmalı (bkz. kullanıcı talebi 2026-09-05).
     static func current(for characterID: UUID) -> String {
-        if let stored = LocalConversationStore.shared.load(for: characterID)?.detectedLanguage,
-           supported.contains(stored) {
-            return stored
+        let stored = LocalConversationStore.shared.load(for: characterID)
+        if let d = stored?.detectedLanguage, supported.contains(d) {
+            return d
         }
-        return resolve(latestAssistantText: nil, previouslyDetected: nil)
+        let lastAssistant = stored?.messages.last(where: { $0.role == .assistant })?.content
+        return resolve(latestAssistantText: lastAssistant, previouslyDetected: nil)
     }
 }

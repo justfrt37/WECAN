@@ -126,12 +126,22 @@ async function finalizeOrphaned(uid: string) {
     .eq("status", "active");
   if (!orphans || orphans.length === 0) return;
   for (const session of orphans) {
+    // Same atomic-claim guard as voice-call-end: only charge if THIS call is
+    // the one that flips active -> ended (two concurrent starts could both
+    // pick up the same orphan otherwise).
+    const { data: claimed } = await db.from("call_sessions")
+      .update({ status: "ended", ended_at: new Date().toISOString() })
+      .eq("id", session.id)
+      .eq("status", "active")
+      .select("id");
+    if (!claimed || claimed.length === 0) continue;
+
     const tokens = Math.round((session.last_checkpoint_seconds ?? 0) * TOKENS_PER_SECOND);
     if (tokens > 0) {
       await db.rpc("charge_tokens", { p_user_id: uid, p_amount: tokens, p_reason: "voice" });
     }
     await db.from("call_sessions")
-      .update({ status: "ended", ended_at: new Date().toISOString(), tokens_charged: tokens })
+      .update({ tokens_charged: tokens })
       .eq("id", session.id);
   }
 }
@@ -189,11 +199,13 @@ async function generateFirstMessage(systemPrompt: string, recentChatGapMinutes: 
         { role: "system", content: systemPrompt },
         {
           role: "user",
-          content: `[The call just connected. ${openerInstruction(recentChatGapMinutes)} Say a short, ` +
-            "natural opening line — 1 sentence, in character. Nothing else, no explanation.]",
+          content: `[The call just connected. ${openerInstruction(recentChatGapMinutes)} Now say your ` +
+            "opening line the way someone actually answers the phone: a few words, not a sentence. " +
+            "Think 'hey you', 'heyyy finally', 'oh hi', 'you there?'. NO full sentences, no questions " +
+            "longer than two words, no explaining. Just the greeting, in character, nothing else.]",
         },
       ],
-      { maxTokens: 40, temperature: 0.9 },
+      { maxTokens: 16, temperature: 0.9 },
     )).trim();
     return stripUnknownAudioTags(text) || fallback;
   } catch {

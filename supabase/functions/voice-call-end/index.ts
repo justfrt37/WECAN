@@ -148,7 +148,22 @@ Deno.serve(async (req: Request) => {
     const { data: session } = await db.from("call_sessions")
       .select("id, user_id, conversation_id, status").eq("id", callSessionId).maybeSingle();
     if (!session || session.user_id !== uid) return json({ error: "invalid_call_session" }, 400);
-    if (session.status === "ended") {
+
+    // ATOMICALLY claim the end. The client can fire voice-call-end more than
+    // once for the same session (hang-up button + SDK disconnect handler + view
+    // teardown all racing), and the old "select status, if ended bail, else
+    // charge, then set ended" was a check-then-act race — three concurrent
+    // requests all saw status "active" and all called charge_tokens, so a
+    // single 2-minute call was billed ~3x (bkz. kullanıcı raporu / token_
+    // transactions: three "voice" charges ~380 each within 2 seconds).
+    // Only the request that actually flips active -> ended may charge.
+    const { data: claimed } = await db.from("call_sessions")
+      .update({ status: "ended", ended_at: new Date().toISOString() })
+      .eq("id", callSessionId)
+      .eq("status", "active")
+      .select("id");
+
+    if (!claimed || claimed.length === 0) {
       const { data: balanceRow } = await db.from("token_balances").select("balance").eq("user_id", uid).maybeSingle();
       return json({ tokensCharged: 0, newBalance: balanceRow?.balance ?? 0 });
     }
@@ -162,7 +177,7 @@ Deno.serve(async (req: Request) => {
     newBalance = balanceRow?.balance ?? 0;
 
     await db.from("call_sessions")
-      .update({ status: "ended", ended_at: new Date().toISOString(), tokens_charged: tokensCharged })
+      .update({ tokens_charged: tokensCharged })
       .eq("id", callSessionId);
 
     if (session.conversation_id) {

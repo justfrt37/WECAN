@@ -50,6 +50,10 @@ final class CallViewModel {
     private var callSessionId: String?
     private var callStartedAt: Date?
     private var checkpointTask: Task<Void, Never>?
+    /// endCall() can be reached more than once for the same call (hang-up
+    /// button + SDK disconnect handler + view teardown). Only the first run
+    /// may hit voice-call-end — otherwise the call is billed multiple times.
+    private var endCallStarted = false
 
     init(character: Character, conversationId: String?) {
         self.character = character
@@ -192,6 +196,8 @@ final class CallViewModel {
     }
 
     func endCall() async {
+        guard !endCallStarted else { return }
+        endCallStarted = true
         soundPlayer.stopRinging() // no-op if already stopped — covers hangup mid-ring
         checkpointTask?.cancel()
         await conversation?.endConversation()
