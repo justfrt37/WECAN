@@ -896,11 +896,14 @@ final class ChatViewModel {
         // Token yetmiyorsa HİÇ loading gösterme — doğrudan paywall/coin mağazası.
         guard hasTokensOrPaywall(cost: 12) else { return }
         deductBadgeOptimistically(12)
-        // Tek-dokunuş akışında (kullanıcı talebi) balonun ÖNÜNDE kullanıcı
-        // mesajı YOK. Bağlam için varsa son kullanıcı mesajını kullan, yoksa boş
-        // (bot kendi sesiyle bağlamdan bir şey söyler).
-        let precedingUserIdx = messages[..<idx].lastIndex(where: { $0.role == .user })
-        let text = precedingUserIdx.map { messages[$0].content } ?? ""
+        // `userMessage` olarak "Send me a voice" GÖNDERİLMEZ — bot onu bir soru
+        // sanıp cevap veriyordu ("a voice message? sure, how are you"). Yerine
+        // sentetik bir yönerge (voice-call opener'ı gibi); gerçek sohbet geçmişi
+        // zaten `realMessages()` ile bağlam sağlıyor + sunucu VOICE_MESSAGE_
+        // INTENT_RULE ekliyor.
+        let text = "[The user tapped \"send me a voice\". Send them a voice note now — "
+            + "just say something natural in your own voice, picking up wherever the chat is. "
+            + "Don't answer it like a question, don't narrate that you're recording, just talk. Keep it short.]"
         // Sunucudaki kilitli (voice_pending) satırı gerçek sese çevirmek için
         // pending balonun requestText'i (her zaman dolu) kullanılır.
         let serverRequestText = messages[idx].pendingVoiceRequestText ?? String(localized: "Send me a voice")

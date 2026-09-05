@@ -709,6 +709,19 @@ const VOICE_TAGS = [
 ] as const;
 const VOICE_TAG_SET: ReadonlySet<string> = new Set<string>(VOICE_TAGS);
 
+// The user tapped "Send me a voice" — a button, not a typed question. Without
+// this the model reads the last message ("Send me a voice" / "Sesli mesaj
+// gönder") as a literal question and answers it — "a voice message? sure, how
+// are you" (bkz. kullanıcı raporu 2026-09-05).
+const VOICE_MESSAGE_INTENT_RULE =
+  "\n\n[VOICE NOTE] The user asked you — by tapping a button, not by typing — " +
+  "to send them a voice message. This whole reply is that voice note: a short " +
+  "spoken thing you're saying out loud to them. Just talk — pick up wherever " +
+  "the conversation is, say a thought, tease them, ask how their day's going, " +
+  "whatever fits you right now. Do NOT treat \"send me a voice\" as a question " +
+  "to answer, do NOT say things like \"a voice message? sure\" or narrate that " +
+  "you're recording — just say the thing. Keep it short, like a real voice note.";
+
 const VOICE_TAGS_RULE =
   "\n\nVOICE TAG RULE: This reply will be spoken aloud (ElevenLabs v3 " +
   "model). These tags make the voiceover INCREDIBLY realistic — so use them " +
@@ -1467,6 +1480,7 @@ Deno.serve(async (req: Request) => {
       system += levelBehaviorDirective(currentLevel);
     }
     if (voiceChat) {
+      system += VOICE_MESSAGE_INTENT_RULE;
       system += VOICE_TAGS_RULE;
     } else {
       system += NO_STAGE_DIRECTIONS_RULE;
