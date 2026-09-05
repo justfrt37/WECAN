@@ -854,19 +854,18 @@ final class ChatViewModel {
               // dokunulup üretilemez — önce kilitli hâle geçmeli.
               !preparingVoiceMessageIDs.contains(messageID)
         else { return }
-        guard let userMessageIdx = messages[..<idx].lastIndex(where: { $0.role == .user }) else { return }
         // Token yetmiyorsa HİÇ loading gösterme — doğrudan paywall/coin mağazası.
         guard hasTokensOrPaywall(cost: 12) else { return }
         deductBadgeOptimistically(12)
-        let text = messages[userMessageIdx].content
+        // Tek-dokunuş akışında (kullanıcı talebi) balonun ÖNÜNDE kullanıcı
+        // mesajı YOK. Bağlam için varsa son kullanıcı mesajını kullan, yoksa boş
+        // (bot kendi sesiyle bağlamdan bir şey söyler).
+        let precedingUserIdx = messages[..<idx].lastIndex(where: { $0.role == .user })
+        let text = precedingUserIdx.map { messages[$0].content } ?? ""
         // Sunucudaki kilitli (voice_pending) satırı gerçek sese çevirmek için
-        // AYNI requestText gerekir — bu, pending balonu oluşturulurken sunucuya
-        // yazılan metin (bkz. appendPendingVoiceBubble / Message.fromServer).
-        // Otomatik [[SEND_VOICE]] akışında bu "Send me a voice"dır, `text` ise
-        // önceki gerçek kullanıcı mesajı — eşleşmezse sunucu yeni bir `voice`
-        // satırı ekler (yinelenen balon hatası). Eski/eksik kayıtlar için `text`e düş.
-        let serverRequestText = messages[idx].pendingVoiceRequestText ?? text
-        let lastMessageAt = userMessageIdx > 0 ? messages[userMessageIdx - 1].createdAt : nil
+        // pending balonun requestText'i (her zaman dolu) kullanılır.
+        let serverRequestText = messages[idx].pendingVoiceRequestText ?? String(localized: "Send me a voice")
+        let lastMessageAt = idx > 0 ? messages[idx - 1].createdAt : nil
 
         // Bu pending balon YERİNDE güncellenir (kendi "üretiliyor" durumunu
         // gösterir) — en altta AYRI bir "yazıyor/ses" balonu ÇIKMAZ. Aksi hâlde
@@ -1023,7 +1022,7 @@ final class ChatViewModel {
         switch media.kind {
         case "photo":
             guard PurchaseService.shared.isPro else { return }
-            appendPendingImageBubble(prompt: media.prompt ?? "a photo of you right now")
+            appendPendingImageBubble(prompt: media.prompt ?? "a photo of you right now", withTypingPreamble: true)
         case "voice":
             guard PurchaseService.shared.canUseVoice else { return }
             appendPendingVoiceBubble(requestText: String(localized: "Send me a voice"))
@@ -1032,25 +1031,30 @@ final class ChatViewModel {
         }
     }
 
-    private func appendPendingImageBubble(prompt: String) {
+    /// `withTypingPreamble`: otomatik [[SEND_PHOTO]] akışında bot "yazıyor"
+    /// gösterip sonra balonu düşürür. Tek-dokunuş düğme akışında (kullanıcı
+    /// talebi) balon ANINDA eklenir — art arda hızlı dokunuşlarda kutuların
+    /// gecikmeli/hiç görünmemesi buradan (Task + await + çakışan withAnimation).
+    private func appendPendingImageBubble(prompt: String, withTypingPreamble: Bool = false) {
+        func drop() {
+            messages.append(Message(role: .assistant, content: "", pendingImagePrompt: prompt))
+            updateCache()
+            Task {
+                // Açılmamış (kilitli) foto'yu SUNUCUDA sakla — üretmeden çıkıp
+                // girse bile "üret" balonu olarak geri gelsin.
+                await service.savePhotoMessage(character: character, prompt: prompt, url: nil)
+            }
+        }
+        guard withTypingPreamble else { drop(); return }
         Task {
             await handleWakeUpIfAsleep()
-            // "Fotoğraf hazırlıyor" hissi: kısa yazıyor balonu → sonra bulanık
-            // foto balonu. Foto isteğine METİN cevabı verilmez (foto + açılınca
-            // gelen caption yanıttır).
             await pause(TypingTiming.randomStartDelay())
             showsTypingBubble = true
             store?.setTyping(character.id, true)
             await pause(0.9)
             showsTypingBubble = false
             store?.setTyping(character.id, false)
-            withAnimation(.spring(response: 0.45, dampingFraction: 0.72)) {
-                messages.append(Message(role: .assistant, content: "", pendingImagePrompt: prompt))
-            }
-            updateCache()
-            // Açılmamış (kilitli) foto'yu SUNUCUDA sakla — üretmeden çıkıp girse
-            // bile "üret" balonu olarak geri gelsin (bkz. chat/index.ts photoMessage).
-            await service.savePhotoMessage(character: character, prompt: prompt, url: nil)
+            withAnimation(.spring(response: 0.45, dampingFraction: 0.72)) { drop() }
         }
     }
 

@@ -1286,9 +1286,18 @@ Deno.serve(async (req: Request) => {
       const prompt: string = String(body.photoMessage.prompt ?? "");
       const url: string | null = typeof body.photoMessage.url === "string" ? body.photoMessage.url : null;
       if (url) {
-        const { data: pend } = await db.from("messages")
+        // OLDEST unrevealed pending first (FIFO). The one-tap "send me a photo"
+        // flow makes every image_pending row share the same generic prompt, so
+        // matching newest-first revealed them out of order (bkz. kullanıcı
+        // raporu — "yeni bulanık kutular görünmüyor / sıra karışıyor").
+        let { data: pend } = await db.from("messages")
           .select("id").eq("conversation_id", convo.id).eq("kind", "image_pending").eq("content", prompt)
-          .order("created_at", { ascending: false }).limit(1);
+          .order("created_at", { ascending: true }).limit(1);
+        if (!pend || !pend[0]) {
+          ({ data: pend } = await db.from("messages")
+            .select("id").eq("conversation_id", convo.id).eq("kind", "image_pending")
+            .order("created_at", { ascending: true }).limit(1));
+        }
         if (pend && pend[0]) {
           await db.from("messages").update({ content: url, kind: "image" }).eq("id", pend[0].id);
         } else {
@@ -1307,19 +1316,16 @@ Deno.serve(async (req: Request) => {
       const reqText: string = String(body.voiceMessage.requestText ?? "");
       const url: string | null = typeof body.voiceMessage.url === "string" ? body.voiceMessage.url : null;
       if (url) {
-        // Önce requestText ile birebir eşleşen kilitli satırı ara. Bulunamazsa
-        // (ör. otomatik [[SEND_VOICE]] akışı balonu "Send me a voice" ile
-        // oluşturur ama istemci tamamlarken önceki kullanıcı mesajını gönderir)
-        // konuşmadaki EN SON voice_pending satırına düş — yeni bir `voice`
-        // satırı eklemek yerine onu çevir. Aksi hâlde öksüz bir kilitli balon +
-        // yinelenen ses balonu kalıyordu.
+        // OLDEST unrevealed voice_pending first (FIFO) — the one-tap flow gives
+        // every voice_pending the same generic requestText, so newest-first
+        // revealed them out of order (same fix as image_pending above).
         let { data: pend } = await db.from("messages")
           .select("id").eq("conversation_id", convo.id).eq("kind", "voice_pending").eq("content", reqText)
-          .order("created_at", { ascending: false }).limit(1);
+          .order("created_at", { ascending: true }).limit(1);
         if (!pend || !pend[0]) {
           ({ data: pend } = await db.from("messages")
             .select("id").eq("conversation_id", convo.id).eq("kind", "voice_pending")
-            .order("created_at", { ascending: false }).limit(1));
+            .order("created_at", { ascending: true }).limit(1));
         }
         if (pend && pend[0]) {
           await db.from("messages").update({ content: url, kind: "voice" }).eq("id", pend[0].id);
@@ -1618,8 +1624,16 @@ Deno.serve(async (req: Request) => {
       conversationId,
       isLeakAttempt ? "none" : "low",
     );
-    const { text: mediaCleanedReply, media: autoMedia } =
+    const { text: parsedReply, media: autoMedia } =
       (!voiceChat && !imageReactionChat) ? parseMediaIntent(rawReply) : { text: rawReply, media: null };
+    // A companion never sends a bare link. If the model emits a URL (observed
+    // after the media flow changed — it sometimes pastes the raw storage URL
+    // instead of using [[SEND_PHOTO]]), strip it rather than showing "https://…"
+    // as a chat bubble (bkz. kullanıcı raporu 2026-09-05).
+    const mediaCleanedReply = parsedReply
+      .replace(/https?:\/\/\S+/gi, "")
+      .replace(/[ \t]{2,}/g, " ")
+      .trim();
     // Voice and text diverge here on purpose — see sanitizeVoiceReply for why
     // square brackets must survive in one path and die in the other.
     const reply = voiceChat

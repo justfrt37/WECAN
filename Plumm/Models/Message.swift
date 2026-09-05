@@ -93,7 +93,13 @@ struct Message: Identifiable, Codable, Hashable {
     /// cihazda saklandığından reload'da geri gelmez, metin gibi düşer.
     static func fromServer(role: String, content: String, kind: String?, createdAt: Date) -> Message {
         let r = ChatRole(rawValue: role) ?? .assistant
-        if kind == "image", let url = URL(string: content) {
+        if kind == "image" {
+            // content = Storage URL. If it won't parse, still DON'T fall through
+            // to a text bubble — that's how a raw "https://…" ends up shown as a
+            // message (bkz. kullanıcı raporu 2026-09-05). Degrade to an empty
+            // (invisible) row instead.
+            let url = URL(string: content)
+                ?? URL(string: content.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "")
             return Message(role: r, content: "", createdAt: createdAt, imageURL: url)
         }
         // "Açılmamış/kilitli" foto — kullanıcı isteği attı ama henüz üretmedi.
@@ -104,7 +110,9 @@ struct Message: Identifiable, Codable, Hashable {
         }
         // Üretilmiş sesli mesaj (content = Storage URL) → reload'da yine SES balonu
         // olarak görünür, metin değil (bkz. kullanıcı talebi). Ses buradan indirilir.
-        if kind == "voice", let url = URL(string: content) {
+        if kind == "voice" {
+            let url = URL(string: content)
+                ?? URL(string: content.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "")
             return Message(role: r, content: "", createdAt: createdAt, voiceRemoteURL: url)
         }
         // "Açılmamış/kilitli" ses isteği — reload'da yine pending (kilitli) balon.

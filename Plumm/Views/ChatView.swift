@@ -1047,13 +1047,21 @@ private struct PendingImageBubble: View {
             if isGenerating {
                 ImagePendingIndicator()
             } else {
-                // Fiyat artık burada gösterilmiyor — tüm token fiyatları yalnızca
-                // Token Store'daki listede (bkz. TokenCostsView / kullanıcı talebi).
-                Text("Tap to view")
-                    .font(.system(size: 14, weight: .bold))
-                    .foregroundStyle(.black)
-                    .padding(.horizontal, 16).padding(.vertical, 10)
-                    .background(.white, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                // Bulanık foto → token maliyeti + "dokun" ipucu (kullanıcı talebi
+                // 2026-09-05: kilitli kutularda fiyat GÖRÜNSÜN).
+                VStack(spacing: 6) {
+                    HStack(spacing: 4) {
+                        Text("\(TokenCosts.photo)")
+                            .font(.system(size: 13, weight: .heavy))
+                            .foregroundStyle(.black)
+                        CoinIcon(size: 14)
+                    }
+                    Text("Tap to view")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundStyle(.black)
+                }
+                .padding(.horizontal, 16).padding(.vertical, 10)
+                .background(.white, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
         }
         .frame(width: 220, height: 390)
@@ -1096,12 +1104,18 @@ private struct PendingVoiceBubble: View {
                         }
                         .onDisappear { blink = false }
                 } else {
-                    // Kilitli sesli mesaj — statik mikrofon (fiyat gösterilmiyor;
-                    // tüm token fiyatları yalnızca Token Store listesinde).
-                    Image(systemName: "mic.fill")
-                        .font(.system(size: 22))
-                        .foregroundStyle(.white.opacity(0.85))
-                        .transition(.scale(scale: 0.5).combined(with: .opacity))
+                    // Kilitli sesli mesaj — token maliyeti rozeti (kullanıcı
+                    // talebi 2026-09-05: kilitli kutularda fiyat GÖRÜNSÜN).
+                    HStack(spacing: 3) {
+                        Text("\(TokenCosts.voiceMessage)")
+                            .font(.system(size: 14, weight: .heavy))
+                            .foregroundStyle(.black)
+                        CoinIcon(size: 15)
+                    }
+                    .padding(.horizontal, 9)
+                    .frame(height: 30)
+                    .background(.white, in: Capsule())
+                    .transition(.scale(scale: 0.5).combined(with: .opacity))
                 }
             }
             .frame(width: isPreparing ? nil : 58, alignment: .leading)
