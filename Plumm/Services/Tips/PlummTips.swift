@@ -28,10 +28,6 @@ enum PlummTips {
         ])
     }
 
-    /// Dev only — "Reset feature tips" row in Settings.
-    static func reset() {
-        try? Tips.resetDatastore()
-    }
 }
 
 private let showOnce: [any TipOption] = [Tips.MaxDisplayCount(1)]

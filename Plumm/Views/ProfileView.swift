@@ -20,7 +20,6 @@ struct ProfileView: View {
 
     // Ayarlar (eski SettingsView'den buraya taşındı)
     @State private var notificationsOn = false
-    @State private var showCosts = false
     /// uid kopyalandı → ikon kısa süre ✓ olur (bkz. avatarCard).
     @State private var didCopyUID = false
 
@@ -52,7 +51,6 @@ struct ProfileView: View {
                 .ignoresSafeArea()
         )
         .task { notificationsOn = await currentNotificationStatus() }
-        .sheet(isPresented: $showCosts) { TokenCostsView() }
     }
 
     // MARK: Üyelik — KALDIRILDI
@@ -145,22 +143,10 @@ struct ProfileView: View {
             }
             .buttonStyle(.plain)
 
-            Button { showCosts = true } label: {
-                row("Token costs")
-            }
-            .buttonStyle(.plain)
-
             Button { openURL(supportMailURL) } label: {
                 row("Help & Support")
             }
             .buttonStyle(.plain)
-
-            #if DEBUG
-            Button { PlummTips.reset() } label: {
-                row("Reset feature tips")
-            }
-            .buttonStyle(.plain)
-            #endif
 
             // Yasal metinler — dış tarayıcıda plummai.com'a açılır (App Store
             // Connect'teki Privacy/Terms URL'leriyle aynı, artık in-app sheet yok).

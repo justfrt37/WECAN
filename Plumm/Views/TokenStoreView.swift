@@ -154,8 +154,8 @@ struct TokenStoreView: View {
                 .buttonStyle(.plain)
 
                 // "i" (info.circle) butonu kaldırıldı (bkz. kullanıcı talebi).
-                // Token maliyetleri ekranına Settings'ten ulaşılıyor
-                // (bkz. ProfileView > Token Costs satırı).
+                // Ayrı bir token-maliyetleri ekranı yok — maliyetler kilitli
+                // balonların/Boost düğmesinin üzerinde gösteriliyor.
 
                 Spacer()
 

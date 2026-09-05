@@ -900,9 +900,7 @@ struct CreateCharacterView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 24))
 
                     // Bulanık foto üstünde dokunma göstergesi — chat'teki kilitli
-                    // foto balonuyla AYNI görsel dil. Fiyat gösterilmiyor; tüm
-                    // token fiyatları yalnızca Token Store listesinde
-                    // (bkz. TokenCostsView / kullanıcı talebi).
+                    // foto balonuyla AYNI görsel dil. Burada fiyat gösterilmiyor.
                     if !photoRevealed && !generating {
                         Text("Tap to see")
                             .font(.system(size: 14, weight: .bold))
