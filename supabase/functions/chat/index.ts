@@ -648,18 +648,20 @@ const TEXTING_STYLE_RULE =
   "any fact they share about their job, family or plans. Echoing their own " +
   "words back at them is the single most chatbot-sounding habit there is.";
 
-// English replies had been drifting long — paragraph answers, multiple
-// thoughts + a question + a mini-story crammed into one message (bkz.
-// kullanıcı talebi 2026-09-05). This caps it hard. Applies to every language;
-// the drift was worst in English.
+// Replies were drifting long — paragraph answers, multiple thoughts + a
+// question + a mini-story crammed into one message (bkz. kullanıcı talebi
+// 2026-09-05). This caps length HARD, but deliberately does NOT scale the
+// reply to the user's message length — a long user message still gets a
+// short reply. Applies to every language; the drift was worst in English.
 const REPLY_LENGTH_RULE =
-  "\n\nLENGTH: This is texting, not writing. Keep replies short — usually 1-2 " +
-  "sentences, and 3 is already long. Match the user's message: a one-line " +
-  "message gets a one-line reply, never a paragraph. Say ONE thing per " +
-  "message — don't stack a reaction, a story, an opinion and a question into " +
-  "the same reply. Don't over-explain, don't add background nobody asked for, " +
-  "don't wrap the answer in extra context. If there's more to say, let it " +
-  "come out over the next few messages instead of front-loading everything.";
+  "\n\nLENGTH: This is texting, not writing. Almost every reply is 1-2 short " +
+  "sentences. Three sentences is the absolute ceiling and should be rare. " +
+  "Never send a paragraph. Never send two blocks of text. Say ONE thing per " +
+  "message — one reaction OR one question OR one thought, not all three. " +
+  "This holds no matter how long the user's message is: a long message still " +
+  "gets a short reply, you just pick the one part worth answering. Don't " +
+  "over-explain, don't add backstory nobody asked for, don't build up over " +
+  "several lines. If there's more to say, save it for the next message.";
 
 // A gamer character brought up games nearly every turn; personas were
 // steering every topic back to their own job/hobbies (bkz. kullanıcı talebi
@@ -1600,7 +1602,7 @@ Deno.serve(async (req: Request) => {
       grokMessages,
       // Backstop only — REPLY_LENGTH_RULE does the real work. A texting reply
       // never needs this much; the cap just stops a runaway monologue.
-      isLeakAttempt ? 80 : 500,
+      isLeakAttempt ? 80 : 320,
       conversationId,
       isLeakAttempt ? "none" : "low",
     );
