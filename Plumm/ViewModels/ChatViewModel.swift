@@ -793,15 +793,29 @@ final class ChatViewModel {
     /// blok yok (chat header bu durumda "Online" göstermeye devam eder).
     var currentActivity: (label: String, detail: String)?
 
-    /// "Send me a voice" düğmesi — tek dokunuş. Düğme metni normal bir kullanıcı
-    /// mesajı olarak gönderilir (kullanıcı talebi 2026-09-05: "kullanıcı bunu
-    /// görsün"), bot metinle cevap verir + [[SEND_VOICE]] işareti döndürür →
-    /// `triggerAutoMediaIfNeeded` kilitli ses balonunu düşürür. Sesli MESAJ
-    /// Pro hakkı (sesli ARAMA Pro+ — ayrı, bkz. voice-call-start).
+    /// "Send me a voice" düğmesi — tek dokunuş. "Send me a voice" satırı SADECE
+    /// istemcide gösterilir + yerel geçmişe yazılır (FirstHelloContent gibi —
+    /// gerçek bir chat isteği ATILMAZ, bot metinle cevap VERMEZ). Sonraki gerçek
+    /// mesajda geçmiş bağlamı olarak bota gider. Kilitli ses balonu hemen düşer;
+    /// üretim + 12 token tahsil o balona dokununca (bkz. generatePendingVoice).
+    /// Sesli MESAJ Pro hakkı (sesli ARAMA Pro+ — ayrı, bkz. voice-call-start).
     func sendVoiceRequest() {
         guard !isSending, !isLoadingHistory else { return }
         guard PurchaseService.shared.isPro else { paywallTier = .pro; showPaywall = true; return }
-        send(String(localized: "Send me a voice"))
+        appendLocalMediaRequestLine(String(localized: "Send me a voice"))
+        appendPendingVoiceBubble(requestText: String(localized: "Send me a voice"))
+    }
+
+    /// Düğme etiketini yerel bir kullanıcı mesajı olarak ekler — ekranda görünür
+    /// ve LocalConversationStore'a yazılır (bir sonraki gerçek `send()`'in
+    /// `realMessages()` geçmişine dahil olur), ama sunucuya AYRI bir istek
+    /// gönderilmez.
+    private func appendLocalMediaRequestLine(_ text: String) {
+        let msg = Message(role: .user, content: text)
+        messages.append(msg)
+        LocalConversationStore.shared.appendMessage(msg, for: character.id, defaultLevel: relationshipLevel, defaultLevelProgress: levelProgress)
+        updateCache()
+        NotificationScheduler.shared.noteUserSent(character: character)
     }
 
     /// Kilitli sesli mesaj balonunu ekler — hem düğme akışı (`sendVoiceRequest`,
@@ -974,15 +988,16 @@ final class ChatViewModel {
         }
     }
 
-    /// "Send me a photo" düğmesi — tek dokunuş. Düğme metni normal bir kullanıcı
-    /// mesajı olarak gönderilir (kullanıcı talebi 2026-09-05: "kullanıcı bunu
-    /// görsün"), bot metinle cevap verir + [[SEND_PHOTO]] işareti döndürür →
-    /// `triggerAutoMediaIfNeeded` kilitli foto balonunu düşürür. Foto Pro hakkı.
+    /// "Send me a photo" düğmesi — tek dokunuş. "Send me a photo" satırı SADECE
+    /// istemcide gösterilir + yerel geçmişe yazılır (gerçek chat isteği ATILMAZ,
+    /// bot metinle cevap VERMEZ). Kilitli foto balonu hemen düşer; üretim + 25
+    /// token tahsil o balona dokununca (bkz. generatePendingImage). Foto Pro hakkı.
     func sendImageRequest() {
         guard !isSending, !isLoadingHistory else { return }
         guard PurchaseService.shared.isPro else { paywallTier = .pro; showPaywall = true; return }
         EventLogger.shared.log("feature_used", ["feature": "photo_request"])
-        send(String(localized: "Send me a photo"))
+        appendLocalMediaRequestLine(String(localized: "Send me a photo"))
+        appendPendingImageBubble(prompt: "a photo of you right now")
     }
 
     /// Kilitli foto balonunu ekler — hem düğme akışı (`sendImageRequest`) hem

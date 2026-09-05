@@ -453,11 +453,9 @@ async function seedDefaultUserGenderMemory(conversationId: string): Promise<void
 // isteğine "tabii hemen gönderiyom" — aynı kalıp). Kaldırıldı, aynı
 // DRAMATIC_PACING_RULE düzeltmesindeki mantık.
 const MEDIA_REQUEST_RULE =
-  "\n\n[PHOTO/VOICE REQUEST] If the user is asking you for a photo/selfie or a " +
-  "voice message — whether they typed it out or the message is exactly \"Send " +
-  "me a photo\" / \"Send me a voice\" (a button they tapped, treat it as a " +
-  "sincere request, never react to it as a weird literal phrase or tell them " +
-  "to press a button): reply with a natural, in-" +
+  "\n\n[PHOTO/VOICE REQUEST] If the user is genuinely asking you (in plain " +
+  "text, without tapping a button) for a photo/selfie or a voice message — " +
+  "not joking or pretending, a real request: reply with a natural, in-" +
   "character line — but don't write as if you've ALREADY sent the photo/" +
   "voice, because it hasn't been generated yet, only a locked bubble will " +
   "appear. At the very END of your reply, on its own " +
