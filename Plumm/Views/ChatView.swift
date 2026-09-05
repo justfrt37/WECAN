@@ -637,7 +637,8 @@ struct ChatView: View {
                 .overlay(Capsule().strokeBorder(.white.opacity(0.12), lineWidth: 1))
         }
         .buttonStyle(.plain)
-        .disabled(viewModel.isSending || viewModel.isLoadingHistory)
+        .disabled(viewModel.isSending || viewModel.isLoadingHistory || viewModel.isAwaitingMediaBubble)
+        .opacity(viewModel.isAwaitingMediaBubble ? 0.5 : 1)
     }
 
     // MARK: Engellendi barı — mesajlaşma tamamen kapalı, sadece kaldır düğmesi var.

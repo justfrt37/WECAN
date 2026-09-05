@@ -773,6 +773,11 @@ final class ChatViewModel {
     /// normal "yazıyor" balonuyla AYNI görünmesin diye (bkz. ChatView.messagesList).
     var isSendingImageReply: Bool = false
 
+    /// "Send me a photo/voice" düğmesine basıldıktan sonra kilitli balon
+    /// düşene kadar (yazıyor balonu + rastgele 1-3 sn) TRUE — quick-reply
+    /// düğmeleri bu sürede kilitli (bkz. dropMediaBubbleAfterTyping).
+    var isAwaitingMediaBubble: Bool = false
+
     /// Şu an gerçekten üretim/indirme sürüyor olan pending foto/ses balonları
     /// (bkz. ChatBubble pending dalları — bu id'ler için yükleme çubuğu
     /// gösterilir ve tekrar dokunma engellenir). Kalıcı DEĞİL — sadece bu
@@ -800,10 +805,31 @@ final class ChatViewModel {
     /// üretim + 12 token tahsil o balona dokununca (bkz. generatePendingVoice).
     /// Sesli MESAJ Pro hakkı (sesli ARAMA Pro+ — ayrı, bkz. voice-call-start).
     func sendVoiceRequest() {
-        guard !isSending, !isLoadingHistory else { return }
+        guard !isSending, !isLoadingHistory, !isAwaitingMediaBubble else { return }
         guard PurchaseService.shared.isPro else { paywallTier = .pro; showPaywall = true; return }
         appendLocalMediaRequestLine(String(localized: "Send me a voice"))
-        appendPendingVoiceBubble(requestText: String(localized: "Send me a voice"))
+        dropMediaBubbleAfterTyping { [self] in
+            appendPendingVoiceBubble(requestText: String(localized: "Send me a voice"))
+        }
+    }
+
+    /// Tek-dokunuş medya düğmelerine basıldığında: kısa "yazıyor" balonu →
+    /// rastgele 1-3 sn → kilitli balon. Bu süre boyunca `isAwaitingMediaBubble`
+    /// düğmeleri kilitler (art arda hızlı dokunuş = çakışma/kayıp kutu sorunu,
+    /// bkz. kullanıcı talebi 2026-09-05).
+    private func dropMediaBubbleAfterTyping(_ drop: @escaping () -> Void) {
+        isAwaitingMediaBubble = true
+        Task {
+            await handleWakeUpIfAsleep()
+            await pause(TypingTiming.randomStartDelay())
+            showsTypingBubble = true
+            store?.setTyping(character.id, true)
+            await pause(Double.random(in: 1...3))
+            showsTypingBubble = false
+            store?.setTyping(character.id, false)
+            withAnimation(.spring(response: 0.45, dampingFraction: 0.72)) { drop() }
+            isAwaitingMediaBubble = false
+        }
     }
 
     /// Düğme etiketini yerel bir kullanıcı mesajı olarak ekler — ekranda görünür
@@ -993,11 +1019,13 @@ final class ChatViewModel {
     /// bot metinle cevap VERMEZ). Kilitli foto balonu hemen düşer; üretim + 25
     /// token tahsil o balona dokununca (bkz. generatePendingImage). Foto Pro hakkı.
     func sendImageRequest() {
-        guard !isSending, !isLoadingHistory else { return }
+        guard !isSending, !isLoadingHistory, !isAwaitingMediaBubble else { return }
         guard PurchaseService.shared.isPro else { paywallTier = .pro; showPaywall = true; return }
         EventLogger.shared.log("feature_used", ["feature": "photo_request"])
         appendLocalMediaRequestLine(String(localized: "Send me a photo"))
-        appendPendingImageBubble(prompt: "a photo of you right now")
+        dropMediaBubbleAfterTyping { [self] in
+            appendPendingImageBubble(prompt: "a photo of you right now")
+        }
     }
 
     /// Kilitli foto balonunu ekler — hem düğme akışı (`sendImageRequest`) hem
