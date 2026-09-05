@@ -130,6 +130,8 @@ struct CharacterProfileView: View {
                 // PRO ise coin mağazası, değilse paywall.
                 if PurchaseService.shared.isPro { showTokenStore = true }
                 else { showPaywall = true }
+            } onNeedsSubscription: {
+                showPaywall = true
             }
         }
         // Locked photos are now blurred-in-place (bkz. blurredLockedImage) —

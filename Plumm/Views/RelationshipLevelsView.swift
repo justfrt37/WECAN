@@ -27,19 +27,26 @@ struct RelationshipLevelsView: View {
     @State private var boostError: String?
     let onBoosted: (_ newLevel: Int, _ newBalance: Int) -> Void
     let onInsufficientTokens: () -> Void
+    /// No active subscription → boosting isn't available, open the paywall.
+    let onNeedsSubscription: () -> Void
     @Environment(\.dismiss) private var dismiss
     private let service = ChatService()
 
     init(characterId: UUID, role: String, currentLevel: Int, tokenBalance: Int,
          onBoosted: @escaping (_ newLevel: Int, _ newBalance: Int) -> Void,
-         onInsufficientTokens: @escaping () -> Void) {
+         onInsufficientTokens: @escaping () -> Void,
+         onNeedsSubscription: @escaping () -> Void) {
         self.characterId = characterId
         self.role = role
         self._currentLevel = State(initialValue: currentLevel)
         self._tokenBalance = State(initialValue: tokenBalance)
         self.onBoosted = onBoosted
         self.onInsufficientTokens = onInsufficientTokens
+        self.onNeedsSubscription = onNeedsSubscription
     }
+
+    /// max: boost bedava. pro / pro_plus: token öder. none: paywall.
+    private var tier: SubscriptionTier { PurchaseService.shared.tier }
 
     // Pencil tasarımından birebir tonlar
     private let coral = Color(hex: 0xFF6F61)
@@ -50,11 +57,21 @@ struct RelationshipLevelsView: View {
 
     private func boost() {
         guard !isBoosting, currentLevel < Self.maxLevel else { return }
-        let cost = TokenCosts.levelBoost(toLevel: currentLevel + 1)
-        guard tokenBalance >= cost else {
-            onInsufficientTokens()
+
+        // Abonelik yoksa boost yok — paywall.
+        guard tier != .none else {
+            onNeedsSubscription()
             return
         }
+        // max bedava; pro / pro_plus token öder — bakiye yetmiyorsa istek atma.
+        if tier != .max {
+            let cost = TokenCosts.levelBoost(toLevel: currentLevel + 1)
+            guard tokenBalance >= cost else {
+                onInsufficientTokens()
+                return
+            }
+        }
+
         isBoosting = true
         Task {
             switch await service.boostLevel(characterId: characterId) {
@@ -65,6 +82,8 @@ struct RelationshipLevelsView: View {
                 onBoosted(result.level, result.tokenBalance)
             case .insufficientTokens:
                 onInsufficientTokens()
+            case .needsSubscription:
+                onNeedsSubscription()
             case .alreadyMaxLevel:
                 currentLevel = Self.maxLevel
             case .failed:
@@ -212,17 +231,24 @@ struct RelationshipLevelsView: View {
     }
 
     private func boostButton(targetLevel: Int) -> some View {
-        Button { boost() } label: {
+        // Fiyat SADECE pro / pro_plus için gösterilir (bkz. kullanıcı talebi):
+        // max'te boost bedava, abonelik yoksa dokununca paywall açılır.
+        let showsCost = tier == .pro || tier == .proPlus
+        return Button { boost() } label: {
             if isBoosting {
                 ProgressView().tint(.white).frame(width: 60, height: 30)
             } else {
-                // Fiyat gösterilmiyor — tüm token fiyatları yalnızca Token Store
-                // listesinde (bkz. TokenCostsView / kullanıcı talebi).
-                Text("Boost").font(.system(size: 12, weight: .bold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 7)
-                    .background(LinearGradient(colors: [coral, gold], startPoint: .leading, endPoint: .trailing), in: Capsule())
+                VStack(spacing: 1) {
+                    Text("Boost").font(.system(size: 12, weight: .bold))
+                    if showsCost {
+                        Text("\(TokenCosts.levelBoost(toLevel: targetLevel)) 🪙")
+                            .font(.system(size: 10, weight: .semibold))
+                    }
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, 14)
+                .padding(.vertical, showsCost ? 6 : 7)
+                .background(LinearGradient(colors: [coral, gold], startPoint: .leading, endPoint: .trailing), in: Capsule())
             }
         }
         .buttonStyle(.plain)
@@ -231,5 +257,5 @@ struct RelationshipLevelsView: View {
 }
 
 #Preview {
-    RelationshipLevelsView(characterId: UUID(), role: "flirty", currentLevel: 3, tokenBalance: 100, onBoosted: { _, _ in }, onInsufficientTokens: {})
+    RelationshipLevelsView(characterId: UUID(), role: "flirty", currentLevel: 3, tokenBalance: 100, onBoosted: { _, _ in }, onInsufficientTokens: {}, onNeedsSubscription: {})
 }

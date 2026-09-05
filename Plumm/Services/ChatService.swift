@@ -226,6 +226,7 @@ enum BoostOutcome {
     case success(LevelBoostResult)
     case insufficientTokens   // real 402 from charge_tokens
     case alreadyMaxLevel      // 400 already_max_level
+    case needsSubscription    // 403 subscription_required — open the paywall
     case failed               // network / 5xx / decode — "try again", no redirect
 }
 
@@ -329,9 +330,10 @@ struct ChatService {
 
         let errorCode = (try? JSONDecoder().decode(LevelBoostResponse.self, from: data))?.error
         switch (http.statusCode, errorCode) {
-        case (402, _):                   return .insufficientTokens
-        case (400, "already_max_level"): return .alreadyMaxLevel
-        default:                         return .failed
+        case (402, _):                     return .insufficientTokens
+        case (400, "already_max_level"):   return .alreadyMaxLevel
+        case (403, "subscription_required"): return .needsSubscription
+        default:                           return .failed
         }
     }
 

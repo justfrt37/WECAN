@@ -1,14 +1,18 @@
 // supabase/functions/level-boost/index.ts
 //
-// "Boost" button on RelationshipLevelsView — spends tokens to instantly gain
-// ONE relationship level (never more than one per call, matches "additional
-// level" phrasing). Token-gated only, no subscription tier required — same
-// pay-per-tap-without-a-subscription model as photo/voice generation.
+// "Boost" button on RelationshipLevelsView — instantly gain ONE relationship
+// level (never more than one per call, matches "additional level" phrasing).
+//
+// Tier rules (bkz. kullanıcı talebi 2026-09-05):
+//   • none  → 403 subscription_required (client opens the paywall, never calls)
+//   • max   → free, no token charge
+//   • pro / pro_plus → costs tokens (costForTargetLevel), 402 if short
 //
 //   İstek:  { characterId }
 //   Cevap:  { level, levelProgress, tokenBalance }  veya  { error }
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { activeTier } from "../_shared/entitlements.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -73,15 +77,23 @@ Deno.serve(async (req: Request) => {
     const currentLevel: number = convo.relationship_level ?? 1;
     if (currentLevel >= MAX_LEVEL) return json({ error: "already_max_level" }, 400);
 
-    const targetLevel = currentLevel + 1;
-    const cost = costForTargetLevel(targetLevel);
+    const tier = await activeTier(db, uid);
+    if (tier === "none") {
+      return json({ error: "subscription_required", required_tier: "pro" }, 403);
+    }
 
-    const { data: charged } = await db.rpc("charge_tokens", {
-      p_user_id: uid,
-      p_amount: cost,
-      p_reason: "level_boost",
-    });
-    if (!charged) return json({ error: "insufficient_tokens" }, 402);
+    const targetLevel = currentLevel + 1;
+
+    // max: bedava. pro / pro_plus: token öder.
+    if (tier !== "max") {
+      const cost = costForTargetLevel(targetLevel);
+      const { data: charged } = await db.rpc("charge_tokens", {
+        p_user_id: uid,
+        p_amount: cost,
+        p_reason: "level_boost",
+      });
+      if (!charged) return json({ error: "insufficient_tokens" }, 402);
+    }
 
     await db.from("conversations")
       .update({ relationship_level: targetLevel, level_progress: 0, updated_at: new Date().toISOString() })
