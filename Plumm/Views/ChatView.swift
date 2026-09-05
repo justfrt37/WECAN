@@ -630,6 +630,9 @@ struct ChatView: View {
         )
     }
 
+    /// `costTokens` parametresi kaldırıldı: butonların yanındaki token sayısı +
+    /// kalp ikonu artık gösterilmiyor (bkz. kullanıcı talebi). Maliyetler
+    /// Settings > Token Costs ekranında duruyor.
     private func modeButton(icon: String, label: String, isArmed: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack(spacing: 5) {
