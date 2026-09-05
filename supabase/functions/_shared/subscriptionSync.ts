@@ -97,60 +97,45 @@ export async function syncSubscriptionForUser(uid: string): Promise<SyncResult> 
   const periodStart = ent.purchase_date ?? new Date().toISOString();
   const periodEnd = ent.expires_date ?? new Date(now + 365 * 86_400_000).toISOString();
 
-  // ATOMİK dönem talebi. Eskiden bu bir "oku → yaz → ver" dizisiydi ve arada
-  // kilit yoktu: eşzamanlı iki çağrı (syncWithServerRetrying 4 kez deniyor,
-  // ayrıca purchase()/restore() ve webhook aynı anda tetikleyebiliyor) ikisi
-  // de `existing`i güncellenmeden okuyup ikisi de "yeni dönem" sanıyor ve
-  // ikisi de grant veriyordu — canlı defterde 1 saniye arayla iki +12000
-  // (bkz. kullanıcı raporu, 9 kez tekrarlanan grant).
-  //
-  // Şimdi kararı VERİTABANI veriyor: dönem anahtarını yalnızca FARKLIYSA
-  // güncelleyen koşullu bir UPDATE ve satır yoksa çakışmada sessizce düşen
-  // bir INSERT. İkisinden de dönen satır sayısı 1 ise bu çağrı dönemi ilk kez
-  // talep etmiştir; eşzamanlı diğer çağrı 0 satır alır ve grant vermez.
-  const row = {
+  // `subscriptions` satırı artık YALNIZCA "şu an hangi tier" sorusunun cevabı.
+  // Koşulsuz yazılıyor: tier gerçeğin aynası, her sync'te güncel olmalı
+  // (aynı dönem içinde Pro'dan Pro+'a yükseltme bunu gerektiriyor).
+  await db.from("subscriptions").upsert({
     user_id: uid,
     tier: activeTier,
     current_period_start: periodStart,
     current_period_end: periodEnd,
     updated_at: new Date().toISOString(),
-  };
+  }, { onConflict: "user_id" });
 
-  const { data: updated } = await db.from("subscriptions")
-    .update(row)
-    .eq("user_id", uid)
-    .neq("current_period_start", periodStart)
+  const amount = (activeProductId && PRODUCT_TOKENS[activeProductId]) ?? WEEKLY_TOKENS[activeTier];
+
+  // GRANT KARARI ayrı bir deftere taşındı (bkz. 029_subscription_grants.sql).
+  //
+  // Eskiden idempotency anahtarı `subscriptions.current_period_start` idi —
+  // yani "bu döneme token verildi mi" kaydı, token'ı veren satırın kendi
+  // içindeydi. Satır silinince kanıt da siliniyor ve aynı dönem tekrar
+  // ödüllendiriliyordu: canlı örnekte TEK bir yearly_pro_max dönemi için beş
+  // kez +35000 = 175.000 token (bkz. kullanıcı raporu). Aynı açık üretimde de
+  // gerçek — satırı temizleyen herhangi bir bakım ya da webhook/istemci yarışı
+  // aynı sonucu verir.
+  //
+  // Artık kararı birincil anahtar veriyor: (user_id, product_id, period_start)
+  // yalnızca bir kez eklenebilir. Çakışan INSERT sessizce düşer, o çağrı 0
+  // satır alır ve token VERMEZ. `subscriptions` satırına ne olursa olsun
+  // (silinsin, tier'ı değişsin) bir dönem ikinci kez ödeyemez.
+  const { data: claimed } = await db.from("subscription_grants")
+    .upsert({
+      user_id: uid,
+      product_id: activeProductId ?? activeTier,
+      period_start: periodStart,
+      tokens: amount,
+    }, { onConflict: "user_id,product_id,period_start", ignoreDuplicates: true })
     .select("user_id");
 
-  let isNewPeriod = (updated?.length ?? 0) > 0;
-
-  if (!isNewPeriod) {
-    // Ya satır hiç yok (ilk abonelik) ya da dönem zaten bizimki (grant verilmiş).
-    // İlkini ayırt etmek için çakışmayı yok sayan bir INSERT deniyoruz:
-    // satır zaten varsa 0 satır döner ve grant verilmez.
-    const { data: inserted } = await db.from("subscriptions")
-      .upsert(row, { onConflict: "user_id", ignoreDuplicates: true })
-      .select("user_id");
-    isNewPeriod = (inserted?.length ?? 0) > 0;
-
-    if (!isNewPeriod) {
-      // Satır var ve dönem aynı → grant verilmeyecek. AMA tier değişmiş
-      // olabilir: kullanıcı aynı dönem içinde Pro'dan Pro+'a yükseltirse
-      // yukarıdaki koşullu UPDATE (`.neq(current_period_start, ...)`)
-      // hiç çalışmıyor ve satır `pro` olarak kalıyordu — kullanıcı parayı
-      // ödüyor, sunucu hâlâ eski tier'ı görüyordu (bkz. kullanıcı raporu:
-      // "satın alımı yaptığımda backend'deki üyeliğim pro'da kalıyor").
-      //
-      // Tier ile GRANT'ı ayırmak gerekiyordu: tier gerçeğin aynası, her
-      // zaman yazılmalı; token grant'ı ise dönem başına bir kez.
-      await db.from("subscriptions")
-        .update({ tier: activeTier, current_period_end: periodEnd, updated_at: new Date().toISOString() })
-        .eq("user_id", uid);
-    }
-  }
+  const isNewPeriod = (claimed?.length ?? 0) > 0;
 
   if (isNewPeriod) {
-    const amount = (activeProductId && PRODUCT_TOKENS[activeProductId]) ?? WEEKLY_TOKENS[activeTier];
     await db.rpc("grant_tokens", {
       p_user_id: uid,
       p_amount: amount,
