@@ -207,38 +207,6 @@ struct VoiceCallView: View {
                 }
                 .padding(.bottom, 40)
             }
-
-            // TEMP DEBUG overlay — remove once voice call pipeline is verified on device.
-            // #if DEBUG-gated: was rendering unconditionally, leaking internal edge
-            // function names (e.g. "Calling voice-call-start…") to real users on
-            // every call — found during QA pass, 2026-08-26.
-            #if DEBUG
-            VStack {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("DEBUG")
-                        .font(.system(size: 12, weight: .heavy))
-                        .foregroundStyle(.yellow)
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 2) {
-                            ForEach(Array(viewModel.debugLog.enumerated()), id: \.offset) { _, line in
-                                Text(line)
-                                    .font(.system(size: 10, design: .monospaced))
-                                    .foregroundStyle(.white)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    .frame(maxHeight: 180)
-                }
-                .padding(8)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(.black.opacity(0.75), in: RoundedRectangle(cornerRadius: 8))
-                .padding(.horizontal, 12)
-                .padding(.top, 8)
-                Spacer()
-            }
-            #endif
         }
         .onAppear {
             viewModel.tokenStore = tokenStore

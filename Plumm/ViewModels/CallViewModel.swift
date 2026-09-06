@@ -3,13 +3,14 @@
 //  Real-time voice call durumu, backed by an ElevenLabs Agents session
 //  (Flash v2.5). The SDK (built on LiveKit WebRTC) owns mic capture, ASR,
 //  TTS playback, and barge-in natively — this class just wires our token
-//  billing and DEBUG logging around it. See
+//  billing and diagnostics logging around it. See
 //  docs/superpowers/specs/2026-07-29-voice-call-agents-migration-design.md.
 //
 
 import Foundation
 import ElevenLabs
 import Observation
+import OSLog
 
 enum CallState: Equatable {
     case idle
@@ -39,9 +40,14 @@ final class CallViewModel {
     /// cost is variable/unpredictable so it's worth confirming on-screen).
     var tokensCharged: Int?
 
-    // TEMP DEBUG — remove once voice call pipeline is verified on device.
-    var debugLog: [String] = []
-    private func debug(_ s: String) { debugLog.append(s) }
+    /// Arama tanılama kaydı. Eskiden ekranın üstünde sarı "DEBUG" kutusu
+    /// olarak ÇİZİLİYORDU (`debugLog` dizisi + VoiceCallView'daki overlay);
+    /// kutu kaldırıldı ama satırların kendisi değerli — akış artık Console.app'ten
+    /// okunuyor (cihaz bağlı, alt sistem `com.firat.Plumm`, kategori `call`),
+    /// PurchaseService.diag ile aynı desen. print DEĞİL: print yalnızca Xcode'a
+    /// bağlıyken görünür, bu TestFlight'ta da okunur.
+    private static let diag = Logger(subsystem: "com.firat.Plumm", category: "call")
+    private func debug(_ s: String) { Self.diag.log("[CALL] \(s, privacy: .public)") }
 
     private let service = CallService()
     private let soundPlayer = CallSoundPlayer()
