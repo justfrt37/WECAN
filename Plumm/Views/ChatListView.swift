@@ -150,12 +150,23 @@ struct ChatListView: View {
                 .map {
                     Message.fromServer(role: $0.role, content: $0.content, kind: $0.kind, createdAt: $0.date ?? Date())
                 }
-            if chatCacheWrittenFor.insert(ch.id).inserted {
+            // Az önce eklenmiş kilitli ses/foto balonu (bkz. appendPendingVoiceBubble/
+            // appendPendingImageBubble) sunucuya yazılırken bu liste yenilenirse,
+            // henüz o satırı görmeyen bu sunucu cevabı chatCache'in ÜZERİNE YAZIP
+            // balonu kalıcı olarak kaybettiriyordu (bkz. kullanıcı raporu: "send me
+            // a voice/photo mesajları girip çıkınca kayboluyor, hâlâ okunmadı
+            // sayıyor"). Var olan önbellek zaten en az bu kadar (veya daha) güncelse
+            // ÜZERİNE YAZMA — yalnızca sunucu gerçekten DAHA FAZLA mesaj biliyorsa kabul et.
+            if chatCacheWrittenFor.insert(ch.id).inserted,
+               (store.chatCache[ch.id]?.count ?? 0) < displayMessages.count {
                 store.chatCache[ch.id] = displayMessages
             }
 
             let assistantCount = convMsgs.filter { !$0.isUser }.count
             let unread = max(0, assistantCount - ReadTracker.seen(conv.characterID))
+            #if DEBUG
+            print("[UNREAD-DEBUG] \(ch.name): assistantCount=\(assistantCount) seen=\(ReadTracker.seen(conv.characterID)) unread=\(unread) kinds=\(convMsgs.filter { !$0.isUser }.map { $0.kind ?? "nil" })")
+            #endif
             // Önizleme en yeni mesajdan (convMsgs desc → .first) — sunucudaki
             // `kind` (text/image/voice) korunur, WhatsApp tarzı önizleme için.
             let last: LastMessage? = convMsgs.first.map {

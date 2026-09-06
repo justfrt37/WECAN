@@ -377,6 +377,7 @@ struct ChatService {
     private struct PhotoMessagePayload: Codable {
         let prompt: String
         let url: String?
+        let reveal: Bool
     }
     private struct PhotoMessageRequest: Codable {
         let characterId: String
@@ -385,16 +386,19 @@ struct ChatService {
     }
 
     /// Foto balonunun kalıcı durumunu sunucuya yazar (bkz. chat/index.ts
-    /// photoMessage). `url == nil` → "açılmamış/kilitli" foto sakla (kullanıcı
-    /// isteği attı, henüz üretmedi); `url != nil` → o pending satırı gerçek
-    /// görsele çevir. Böylece açılmamış foto da chate tekrar girince görünür.
+    /// photoMessage). `reveal == false` → yeni "açılmamış/kilitli" foto satırı
+    /// oluştur; `reveal == true` → var olan pending satırı gerçek görsele çevir
+    /// (`url` doluysa içerik URL olur, üretim/yükleme başarısız olup `url` nil
+    /// gelse BİLE var olan satır kilitten çıkar — sunucu bunu YENİ istek sanıp
+    /// sonsuz pending satırı biriktirmesin, bkz. kullanıcı raporu: "sesi/fotoyu
+    /// görsem bile okunmadı diyor" kök nedeni).
     @discardableResult
-    func savePhotoMessage(character: Character, prompt: String, url: String?) async -> Bool {
+    func savePhotoMessage(character: Character, prompt: String, url: String?, reveal: Bool = false) async -> Bool {
         var request = authorizedRequest(url: Config.chatFunctionURL, timeout: 20)
         guard let body = try? JSONEncoder().encode(PhotoMessageRequest(
             characterId: character.id.uuidString.lowercased(),
             systemPrompt: character.systemPrompt,
-            photoMessage: PhotoMessagePayload(prompt: prompt, url: url)
+            photoMessage: PhotoMessagePayload(prompt: prompt, url: url, reveal: reveal)
         )) else { return false }
         request.httpBody = body
         guard let (_, response) = try? await URLSession.shared.data(for: request),
@@ -406,6 +410,7 @@ struct ChatService {
     private struct VoiceMessagePayload: Codable {
         let requestText: String
         let url: String?
+        let reveal: Bool
     }
     private struct VoiceMessageRequest: Codable {
         let characterId: String
@@ -414,16 +419,19 @@ struct ChatService {
     }
 
     /// Sesli mesaj balonunun kalıcı durumunu sunucuya yazar (bkz. chat/index.ts
-    /// voiceMessage — foto ile simetrik). `url == nil` → "açılmamış/kilitli" ses
-    /// (kind=voice_pending); `url != nil` → o pending satırı gerçek sese çevir
-    /// (kind=voice, content=URL). Böylece reload'da METİN değil SES balonu görünür.
+    /// voiceMessage — foto ile simetrik). `reveal == false` → yeni kilitli ses
+    /// satırı oluştur (kind=voice_pending); `reveal == true` → var olan pending
+    /// satırı gerçek sese çevir (`url` doluysa content=URL, kind=voice; upload
+    /// başarısız olup `url` nil gelse BİLE aynı satır kilitten çıkar — aksi
+    /// halde sunucu bunu yeni istek sanıp aynı balon her açılışta bir pending
+    /// satır daha ekliyordu, bkz. kullanıcı raporu kök nedeni).
     @discardableResult
-    func saveVoiceMessage(character: Character, requestText: String, url: String?) async -> Bool {
+    func saveVoiceMessage(character: Character, requestText: String, url: String?, reveal: Bool = false) async -> Bool {
         var request = authorizedRequest(url: Config.chatFunctionURL, timeout: 20)
         guard let body = try? JSONEncoder().encode(VoiceMessageRequest(
             characterId: character.id.uuidString.lowercased(),
             systemPrompt: character.systemPrompt,
-            voiceMessage: VoiceMessagePayload(requestText: requestText, url: url)
+            voiceMessage: VoiceMessagePayload(requestText: requestText, url: url, reveal: reveal)
         )) else { return false }
         request.httpBody = body
         guard let (_, response) = try? await URLSession.shared.data(for: request),
