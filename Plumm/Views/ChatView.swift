@@ -814,14 +814,12 @@ private struct ChatBubble: View {
                 .onTapGesture { onTapLocalImage?(localImage) }
             } else if let imageURL = message.imageURL {
                 // Foto mesajı (kızın gönderdiği fotoğraf) — WhatsApp tarzı KÜÇÜK
-                // önizleme kutusu: 9:16 üretilen fotoğrafın tamamı burada
-                // gösterilmiyor (kırpılıyor, ASLA gerilmiyor — scaledToFill +
-                // clipped), tam hâli sadece tam ekran görünümde (onTapImage).
-                // İlk gelişte bulanık + "Tap to view" — ilk dokunuş sadece
-                // bulanıklığı açar, sonraki dokunuş tam ekranı açar.
-                // Aspect ratio KORUNARAK gösterilir: üretilen fotolar 9:16 —
-                // balon da 9:16 kutu + scaledToFit → foto KIRPILMAZ/GERİLMEZ,
-                // tam hâli doğru oranıyla görünür (bkz. kullanıcı talebi). Tam
+                // önizleme kutusu. İlk gelişte bulanık + "Tap to view" — ilk
+                // dokunuş sadece bulanıklığı açar, sonraki dokunuş tam ekranı açar.
+                // Aspect ratio KORUNARAK gösterilir: üretilen fotolar 3:4 (bkz.
+                // chat-image/index.ts — 9:16 zorlanınca xAI vücudu/yüzü uzatıp
+                // inceltiyordu, kaldırıldı) — balon da 3:4 kutu + scaledToFit →
+                // foto KIRPILMAZ/GERİLMEZ, tam hâli doğru oranıyla görünür. Tam
                 // hâli yine tam ekranda da açılır (onTapImage).
                 ZStack {
                     CachedImage(url: imageURL) { img in
@@ -833,7 +831,7 @@ private struct ChatBubble: View {
                             ProgressView().tint(.white)
                         }
                     }
-                    .frame(width: 220, height: 390)
+                    .frame(width: 220, height: 293)
                     .blur(radius: imageRevealed ? 0 : 26)
 
                     if !imageRevealed {
@@ -845,7 +843,7 @@ private struct ChatBubble: View {
                             .background(.white, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                     }
                 }
-                .frame(width: 220, height: 390)
+                .frame(width: 220, height: 293)
                 .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                 .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(.white.opacity(0.1), lineWidth: 1))
                 .onTapGesture {
@@ -983,7 +981,7 @@ private struct PendingImageBubble: View {
             CachedImage(url: backdropURL) { img in
                 img.resizable().scaledToFill()
             } placeholder: { AppColor.card }
-            .frame(width: 220, height: 390)
+            .frame(width: 220, height: 293)
             .clipped()
             .blur(radius: 26)
 
@@ -1009,7 +1007,7 @@ private struct PendingImageBubble: View {
                 .background(.white, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
         }
-        .frame(width: 220, height: 390)
+        .frame(width: 220, height: 293)
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(.white.opacity(0.1), lineWidth: 1))
         .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))

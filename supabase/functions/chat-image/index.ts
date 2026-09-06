@@ -9,7 +9,9 @@
 //   2) O prompt, Grok Imagine'e gönderilir — karakterin mevcut profil fotoğrafı
 //      varsa /v1/images/edits (image-to-image, temel/baseline görsel olarak)
 //      kullanılır, yoksa (ya da edits başarısız olursa) düz /v1/images/generations'a
-//      düşer. Her ikisinde de aspect_ratio=9:16, resolution=2k sabit.
+//      düşer. resolution=2k sabit; aspect_ratio KASITLI OLARAK verilmiyor —
+//      9:16 zorlanınca model insan vücudunu/yüzünü uzatıp inceltiyordu (bkz.
+//      IMAGE_MODEL yorumu), doğal varsayılan (3:4) bozulmuyor.
 //
 //   İstek:  { characterId, prompt }  (Authorization: Bearer <JWT> zorunlu)
 //   Cevap:  { url }  veya  { error }
@@ -31,7 +33,14 @@ const XAI_IMAGE_GENERATIONS_URL = "https://api.x.ai/v1/images/generations";
 const XAI_IMAGE_EDITS_URL = "https://api.x.ai/v1/images/edits";
 const IMAGE_MODEL = "grok-imagine-image";
 const IMAGE_RESOLUTION = "2k";
-const IMAGE_ASPECT_RATIO = "9:16"; // docs.x.ai ile doğrulandı (2026-07): desteklenen değerlerden biri
+// `aspect_ratio: "9:16"` KASITLI OLARAK KALDIRILDI (2026-09-06) — xAI bu
+// oranı gerçekten üretiyordu (dosya gerçekten 1584×2816 dönüyordu, sahte bir
+// kırpma/gerilme değildi), AMA modelin kendisi bu oranı zorlanınca insan
+// vücudunu/yüzünü GÖRÜNÜR ŞEKİLDE UZATIP İNCELTEREK üretiyordu (bkz. kullanıcı
+// raporu: "chatteki fotolar uzamış, incelmiş duruyor"). Karakter oluşturma
+// (create-character/index.ts) aynı modeli aspect_ratio HİÇ vermeden çağırıyor,
+// doğal varsayılanı 3:4 (doğrulandı: 1776×2368) ve orada bu bozulma YOK —
+// o yüzden burada da parametre tamamen kaldırılıp doğal orana bırakılıyor.
 
 // TEMP TESTING — Civitai cost/quality comparison (2026-07-12). Swaps the
 // actual image-generation call (only) from Grok Imagine to Civitai's Flux2
@@ -92,12 +101,13 @@ const NO_TEXT_RULE =
 // even when the display container's aspect ratio is mathematically correct —
 // this got reported as a crop bug when it was actually a composition problem.
 const FRAMING_RULE =
-  "The output canvas is a TALL VERTICAL 9:16 frame (like a phone photo/story). " +
-  "Compose for that shape: leave natural headroom above the subject's head, " +
-  "and choose a pose/crop (e.g. waist-up, three-quarter, or full-body) that " +
-  "fits the vertical frame comfortably. Never awkwardly clip background " +
-  "objects (ceiling lights, door frames, furniture, signs) right at the edge " +
-  "of the frame — either include them fully or leave them out of the shot.";
+  "The output canvas is a portrait-oriented frame (3:4, like a normal phone " +
+  "photo). Compose for that shape: leave natural headroom above the " +
+  "subject's head, and choose a pose/crop (e.g. waist-up, three-quarter, or " +
+  "full-body) that fits the frame comfortably. Never awkwardly clip " +
+  "background objects (ceiling lights, door frames, furniture, signs) right " +
+  "at the edge of the frame — either include them fully or leave them out " +
+  "of the shot.";
 
 function appearanceContext(opts: {
   name: string;
@@ -501,7 +511,6 @@ async function editsWithBaseline(prompt: string, baselineImageUrl: string): Prom
           model: IMAGE_MODEL,
           prompt,
           image: { url: baselineImageUrl, type: "image_url" },
-          aspect_ratio: IMAGE_ASPECT_RATIO,
           resolution: IMAGE_RESOLUTION,
         }),
       });
@@ -522,7 +531,6 @@ async function generateWithoutBaseline(prompt: string): Promise<Uint8Array> {
       model: IMAGE_MODEL,
       prompt,
       n: 1,
-      aspect_ratio: IMAGE_ASPECT_RATIO,
       resolution: IMAGE_RESOLUTION,
     }),
   });
