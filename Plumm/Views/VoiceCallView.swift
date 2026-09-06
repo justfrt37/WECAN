@@ -6,6 +6,70 @@
 import SwiftUI
 import UIKit
 
+/// ChatGPT sesli mod tarzı katmanlı, bulanık "aura" — durum metni yerine
+/// karakterin dinlediğini/konuştuğunu görsel olarak anlatır (bkz. kullanıcı
+/// talebi: "listening yazmak yerine ses ışıklandırması gibi bir şey").
+/// Renk + hız duruma göre değişir; TimelineView(.animation) ile sürekli,
+/// kesintisiz akar — durumlar arası geçişte animasyon yeniden BAŞLAMAZ,
+/// sadece hedef renk/hız kayar (aksi halde her state değişiminde halka
+/// sıfırlanıp "atlıyormuş" gibi görünürdü).
+private struct VoiceAuraView: View {
+    let state: CallState
+
+    private var palette: [Color] {
+        switch state {
+        case .listening: return [Color(hex: 0x64D2FF), Color(hex: 0x9B8CFF)]
+        case .thinking: return [Color(hex: 0xB98CFF), Color(hex: 0x64D2FF)]
+        case .speaking: return [AppColor.pink, Color(hex: 0xFF8AD4)]
+        default: return [AppColor.pink.opacity(0.5), AppColor.pink.opacity(0.5)]
+        }
+    }
+
+    private var isActive: Bool {
+        switch state {
+        case .listening, .thinking, .speaking: return true
+        default: return false
+        }
+    }
+
+    /// Konuşurken en canlı/hızlı (kendi sesi), dinlerken sakin ve sürekli
+    /// (seni dinlediğini hissettirmek için asla durağan görünmemeli),
+    /// düşünürken ikisi arası.
+    private var speed: Double {
+        switch state {
+        case .speaking: return 1.7
+        case .thinking: return 1.15
+        case .listening: return 0.85
+        default: return 0.4
+        }
+    }
+
+    var body: some View {
+        TimelineView(.animation(paused: false)) { timeline in
+            let t = timeline.date.timeIntervalSinceReferenceDate * speed
+            ZStack {
+                ForEach(0..<3, id: \.self) { i in
+                    let phase = Double(i) * 2.4
+                    let wobble = sin(t + phase) * 0.5 + 0.5 // 0...1, sürekli nefes alıp veriyor
+                    Circle()
+                        .fill(
+                            RadialGradient(
+                                colors: [palette[i % palette.count].opacity(0.6), .clear],
+                                center: .center, startRadius: 8, endRadius: 150
+                            )
+                        )
+                        .frame(width: 230, height: 230)
+                        .scaleEffect(1.0 + wobble * 0.24 + Double(i) * 0.1)
+                        .opacity(isActive ? 0.5 + wobble * 0.4 : 0.22)
+                        .blur(radius: 20)
+                }
+            }
+            .animation(.easeInOut(duration: 0.4), value: isActive)
+        }
+        .allowsHitTesting(false)
+    }
+}
+
 /// Scale + fade on press, spring-back on release — used by every tappable
 /// control on this screen so it reads as responsive (no built-in SwiftUI
 /// Button gives any press feedback by default).
@@ -41,14 +105,7 @@ struct VoiceCallView: View {
                 Spacer()
 
                 ZStack {
-                    Circle()
-                        .fill(AppColor.pink.opacity(0.25))
-                        .frame(width: 220, height: 220)
-                        .scaleEffect(ringPulseScale)
-                        .animation(
-                            .easeInOut(duration: viewModel.state == .speaking ? 0.6 : 1.1).repeatForever(autoreverses: true),
-                            value: ringPulseScale
-                        )
+                    VoiceAuraView(state: viewModel.state)
 
                     CachedImage(url: viewModel.character.avatarURL ?? viewModel.character.photoURL) { image in
                         image.resizable().scaledToFill()
@@ -61,9 +118,14 @@ struct VoiceCallView: View {
                     .font(.system(size: 24, weight: .bold))
                     .foregroundStyle(.white)
 
-                Text(statusLabel)
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.7))
+                // Dinliyor/düşünüyor/konuşuyor durumları artık metinle değil
+                // VoiceAuraView'in kendisiyle anlatılıyor (bkz. kullanıcı talebi) —
+                // metin sadece ışıklandırmanın karşılığı olmayan durumlarda kalır.
+                if showsStatusText {
+                    Text(statusLabel)
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.7))
+                }
 
                 if case .ended = viewModel.state {} else {
                     TimelineView(.periodic(from: .now, by: 1)) { _ in
@@ -212,14 +274,12 @@ struct VoiceCallView: View {
         return String(format: "%02d:%02d", total / 60, total % 60)
     }
 
-    /// `.idle` (ringing/connecting) gets a slow, gentle pulse — a visual
-    /// companion to the ringback tone. `.speaking` keeps its faster pulse.
-    /// Anything else (listening/thinking/ended) sits still.
-    private var ringPulseScale: CGFloat {
+    /// listening/thinking/speaking artık VoiceAuraView ile anlatılıyor —
+    /// metin sadece ışıklandırmanın karşılık gelmediği durumlarda görünür.
+    private var showsStatusText: Bool {
         switch viewModel.state {
-        case .speaking: return 1.08
-        case .idle: return 1.04
-        default: return 1.0
+        case .idle, .ended: return true
+        case .listening, .thinking, .speaking: return false
         }
     }
 
