@@ -30,7 +30,6 @@ struct ChatView: View {
     @State private var showBlockConfirm = false
     @State private var showClearChatOptions = false
     @State private var isBlocked: Bool
-    @State private var recognizer = SpeechRecognizer()
     @State private var voice = VoicePlayer()
     @State private var didPrefill = false
     @State private var readyToAutoScroll = false
@@ -45,10 +44,6 @@ struct ChatView: View {
     @State private var fullscreenImageURL: URL?
     /// Kullanıcının KENDİ gönderdiği fotoğrafa dokununca tam ekran (yerel, CachedImage YOK).
     @State private var fullscreenLocalImage: UIImage?
-
-    // Sesli mesaj kaydı: `recognizer.isRecording` kayıt sırasında, `isReviewingVoice`
-    // durdurulduktan sonra Send/Cancel bekleme aşamasında (bkz. plan: recording overlay).
-    @State private var isReviewingVoice = false
 
     // Fotoğraf gönderme: kamera veya kütüphaneden seçilen görsel, gönderilmeden
     // önce tam ekran review ekranında (caption + Send/Cancel) bekler.
@@ -103,13 +98,6 @@ struct ChatView: View {
 
                 if isBlocked {
                     blockedBar
-                } else if recognizer.isRecording || isReviewingVoice {
-                    VoiceRecordingOverlay(
-                        isRecording: recognizer.isRecording,
-                        onCancel: cancelRecording,
-                        onSend: sendRecordedVoice
-                    )
-                    .padding(.bottom, bottomInset)
                 } else {
                     quickReplyRow
                     inputBar
@@ -125,10 +113,9 @@ struct ChatView: View {
                 "character_id": viewModel.character.id,
                 "messages_sent_this_session": viewModel.messagesSentThisSession,
             ])
-            // Sohbetten çıkınca ses çalmaya / mikrofon açık kalmaya devam etmesin —
-            // oynatıcıyı durdur (ses oturumunu da bırakır) ve kaydı iptal et.
+            // Sohbetten çıkınca ses çalmaya devam etmesin — oynatıcıyı durdur
+            // (ses oturumunu da bırakır).
             voice.stop()
-            recognizer.cancel()
         }
         .task {
             viewModel.store = store
@@ -701,19 +688,10 @@ struct ChatView: View {
                     Image(systemName: "camera")
                         .font(.system(size: 20)).foregroundStyle(.white.opacity(0.5))
                 }
-                Button { toggleRecording() } label: {
-                    Image(systemName: recognizer.isRecording ? "stop.circle.fill" : "mic.fill")
-                        .font(.system(size: 20))
-                        .foregroundStyle(recognizer.isRecording ? AppColor.pink : .white.opacity(0.5))
-                }
-                .buttonStyle(.plain)
             }
             .padding(.horizontal, 14).frame(minHeight: 46)
             .background(.white.opacity(0.1), in: Capsule())
-            .overlay(Capsule().strokeBorder(
-                recognizer.isRecording ? AppColor.pink.opacity(0.6) : .white.opacity(0.1),
-                lineWidth: 1
-            ))
+            .overlay(Capsule().strokeBorder(.white.opacity(0.1), lineWidth: 1))
 
             Button {
                 viewModel.send()
@@ -738,40 +716,6 @@ struct ChatView: View {
         .popoverTip(SendFirstMessageTip(), arrowEdge: .bottom)
     }
 
-    /// Mikrofon: kaydı başlat/durdur. ARTIK OTOMATIK GÖNDERMEZ — durunca
-    /// review aşamasına geçer (bkz. VoiceRecordingOverlay Cancel/Send).
-    private func toggleRecording() {
-        if recognizer.isRecording {
-            recognizer.stop()
-            isReviewingVoice = true
-        } else {
-            Task {
-                if !recognizer.authorized { await recognizer.requestAuthorization() }
-                guard recognizer.authorized else {
-                    viewModel.errorMessage = String(localized: "Microphone & speech recognition access needed.")
-                    return
-                }
-                if !recognizer.start() {
-                    viewModel.errorMessage = String(localized: "Couldn't start recording.")
-                }
-            }
-        }
-    }
-
-    /// Overlay'in Cancel düğmesi — kaydı at, gönderme.
-    private func cancelRecording() {
-        recognizer.cancel()
-        isReviewingVoice = false
-    }
-
-    /// Overlay'in Send düğmesi — kayıt hâlâ sürüyorsa önce durdurur, sonra
-    /// transkript + ses dosyasını `sendUserVoice`e verir (bkz. ChatViewModel).
-    private func sendRecordedVoice() {
-        if recognizer.isRecording { recognizer.stop() }
-        isReviewingVoice = false
-        guard let url = recognizer.recordedFileURL else { return }
-        viewModel.sendUserVoice(transcript: recognizer.transcript, audioURL: url)
-    }
 }
 
 // MARK: - Mesaj balonu
@@ -1440,65 +1384,3 @@ private struct PhotoReviewView: View {
 
 // MARK: - Sesli mesaj kaydı overlay'i ("wavy imitator" + timer + Cancel/Send)
 
-private struct VoiceRecordingOverlay: View {
-    let isRecording: Bool
-    let onCancel: () -> Void
-    let onSend: () -> Void
-
-    @State private var elapsed = 0
-    @State private var animating = false
-
-    private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect().eraseToAnyPublisher()
-
-    var body: some View {
-        HStack(spacing: 14) {
-            Button(action: onCancel) {
-                Image(systemName: "xmark")
-                    .font(.system(size: 18, weight: .bold))
-                    .foregroundStyle(.white.opacity(0.8))
-                    .frame(width: 40, height: 40)
-                    .background(.white.opacity(0.1), in: Circle())
-            }
-            .buttonStyle(.plain)
-
-            HStack(spacing: 3) {
-                ForEach(0..<24, id: \.self) { i in
-                    Capsule()
-                        .fill(AppColor.pink.opacity(isRecording ? 0.9 : 0.5))
-                        .frame(width: 3, height: animating ? barHeight(i) : 6)
-                        .animation(
-                            .easeInOut(duration: 0.4).repeatForever().delay(Double(i % 6) * 0.06),
-                            value: animating
-                        )
-                }
-            }
-            .frame(maxWidth: .infinity)
-
-            Text(String(format: "%d:%02d", elapsed / 60, elapsed % 60))
-                .font(.system(size: 13, weight: .semibold, design: .monospaced))
-                .foregroundStyle(.white.opacity(0.7))
-
-            Button(action: onSend) {
-                Image(systemName: "paperplane.fill")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .frame(width: 40, height: 40)
-                    .background(
-                        LinearGradient(colors: [AppColor.pink, AppColor.amber],
-                                       startPoint: .topLeading, endPoint: .bottomTrailing),
-                        in: Circle()
-                    )
-            }
-            .buttonStyle(.plain)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .background(AppColor.card.opacity(0.9))
-        .onAppear { animating = true }
-        .onReceive(timer) { _ in if isRecording { elapsed += 1 } }
-    }
-
-    private func barHeight(_ i: Int) -> CGFloat {
-        [8, 16, 22, 12, 18, 10][i % 6]
-    }
-}

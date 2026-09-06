@@ -139,7 +139,7 @@ final class ChatViewModel {
         if let balance = tokenStore?.balance { tokenStore?.setBalance(balance - cost) }
     }
 
-    /// Gönderim hatası ortak kuyruğu (send / sendUserVoice / sendUserPhoto):
+    /// Gönderim hatası ortak kuyruğu (send / sendUserPhoto):
     /// 402 ise uyarı yerine paywall/coin mağazası, değilse mesajı "başarısız"
     /// işaretle + hatayı göster. `refundsBadge` true ise gönderim başında
     /// anında düşülen rozet bakiyesi gerçek değerle düzeltilir (istek sunucuya
@@ -272,10 +272,9 @@ final class ChatViewModel {
     }
 
     /// Başarısız bir mesaj balonuna dokununca — eski (failed) mesajı kaldırır,
-    /// AYNI içerikle orijinal gönderim yolunu (send/sendUserVoice/sendUserPhoto)
+    /// AYNI içerikle orijinal gönderim yolunu (send/sendUserPhoto)
     /// yeniden çağırır. Hangi yolun kullanılacağı mesajın kendi alanlarından
-    /// çıkarılır: voiceLocalPath doluysa sesli mesaj, localImagePath doluysa
-    /// kullanıcı fotoğrafı, ikisi de yoksa düz metin.
+    /// çıkarılır: localImagePath doluysa kullanıcı fotoğrafı, yoksa düz metin.
     func retrySend(messageID: UUID) {
         guard let idx = messages.firstIndex(where: { $0.id == messageID }),
               messages[idx].failed == true
@@ -285,10 +284,10 @@ final class ChatViewModel {
         LocalConversationStore.shared.removeMessage(id: messageID, for: character.id)
         store?.chatCache[character.id] = realMessages()
 
-        if let voicePath = failedMsg.voiceLocalPath {
-            let audioURL = VoicePlayer.voiceMessagesDirectory.appendingPathComponent(voicePath)
-            sendUserVoice(transcript: failedMsg.content, audioURL: audioURL)
-        } else if let photoPath = failedMsg.localImagePath,
+        // Kullanıcının kendi sesini kaydedip gönderme özelliği kaldırıldı
+        // (2026-09-06). Cihazda o dönemden kalmış başarısız bir sesli mesaj
+        // varsa metin olarak yeniden gönderilir — içeriği zaten transkriptti.
+        if let photoPath = failedMsg.localImagePath,
                   let image = UserPhotoStore.loadUserPhoto(relativePath: photoPath) {
             sendUserPhoto(image: image, caption: failedMsg.content)
         } else {
@@ -583,7 +582,7 @@ final class ChatViewModel {
         ]
     }
 
-    /// `send()`/`sendUserVoice()`/`sendUserPhoto()` ortak balon teslim mantığı —
+    /// `send()`/`sendUserPhoto()` ortak balon teslim mantığı —
     /// üçünde de aynı 20 satırlık "kalan süre kadar bekle, balonu kapat, mesajı
     /// ekle" bloğu tekrarlanıyordu, artık tek yerde. `result.replySegments`
     /// doluysa (bkz. DRAMATIC_PACING_RULE) her parçayı ayrı bir balon olarak,
@@ -639,73 +638,6 @@ final class ChatViewModel {
         if ScheduleLookup.currentBlock(schedule: schedule, date: now)?.isSleep == true { return true }
         guard let nextStart = ScheduleLookup.nextSleepBlockStart(schedule: schedule, from: now) else { return false }
         return nextStart.timeIntervalSince(now) <= 3600
-    }
-
-    /// Kullanıcının KENDİ kaydettiği sesli mesaj — botun sesli CEVAP vermesini
-    /// isteme (`sendVoiceRequest`) ile KARIŞTIRILMASIN, bu farklı bir şey:
-    /// kullanıcı konuştu, transkript metin olarak Grok'a gider (ücretsiz —
-    /// cihaz üstü konuşma tanıma), ses SADECE cihazda oynatılabilir bir
-    /// balon olarak kalır.
-    func sendUserVoice(transcript: String, audioURL: URL) {
-        let trimmed = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, !isSending, !isLoadingHistory else { return }
-        let cost = 1
-        // Kredi yetmiyorsa istek ATMA — paywall aç.
-        guard hasTokensOrPaywall(cost: cost) else { return }
-
-        let lastMessageAt = messages.last?.createdAt
-        let messageID = UUID()
-        let duration = (try? AVAudioPlayer(contentsOf: audioURL))?.duration ?? 0
-        let savedPath: String? = (try? Data(contentsOf: audioURL)).flatMap {
-            VoicePlayer.saveVoiceMessage($0, messageID: messageID)
-        }
-        let userMsg = Message(
-            id: messageID, role: .user, content: trimmed,
-            voiceLocalPath: savedPath, voiceDuration: duration
-        )
-        messages.append(userMsg)
-        LocalConversationStore.shared.appendMessage(userMsg, for: character.id, defaultLevel: relationshipLevel, defaultLevelProgress: levelProgress)
-        store?.chatCache[character.id] = realMessages()
-        NotificationScheduler.shared.noteUserSent(character: character)
-        messagesSentThisSession += 1
-        EventLogger.shared.log("message_sent", ["character_id": character.id, "kind": "voice"])
-        isSending = true
-        errorMessage = nil
-        deductBadgeOptimistically(cost)
-
-        Task {
-            await handleWakeUpIfAsleep()
-            await pause(TypingTiming.randomStartDelay())
-            showsTypingBubble = true
-            store?.setTyping(character.id, true)
-            let bubbleStartedAt = Date()
-
-            do {
-                let stored = LocalConversationStore.shared.load(for: character.id)
-                let result = try await service.sendWithLocalHistory(
-                    character: character,
-                    localMessages: realMessages(),
-                    summary: stored?.summary ?? "",
-                    userMessage: trimmed,
-                    level: relationshipLevel,
-                    lastMessageAt: lastMessageAt,
-                    currentActivity: currentActivity?.detail,
-                    nearSleepTime: isNearSleepTime()
-                )
-
-                await deliverSegments(result, bubbleStartedAt: bubbleStartedAt)
-                handleTokenBalance(result.tokenBalance)
-                applyPostReplyEffects(gotPhoto: nil, stored: stored,
-                                      serverLevel: result.level, serverProgress: result.levelProgress)
-
-                if result.wentToSleep { applyWentToSleep(fallback: stored) }
-                applyJealousyState(from: result, fallback: stored)
-                applyNicknames(from: result, fallback: stored)
-            } catch {
-                handleSendFailure(error, messageID: userMsg.id, refundsBadge: true)
-            }
-            isSending = false
-        }
     }
 
     /// Kullanıcının BOTA gönderdiği kendi fotoğrafı (kamera/kütüphane) —
@@ -1462,7 +1394,7 @@ final class ChatViewModel {
         store?.chatCache[character.id] = real
 
         // Kalıcılaştırma her mesaj eklemede senkron olarak MainActor'da çalışıp
-        // UI'ı takıyordu (bkz. çağrı yerleri: send/sendUserVoice/... hepsi bunu
+        // UI'ı takıyordu (bkz. çağrı yerleri: send/sendUserPhoto/... hepsi bunu
         // çağırır). Değer anlık görüntüsü (snapshot) yakalanır ve load+build+save
         // seri arka plan kuyruğunda yapılır — böylece gönderimde hitch olmaz,
         // yarış (race) da olmaz (snapshot değer-tipi + sıralı kuyruk).
