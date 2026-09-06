@@ -39,7 +39,7 @@ const IMAGE_ASPECT_RATIO = "9:16"; // docs.x.ai ile doğrulandı (2026-07): dest
 // unchanged. Reads the real CIVITAI_API Supabase secret — DELETE this block
 // and flip USE_CIVITAI back to false (or remove entirely) if reverting to
 // the xAI image path, or revert straight from git history.
-const USE_CIVITAI_FOR_TESTING = true;
+const USE_CIVITAI_FOR_TESTING = false;
 const CIVITAI_API_TOKEN_TEMP = Deno.env.get("CIVITAI_API") ?? "";
 const CIVITAI_ORCHESTRATION_URL = "https://orchestration.civitai.com/v2/consumer/workflows?wait=60";
 const CIVITAI_MODEL_URN = "urn:air:sdxl:checkpoint:civitai:139562@798204"; // RealVisXL V5.0 Lightning
@@ -603,7 +603,7 @@ Deno.serve(async (req: Request) => {
 
     const { data: character, error: charErr } = await db
       .from("characters")
-      .select("name, profession, tagline, category, builder_selections, photo_url, avatar_url")
+      .select("name, profession, tagline, category, builder_selections, photo_url, avatar_url, created_by")
       .eq("id", characterId)
       .maybeSingle();
     if (charErr || !character) return json({ error: "character not found" }, 400);
@@ -623,6 +623,59 @@ Deno.serve(async (req: Request) => {
     // reply instead of the normal photo-reaction caption (bkz.
     // IMAGE_REDIRECT_RULE) — never just silently swap the photo.
     let redirected = false;
+
+    // KULLANICI-YARATIMI KARAKTER (created_by dolu): sohbet-foto havuzu YOK
+    // (create-character yalnızca profil fotosunu character_photos'a aynalar —
+    // pool-only mantık her istekte AYNI profil fotosunu döndürüyordu, bkz.
+    // kullanıcı raporu 2026-09-05). Bunlar için HER istekte xAI ile taze foto
+    // üretilir: profil fotosu image-to-image baseline (yüz tutarlılığı),
+    // composeImagePrompt (Grok foto-yönetmeni, temp 0.8) her seferinde farklı
+    // sahne/kıyafet/poz/ışık uydurur → randomizasyon buradan gelir. Küratör/
+    // katalog karakterleri AŞAĞIDAKİ havuz mantığında hiç değişmeden kalır.
+    if (character.created_by != null) {
+      const imagePrompt = await composeImagePrompt({
+        appearance: appearanceContext({
+          name: character.name,
+          profession: character.profession,
+          tagline: character.tagline,
+          builderSelections: character.builder_selections ?? null,
+        }),
+        category,
+        userPrompt,
+        hasBaseline: baselineImageUrl !== null,
+        context: conversationContext(history, summary) + currentActivityContext(currentActivity),
+      });
+      try {
+        const [bytes, privacyResult] = await Promise.all([
+          fetchGeneratedImageBytes(imagePrompt, baselineImageUrl),
+          classifyPrivacy(imagePrompt),
+        ]);
+        photoUrl = await uploadGeneratedImage(bytes);
+        isPrivate = privacyResult;
+      } catch (e) {
+        console.error("chat-image generation failed, trying safe fallback prompt:", String(e));
+        try {
+          const safePrompt = await buildSafeFallbackPrompt(userPrompt, imagePrompt);
+          // Toned-down prompt WITH the baseline face first — only drop the
+          // baseline (face will NOT match) if that also fails (bkz.
+          // editsWithBaseline notu).
+          let bytes: Uint8Array;
+          try {
+            bytes = await fetchGeneratedImageBytes(safePrompt, baselineImageUrl);
+          } catch (baselineErr) {
+            if (!baselineImageUrl) throw baselineErr;
+            console.error("chat-image safe fallback (with baseline) also failed — referenceless, face will NOT match:", String(baselineErr));
+            bytes = await generateWithoutBaseline(safePrompt);
+          }
+          photoUrl = await uploadGeneratedImage(bytes);
+          isPrivate = false; // toned-down by construction
+          redirected = true;
+        } catch (e2) {
+          console.error("chat-image safe fallback also failed:", String(e2));
+          return json({ error: "image_generation_failed" }, 502);
+        }
+      }
+    } else {
 
     // Curated characters get a pre-uploaded in-chat photo pool
     // (character_photos) — try that FIRST, only fall through to actual
@@ -688,6 +741,7 @@ Deno.serve(async (req: Request) => {
     photoUrl = curatedMatch.url;
     // Gizlilik bilgisi foto satırında (küratör ayarladı) → classifyPrivacy GEREKMEZ.
     isPrivate = curatedMatch.is_private === true;
+    }
 
     // Konuşmayı bul ya da oluştur. upsert, not insert — conversations(user_id,
     // character_id) UNIQUE (bkz. chat/index.ts'deki aynı düzeltme).
