@@ -30,10 +30,6 @@ struct PlummApp: App {
                     // pendingChatCharacterName set ise (ONB5 bitti) MainTabView'e
                     // geç — onboarding TAM DA seçilen chat görününce complete olur
                     // (bkz. MainTabView.openPendingOnboardingChat).
-                    // Review mode (kokomombo) AÇIKSA onboarding'i TAMAMEN atla —
-                    // Apple inceleme akışı doğrudan ana sayfada başlar. Bayrak
-                    // splash'te tazelenir (bkz. ReviewModeService.fetchCharacters),
-                    // bu yüzden store.isLoaded olduğunda değer güncel.
                     if onboarding.isCompleted
                         || ReviewModeService.shared.isEnabled
                         || onboarding.pendingChatCharacterName != nil {
@@ -77,8 +73,6 @@ struct PlummApp: App {
                 // olsun, yani log NİHAİ durumu göstersin.
                 PurchaseService.shared.logEntitlementState("launch")
                 ImageCache.shared.evictIfNeeded()
-                // First-run feature tips — no-op until onboarding is done and
-                // never in review mode (bkz. PlummTips.configureIfEligible).
                 PlummTips.configureIfEligible(onboardingCompleted: onboarding.isCompleted)
             }
         }

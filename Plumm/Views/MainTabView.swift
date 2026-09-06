@@ -107,8 +107,7 @@ struct MainTabView: View {
     }
 
     /// Pro olmayan her kullanıcıya, uygulamaya her girişte (cold launch +
-    /// her foreground) paywall'ı gösterir — kokomombo (Apple review modu)
-    /// AÇIKSA hiç açılmaz, Pro olsa da olmasa da (bkz. kullanıcı talebi).
+    /// her foreground) paywall'ı gösterir.
     /// Onboarding'i YENİ bitiren kullanıcıda tetiklenmez — paywall'ı zaten
     /// ONB6'da gördü (bkz. openPendingOnboardingChat).
     /// Tier SUNUCUDAN gelene kadar bekleyip öyle karar verir.

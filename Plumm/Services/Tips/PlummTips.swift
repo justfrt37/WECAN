@@ -5,10 +5,6 @@
 //  (see configureIfEligible) so a new user is introduced to features gradually
 //  over their first week instead of all at once.
 //
-//  Configured ONLY after onboarding completes and never in review mode, so no
-//  tip can fire during the onboarding flow or an App Review walkthrough.
-//  (bkz. PlummApp — configureIfEligible çağrısı.)
-//
 
 import TipKit
 

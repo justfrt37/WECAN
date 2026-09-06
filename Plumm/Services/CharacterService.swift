@@ -8,8 +8,6 @@ import Foundation
 
 struct CharacterService {
     /// Tüm karakterleri çeker. Sıralama: eklenme tarihine göre.
-    /// `table`: normalde "characters"; Review Mode açıkken "characters_review"
-    /// gelir (bkz. ReviewModeService — tek karar noktası burası değil, oradadır).
     func fetchAll(table: String = "characters") async throws -> [Character] {
         let endpoint = "\(Config.supabaseURL)/rest/v1/\(table)?select=*&order=id.asc"
         guard let url = URL(string: endpoint) else { throw URLError(.badURL) }

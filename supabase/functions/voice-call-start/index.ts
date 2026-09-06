@@ -325,9 +325,6 @@ Deno.serve(async (req: Request) => {
     const { directive: fetchedDirective, memories, behaviors } =
       await fetchDirectiveMemoriesBehaviors(db, characterId, personalityRole, relationshipLevel, conversationId, memoryQueryText);
     const directive = reviewMode ? REVIEW_DIRECTIVE : fetchedDirective;
-    // Karakter tarifi ÖNCE, direktif sonra — chat/index.ts ile aynı sıra.
-    // reviewMode'da kimlik verilmiyor: o mod mağaza incelemesi için kasıtlı
-    // olarak nötr bir persona çalıştırıyor.
     const identity = reviewMode ? "" : (character?.system_prompt ?? "");
     let systemPrompt = identity ? `${identity}\n\n${directive}` : directive;
     systemPrompt += memoriesBlock(memories);

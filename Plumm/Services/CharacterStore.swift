@@ -119,8 +119,6 @@ final class CharacterStore {
         var fetched: [Character]?
         for attempt in 1...3 {
             do {
-                // Review Mode anahtarını da içerir: açıksa `characters_review`
-                // tablosundan çeker (bkz. ReviewModeService).
                 fetched = try await ReviewModeService.shared.fetchCharacters()
                 break
             } catch {

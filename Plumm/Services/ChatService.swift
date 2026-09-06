@@ -60,9 +60,6 @@ private struct ChatRequest: Codable {
     /// gönderebilirim" tarzı doğal bir yönlendirme cevabı yazmalı (bkz.
     /// chat/index.ts IMAGE_REDIRECT_RULE).
     let imageRedirected: Bool?
-    /// Review Mode (App Store inceleme) açıkken true — sunucu flört direktifini
-    /// atlayıp platonik/arkadaş-canlısı bir direktif uygular (bkz. ReviewModeService,
-    /// chat/index.ts). Varsayılan nil (memberwise init'i bozmaz).
     var reviewMode: Bool? = nil
     /// "Clear Chat" seçenekleri — sadece `clearConversation: true` ile
     /// birlikte anlamlı. bkz. ClearChatOptionsSheet, chat/index.ts clear branch.
@@ -713,7 +710,6 @@ struct ChatService {
 
         let body = ChatRequest(
             characterId: character.id.uuidString.lowercased(),
-            // Review mode açıkken flörtsüz/arkadaş-canlısı prompt (bkz. ReviewModeService).
             systemPrompt: ReviewModeService.systemPrompt(for: character),
             userMessage: userMessage,
             clientHistory: clientHistory,

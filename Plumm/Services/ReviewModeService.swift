@@ -1,31 +1,12 @@
-//
-
-//
-//        insert into app_config (key, bool_value) values ('kokomombo', false);
-//     REST okuma:
-//        GET /rest/v1/app_config?select=bool_value&key=eq.kokomombo
-//        → [{ "bool_value": true }]
-//
-//  2) Anahtar TRUE geldiğinde karakterler normal `characters` tablosu yerine
-//     `characters_review` tablosundan çekilir (AYNI şema, "güvenli" kızlar).
-//     FALSE veya belirlenemiyorsa → normal `characters`.
-//
-//  ───────────────────────────────────────────────────────────────────────────
-//
-
 import Foundation
 
 @MainActor
 final class ReviewModeService {
     static let shared = ReviewModeService()
 
-    /// Karakterlerin çekileceği tablolar.
     static let normalTable = "characters"
     static let reviewTable = "characters_review"
 
-    /// Son bilinen anahtar değeri (kalıcı, UserDefaults). Ağ cevabı gelene kadar
-    /// bununla karar veririz — böylece açılıştaki disk-önbellek gösterimi (bkz.
-    /// CharacterStore.load) doğru modla tutarlı olur.
     private(set) var isEnabled: Bool
     nonisolated private static let cacheKey = "review_mode.enabled.v1"
 
@@ -35,21 +16,12 @@ final class ReviewModeService {
         isEnabled = UserDefaults.standard.bool(forKey: Self.cacheKey)
     }
 
-    /// Review mode'a göre o an aktif tablo adı.
     var activeTable: String { isEnabled ? Self.reviewTable : Self.normalTable }
 
-    // MARK: - Sohbet promptu (review modda flörtsüz)
-
-    /// Ağ/aktör beklemeden okunabilen anlık flag (kalıcı UserDefaults). ChatService
-    /// gibi MainActor olmayan yerlerden senkron kullanılır.
     nonisolated static var isEnabledSnapshot: Bool {
         UserDefaults.standard.bool(forKey: cacheKey)
     }
 
-    /// Review mode AÇIKKEN sohbette gönderilecek system prompt: arkadaş-canlısı,
-    /// tamamen flörtsüz/platonik. KAPALIYKEN karakterin kendi promptu.
-    /// (Backend `chat` fonksiyonu ayrıca `reviewMode` bayrağıyla flört direktifini
-    /// atlar — çift güvence; bkz. supabase/functions/chat/index.ts.)
     nonisolated static func systemPrompt(for character: Character) -> String {
         guard isEnabledSnapshot else { return character.systemPrompt }
         return """
@@ -61,8 +33,6 @@ final class ReviewModeService {
         """
     }
 
-    /// Anahtarı backend'den tazeler + kalıcı önbelleğe yazar. Ağ hatasında son
-    /// bilinen değeri sessizce korur. Döndürdüğü değer güncel `isEnabled`.
     @discardableResult
     func refreshFlag() async -> Bool {
         if let value = await fetchFlag() {
@@ -72,14 +42,10 @@ final class ReviewModeService {
         return isEnabled
     }
 
-    /// Anahtarı tazeler VE doğru tablodan karakterleri çeker.
-    /// CharacterStore, `CharacterService.fetchAll()` yerine bunu çağırır.
     func fetchCharacters() async throws -> [Character] {
         await refreshFlag()
         return try await characterService.fetchAll(table: activeTable)
     }
-
-    // MARK: - Ağ
 
     private func fetchFlag() async -> Bool? {
         let endpoint = "\(Config.supabaseURL)/rest/v1/app_config?select=bool_value&key=eq.kokomombo"
