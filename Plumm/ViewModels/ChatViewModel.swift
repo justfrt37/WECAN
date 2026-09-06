@@ -95,7 +95,8 @@ final class ChatViewModel {
     /// havuzu yok/uygun değil. Artık Grok'tan foto ÜRETİLMİYOR (bkz. kullanıcı
     /// talebi), o yüzden havuz boşsa hata gösterilir.
     private func isNoPhotoError(_ error: Error) -> Bool {
-        if case ChatServiceError.badStatus(422, let body) = error, body.contains("no_photo_available") { return true }
+        if case ChatServiceError.badStatus(422, let body) = error,
+           body.contains("no_photo_available") || body.contains("review_mode_photo_blocked") { return true }
         return false
     }
     var isVisible = false

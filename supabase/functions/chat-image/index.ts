@@ -346,6 +346,7 @@ async function composeImagePrompt(opts: {
   userPrompt: string;
   hasBaseline: boolean;
   context: string;
+  reviewMode?: boolean;
 }): Promise<string> {
   // Stil kararı HER ZAMAN gerçek `category` alanından — bir görseli hiç
   // görmeyen metin modeline "resme bak, stilini anla" diye bırakılmaz (bkz.
@@ -355,6 +356,31 @@ async function composeImagePrompt(opts: {
   const fieldGuidance =
     (isRealistic ? realisticFieldGuidance() : styledFieldGuidance()) +
     (opts.hasBaseline ? baselineConsistencyNote() : "");
+
+  // App Store review modu: üretilen görsel KOŞULSUZ giyimli/wholesome olmalı.
+  // Bu blok, kullanıcının açık isteğini ve aşağıdaki PRIORITY RULE'u EZER.
+  const reviewSfwRule = opts.reviewMode
+    ? "\n\nMANDATORY CONTENT CONSTRAINT — this overrides EVERYTHING else, " +
+      "including the user's request and the PRIORITY RULE. The image must be " +
+      "completely wholesome, platonic, and non-sexual.\n" +
+      "- OUTFIT: modest everyday clothing that fully covers torso, chest, " +
+      "midriff, shoulders, and upper legs (e.g. a long-sleeve top with " +
+      "trousers, a jumper and jeans, or a knee-length casual dress). NEVER " +
+      "swimwear, bikini, lingerie, underwear, bra, crop top, low-cut or " +
+      "cleavage-revealing tops, bare midriff, mini-skirt, short shorts, " +
+      "towel, robe, or any unbuttoned / partially-removed / see-through " +
+      "clothing or state of undress.\n" +
+      "- POSE: ordinary and non-suggestive (standing, sitting normally, " +
+      "walking). No lying on a bed, no arched back, no chest/hip thrust, no " +
+      "come-hither or seductive posture.\n" +
+      "- FRAMING: a normal portrait or full-body shot; never framed on or " +
+      "emphasising chest, hips, or legs.\n" +
+      "- EXPRESSION: warm and friendly; never seductive, sultry, or " +
+      "half-lidded.\n" +
+      "If the user's request asks for anything revealing, intimate, or " +
+      "sexual, IGNORE that part entirely and depict the fully-clothed, " +
+      "wholesome version instead."
+    : "";
 
   const systemPrompt =
     "You are a professional photo director writing the exact prompt that will be " +
@@ -379,6 +405,7 @@ async function composeImagePrompt(opts: {
     "Calibration example of the required format and level of specificity " +
     "(different photo, for format reference only — do not reuse its content):\n" +
     FIELD_FORMAT_EXAMPLE +
+    reviewSfwRule +
     "\n\nNow evaluate the user's request below and write the final prompt in " +
     "this exact six-field format, tailored specifically to what they asked for. " +
     "Output ONLY the six labeled lines — no extra commentary, no quotes.\n\n" +
@@ -593,6 +620,10 @@ Deno.serve(async (req: Request) => {
     const history: { role: string; content: string }[] = Array.isArray(b.history) ? b.history : [];
     const summary: string | null = typeof b.summary === "string" ? b.summary : null;
     const currentActivity: string | null = typeof b.currentActivity === "string" ? b.currentActivity : null;
+    // App Store "review mode" (bkz. ReviewModeService / app_config.kokomombo):
+    // karakterler `characters_review` tablosundan gelir ve gönderilen HER foto
+    // zorla SFW üretilir (havuz kullanılmaz — review karakterlerinin havuzu yok).
+    const reviewMode: boolean = b.reviewMode === true;
     if (!characterId) return json({ error: "characterId required" }, 400);
     if (!userPrompt) return json({ error: "prompt required" }, 400);
 
@@ -602,7 +633,7 @@ Deno.serve(async (req: Request) => {
     if ((preCheckBalance?.balance ?? 0) < 25) return json({ error: "insufficient_tokens" }, 402);
 
     const { data: character, error: charErr } = await db
-      .from("characters")
+      .from(reviewMode ? "characters_review" : "characters")
       .select("name, profession, tagline, category, builder_selections, photo_url, avatar_url, created_by")
       .eq("id", characterId)
       .maybeSingle();
@@ -632,7 +663,11 @@ Deno.serve(async (req: Request) => {
     // composeImagePrompt (Grok foto-yönetmeni, temp 0.8) her seferinde farklı
     // sahne/kıyafet/poz/ışık uydurur → randomizasyon buradan gelir. Küratör/
     // katalog karakterleri AŞAĞIDAKİ havuz mantığında hiç değişmeden kalır.
-    if (character.created_by != null) {
+    // Review modunda (App Store): katalog havuzunu ATLA — review karakterlerinin
+    // `character_photos` satırı yok ve havuzdaki katalog fotoları SFW garanti
+    // etmiyor (açıklamalarda "lingerie"/"nude" var, is_private güvenilmez). Her
+    // foto zorla giyimli/SFW olarak taze üretilir (aşağıdaki generation dalı).
+    if (reviewMode || character.created_by != null) {
       const imagePrompt = await composeImagePrompt({
         appearance: appearanceContext({
           name: character.name,
@@ -644,14 +679,21 @@ Deno.serve(async (req: Request) => {
         userPrompt,
         hasBaseline: baselineImageUrl !== null,
         context: conversationContext(history, summary) + currentActivityContext(currentActivity),
+        reviewMode,
       });
       try {
         const [bytes, privacyResult] = await Promise.all([
           fetchGeneratedImageBytes(imagePrompt, baselineImageUrl),
           classifyPrivacy(imagePrompt),
         ]);
+        if (reviewMode && privacyResult) {
+          // Composer, SFW zorlamasına rağmen açık/mahrem okunan bir prompt
+          // yazdı → bu görseli TESLİM ETME. Aşağıdaki yumuşatma dalına düş
+          // (içerik-politikası reddiyle aynı yol).
+          throw new Error("review_mode_not_sfw");
+        }
         photoUrl = await uploadGeneratedImage(bytes);
-        isPrivate = privacyResult;
+        isPrivate = reviewMode ? false : privacyResult;
       } catch (e) {
         console.error("chat-image generation failed, trying safe fallback prompt:", String(e));
         try {
@@ -666,6 +708,11 @@ Deno.serve(async (req: Request) => {
             if (!baselineImageUrl) throw baselineErr;
             console.error("chat-image safe fallback (with baseline) also failed — referenceless, face will NOT match:", String(baselineErr));
             bytes = await generateWithoutBaseline(safePrompt);
+          }
+          if (reviewMode && await classifyPrivacy(safePrompt)) {
+            // Yumuşatılmış yeniden-yazım bile review modu için yeterince SFW
+            // değil → foto GÖNDERME, token DÜŞME (charge henüz yapılmadı).
+            return json({ error: "review_mode_photo_blocked" }, 422);
           }
           photoUrl = await uploadGeneratedImage(bytes);
           isPrivate = false; // toned-down by construction

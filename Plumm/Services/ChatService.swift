@@ -528,6 +528,9 @@ struct ChatService {
         /// fotoğrafın karakterin GERÇEK şu anki durumunu yansıtması için
         /// (ör. kanepede kitap okurken, iş kıyafeti/laboratuvar DEĞİL).
         let currentActivity: String?
+        /// App Store review modu (bkz. ReviewModeService / chat-image reviewMode):
+        /// sunucu karakteri `characters_review`'dan çeker ve fotoyu zorla SFW üretir.
+        let reviewMode: Bool?
     }
 
     private struct ChatImageResponse: Codable {
@@ -560,7 +563,8 @@ struct ChatService {
                 prompt: prompt,
                 history: wireHistory(from: localMessages),
                 summary: summary.isEmpty ? nil : summary,
-                currentActivity: currentActivity
+                currentActivity: currentActivity,
+                reviewMode: ReviewModeService.isEnabledSnapshot ? true : nil
             )
         )
 
