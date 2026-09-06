@@ -91,9 +91,19 @@ final class CharacterStore {
 
     /// Karakter listesinin diskteki önbelleği — her açılışta sunucuyu beklemeden
     /// aynı anda göstermek için (splash "yükleniyor" ekranında takılmasın diye).
-    private let cacheURL: URL = FileManager.default
-        .urls(for: .cachesDirectory, in: .userDomainMask)[0]
-        .appendingPathComponent("characters_cache.json")
+    ///
+    /// Dosya adı MODA göre ayrılır: review modu (`characters_review`) ile normal
+    /// roster ASLA aynı önbellek dosyasını paylaşmaz — yoksa moddan moda geçince
+    /// bir önceki modun listesi bir sonrakinde sızıyordu (App Store review'da
+    /// tam katalog görünüyordu).
+    private var cacheURL: URL {
+        let name = ReviewModeService.isEnabledSnapshot
+            ? "characters_cache_review.json"
+            : "characters_cache.json"
+        return FileManager.default
+            .urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent(name)
+    }
 
     /// Splash'te çağrılır. Hata olursa yedek (samples) ile devam eder ki
     /// uygulama boş ekranda takılmasın.
@@ -131,6 +141,11 @@ final class CharacterStore {
         if let fetched, !fetched.isEmpty {
             characters = fetched
             saveCachedCharacters(fetched)
+        } else if ReviewModeService.shared.isEnabled {
+            // Review modunda sunucu boş döndü / hata verdi — NORMAL roster'a
+            // ya da örnek karakterlere ASLA düşme (App Store review'da yasak
+            // içerik görünürdü). Boş liste, yanlış listeden iyidir.
+            characters = []
         } else if characters.isEmpty {
             characters = Character.samples
         }
