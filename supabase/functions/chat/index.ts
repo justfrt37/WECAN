@@ -1315,7 +1315,8 @@ Deno.serve(async (req: Request) => {
       if (!convo) return json({ ok: false, conversationId: null });
       const prompt: string = String(body.photoMessage.prompt ?? "");
       const url: string | null = typeof body.photoMessage.url === "string" ? body.photoMessage.url : null;
-      if (url) {
+      const reveal: boolean = body.photoMessage.reveal === true;
+      if (reveal) {
         // OLDEST unrevealed pending first (FIFO). The one-tap "send me a photo"
         // flow makes every image_pending row share the same generic prompt, so
         // matching newest-first revealed them out of order (bkz. kullanıcı
@@ -1328,10 +1329,16 @@ Deno.serve(async (req: Request) => {
             .select("id").eq("conversation_id", convo.id).eq("kind", "image_pending")
             .order("created_at", { ascending: true }).limit(1));
         }
-        if (pend && pend[0]) {
-          await db.from("messages").update({ content: url, kind: "image" }).eq("id", pend[0].id);
-        } else {
-          await db.from("messages").insert({ conversation_id: convo.id, role: "assistant", content: url, kind: "image" });
+        // `url` yoksa (üretim/yükleme başarısız oldu) var olan pending satıra
+        // DOKUNULMAZ — ama YENİ bir tane de eklenmez. Eskiden bu durumda "yeni
+        // istek" sanılıp sonsuz pending satırı birikiyordu (bkz. kullanıcı
+        // raporu kök nedeni: "fotoyu görsem bile okunmadı diyor").
+        if (url) {
+          if (pend && pend[0]) {
+            await db.from("messages").update({ content: url, kind: "image" }).eq("id", pend[0].id);
+          } else {
+            await db.from("messages").insert({ conversation_id: convo.id, role: "assistant", content: url, kind: "image" });
+          }
         }
       } else {
         await db.from("messages").insert({ conversation_id: convo.id, role: "user", content: prompt, kind: "image_request" });
@@ -1345,7 +1352,8 @@ Deno.serve(async (req: Request) => {
       if (!convo) return json({ ok: false, conversationId: null });
       const reqText: string = String(body.voiceMessage.requestText ?? "");
       const url: string | null = typeof body.voiceMessage.url === "string" ? body.voiceMessage.url : null;
-      if (url) {
+      const reveal: boolean = body.voiceMessage.reveal === true;
+      if (reveal) {
         // OLDEST unrevealed voice_pending first (FIFO) — the one-tap flow gives
         // every voice_pending the same generic requestText, so newest-first
         // revealed them out of order (same fix as image_pending above).
@@ -1357,10 +1365,16 @@ Deno.serve(async (req: Request) => {
             .select("id").eq("conversation_id", convo.id).eq("kind", "voice_pending")
             .order("created_at", { ascending: true }).limit(1));
         }
-        if (pend && pend[0]) {
-          await db.from("messages").update({ content: url, kind: "voice" }).eq("id", pend[0].id);
-        } else {
-          await db.from("messages").insert({ conversation_id: convo.id, role: "assistant", content: url, kind: "voice" });
+        // `url` yoksa (TTS ses yükleme başarısız oldu) var olan pending satıra
+        // DOKUNULMAZ — ama YENİ bir tane de eklenmez. Eskiden bu durumda "yeni
+        // istek" sanılıp sonsuz pending satırı birikiyordu (bkz. kullanıcı
+        // raporu kök nedeni: "sesi görsem bile okunmadı diyor").
+        if (url) {
+          if (pend && pend[0]) {
+            await db.from("messages").update({ content: url, kind: "voice" }).eq("id", pend[0].id);
+          } else {
+            await db.from("messages").insert({ conversation_id: convo.id, role: "assistant", content: url, kind: "voice" });
+          }
         }
       } else {
         await db.from("messages").insert({ conversation_id: convo.id, role: "user", content: reqText, kind: "voice_request" });

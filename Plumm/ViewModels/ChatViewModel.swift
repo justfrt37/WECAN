@@ -247,6 +247,9 @@ final class ChatViewModel {
     }
 
     func markReadNow() {
+        #if DEBUG
+        print("[UNREAD-DEBUG] markReadNow \(character.name): realAssistantCount=\(realAssistantCount) isVisible=\(isVisible) hasSyntheticOpening=\(hasSyntheticOpening) totalMessages=\(messages.count)")
+        #endif
         ReadTracker.setSeen(character.id, realAssistantCount)
     }
 
@@ -1007,7 +1010,7 @@ final class ChatViewModel {
                 // Sesi SUNUCUDA sakla: aynı requestText'li "kilitli" (voice_pending)
                 // satır gerçek sese (kind=voice, content=URL) çevrilir. Böylece chate
                 // tekrar girince METİN değil SES balonu görünür (foto ile simetrik).
-                await service.saveVoiceMessage(character: character, requestText: serverRequestText, url: voiceRemoteURL?.absoluteString)
+                await service.saveVoiceMessage(character: character, requestText: serverRequestText, url: voiceRemoteURL?.absoluteString, reveal: true)
 
                 applyPostReplyEffects(gotPhoto: nil, stored: stored)
             } catch {
@@ -1183,7 +1186,7 @@ final class ChatViewModel {
                 // hem açılmamış hem açılmış foto reload sonrası doğru durumda görünür.
                 // Caption turundan ÖNCE saklanır ki sıralama doğru olsun.
                 await service.savePhotoMessage(
-                    character: character, prompt: prompt, url: imageResult.url.absoluteString
+                    character: character, prompt: prompt, url: imageResult.url.absoluteString, reveal: true
                 )
 
                 // "Send me a photo" düğmesiyle düşen bir kutuysa ve eşlik mesajı
