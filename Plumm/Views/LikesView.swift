@@ -20,7 +20,8 @@ struct LikesView: View {
     private let columns = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
 
     /// Seni gerçekten beğenen karakterler (bkz. LikedByStore — günde bir kere
-    /// rastgele seçilir, bkz. NotificationScheduler.rescheduleLikedYou).
+    /// rastgele seçilir, bkz. NotificationScheduler.pickLikedYouIfDue — seçim
+    /// bildirim izninden BAĞIMSIZ, bu ekran bildirimler kapalıyken de dolar).
     /// Kullanıcı GERÇEKTEN cevap yazınca listeden düşer — botun ilk açılış
     /// mesajı enjekte edilir edilmez değil, yoksa kullanıcı fark etmeden kaybolur.
     ///

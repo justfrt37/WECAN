@@ -72,21 +72,21 @@ final class NotificationScheduler {
     /// bekleyen isteklerin de iptal edilebilmesi için birebir korunuyor.
     private static let likedYouID = "notif.liked.0"
 
-    /// Günde bir kere çağrılır (bkz. LikedByStore.isEligibleForPick) — seçilen
-    /// bot LikedByStore'a kalıcı olarak eklenir (bkz. LikesView), bir daha asla
-    /// tekrar seçilmez. Zaten seçilmiş botlar `eligible`den hariç tutulur.
-    func rescheduleLikedYou(characters: [Character]) {
-        guard LikedByStore.isEligibleForPick() else { return }
-        center.removePendingNotificationRequests(withIdentifiers: [Self.likedYouID])
+    /// Günün "seni beğendi" botunu seçer ve LikedByStore'a kalıcı yazar.
+    /// Seçilen bot bir daha asla seçilmez (zaten seçilmişler `eligible`den
+    /// hariç). Seçim yapıldıysa botu döndürür.
+    ///
+    /// BİLDİRİM İZNİNDEN BAĞIMSIZ, ve ayrı bir metot olmasının tek sebebi bu.
+    /// Eskiden seçim `rescheduleLikedYou` içindeydi, o da `onForeground`'un
+    /// `guard granted else { return }` bloğunun ARKASINDAYDI: bildirim izni
+    /// verilmemişse seçim hiç çalışmıyor, LikedByStore hiç dolmuyor ve
+    /// "Beğeniler" ekranı KALICI OLARAK BOŞ kalıyordu (bkz. kullanıcı raporu).
+    /// Beğeniler ekranı bir bildirim özelliği değil, uygulama içi bir ekran —
+    /// kendi başına dolmalı; bildirim yalnızca bunun üstüne binen ekstra.
+    @discardableResult
+    func pickLikedYouIfDue(characters: [Character]) -> Character? {
+        guard LikedByStore.isEligibleForPick() else { return nil }
         let alreadyLiked = LikedByStore.likedCharacterIDs()
-        // Saat aralığının ALT sınırını şu anki saate çek — aksi halde çekilen saat
-        // şu andan erkense iOS bildirimi YARINA atar ve günlük kilitle
-        // "bugün beğenildin" hiç ateşlenmez. Gece 22'den sonra bugünkü pencere
-        // kapandığı için bugüne çizelgelenecek bir şey yok, atla.
-        let currentHour = Calendar.current.component(.hour, from: Date())
-        let lower = max(currentHour, 9)
-        guard lower <= 22 else { return }
-        let hour = Int.random(in: lower...22)
         // Katalog botları arasından HİÇ konuşulmamış olanlar (yerel kaydı olmayan)
         // — yerel kayıt yoksa rutin/uyku bloğu da yok, bakılacak bir şey kalmıyor.
         let eligible = characters.filter { character in
@@ -94,13 +94,28 @@ final class NotificationScheduler {
                 LocalConversationStore.shared.load(for: character.id) == nil &&
                 !alreadyLiked.contains(character.id)
         }
-        guard let bot = eligible.randomElement() else { return }
+        guard let bot = eligible.randomElement() else { return nil }
         // Sonraki seçim YARININ penceresine (09:00) ötelenir — bu ekranın
         // semantiği "günde bir beğeni" (bkz. rescheduleMissedYou'daki aynı
         // günlük kilit). LikedByStore API'si serbest bir gecikme aldığı için
         // günlük kilidi burada süreyi vererek kuruyoruz.
         LikedByStore.recordLike(bot.id, nextPickDelay: Self.secondsUntilTomorrowWindow())
-        scheduleLikedYou(bot: bot, hour: hour)
+        return bot
+    }
+
+    /// Seçilmiş beğeni için bildirimi çizelgeler. SADECE bildirim tarafı —
+    /// seçimin kendisi pickLikedYouIfDue'da ve izne bakmaz.
+    func scheduleLikedYouNotification(for bot: Character) {
+        center.removePendingNotificationRequests(withIdentifiers: [Self.likedYouID])
+        // Saat aralığının ALT sınırını şu anki saate çek — aksi halde çekilen saat
+        // şu andan erkense iOS bildirimi YARINA atar ve günlük kilitle
+        // "bugün beğenildin" hiç ateşlenmez. Gece 22'den sonra bugünkü pencere
+        // kapandığı için çizelgelenecek bir şey yok: beğeninin KENDİSİ yine de
+        // kaydedilmiş durumda, sadece bildirimi çıkmıyor.
+        let currentHour = Calendar.current.component(.hour, from: Date())
+        let lower = max(currentHour, 9)
+        guard lower <= 22 else { return }
+        scheduleLikedYou(bot: bot, hour: Int.random(in: lower...22))
     }
 
     /// Yarının "beğenildin" penceresinin (09:00) başlangıcına kalan süre.
@@ -674,10 +689,14 @@ final class NotificationScheduler {
     }
 
     func onForeground(characters: [Character]) {
+        // Günün beğenisi İZİN KONTROLÜNDEN ÖNCE seçilir: "Beğeniler" ekranı
+        // bildirimler kapalıyken de dolmalı (bkz. pickLikedYouIfDue). Bildirim
+        // yalnızca izin varsa çizelgelenir.
+        let likedBot = pickLikedYouIfDue(characters: characters)
         hasPermission { [weak self] granted in
             guard granted else { return }
             self?.cancelLevelUpTimers()
-            self?.rescheduleLikedYou(characters: characters)
+            if let likedBot { self?.scheduleLikedYouNotification(for: likedBot) }
             self?.rescheduleGhosted(characters: characters)
             self?.armJealousyTimer(characters: characters)
             Task { await self?.rescheduleJealousyEscalation(characters: characters) }

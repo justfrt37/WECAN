@@ -2,7 +2,7 @@
 //  LikedByStore.swift
 //  "Who liked you" — device-local only, mirrors BlockedCharactersStore's pattern.
 //  One random eligible bot gets added every ~15-30 min (see NotificationScheduler
-//  .rescheduleLikedYou). Entries persist until the user actually replies to that
+//  .pickLikedYouIfDue). Entries persist until the user actually replies to that
 //  bot (see LikesView) — not just until the bot's opener line gets injected,
 //  so the liker doesn't vanish from Likes before the user notices them.
 //

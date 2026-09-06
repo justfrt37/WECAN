@@ -17,16 +17,45 @@ struct ExploreView: View {
     @State private var profileCharacter: Character?
     @State private var showCreate = false
 
-    /// Kategori filtresi uygulanmış liste (engellenenler hariç).
+    /// Kategori filtresi uygulanmış liste (engellenenler hariç), kullanıcının
+    /// KENDİ karakterleri en üstte.
     private var filtered: [Character] {
-        store.characters.filter { c in
+        let visible = store.characters.filter { c in
             guard !BlockedCharactersStore.isBlocked(c.id) else { return false }
-            return selectedCategory == .all || c.category == selectedCategory.rawValue
+            return selectedCategory.matches(c.category)
         }
+        // Kullanıcının kendi yarattığı karakterler HER ZAMAN en başta
+        // (bkz. kullanıcı talebi) — kendi karakterini 40+ katalog karakteri
+        // arasında aramak zorunda kalmasın.
+        //
+        // enumerated() + orijinal indeks karşılaştırması: Swift'in `sorted`ı
+        // KARARLI (stable) DEĞİL, yani düz bir `isUserCreated` karşılaştırması
+        // katalog karakterlerinin sunucudan gelen sırasını (id.asc) her
+        // render'da rastgele bozabilirdi.
+        return visible.enumerated()
+            .sorted { a, b in
+                if a.element.isUserCreated != b.element.isUserCreated { return a.element.isUserCreated }
+                return a.offset < b.offset
+            }
+            .map(\.element)
     }
 
     private let columns = [GridItem(.flexible(), spacing: 12),
                            GridItem(.flexible(), spacing: 12)]
+
+    /// Kartın profilini açar — ama önce karakteri O ANKİ listede kimliğinden
+    /// yeniden çözer.
+    ///
+    /// Kapanışın yakaladığı `character` değerine körü körüne güvenilmiyor:
+    /// hücre geri dönüşümü yüzünden eski listeye ait bir aksiyon ateşlenirse
+    /// (bkz. grid'deki `.id(selectedCategory)` notu) o karakter artık ekranda
+    /// GÖRÜNMÜYOR demektir — böyle bir durumda hiçbir şey açmamak, yanlış
+    /// karakteri açmaktan iyidir. Normal akışta bu arama her zaman eşleşir ve
+    /// davranış değişmez.
+    private func open(_ character: Character) {
+        guard let fresh = filtered.first(where: { $0.id == character.id }) else { return }
+        profileCharacter = fresh
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -34,7 +63,20 @@ struct ExploreView: View {
             ScrollView {
                 VStack(spacing: 16) {
                     pills
+                        // Pill satırı grid'in ÜSTÜNDE kalsın ve dokunuşu
+                        // kendisi yutsun — kategori değişimi sırasında altta
+                        // yeniden kurulan kartlara dokunuş sızmasın.
+                        .contentShape(Rectangle())
+                        .zIndex(1)
                     grid
+                        // Kategori değişince grid'in görünüm KİMLİĞİ de değişir:
+                        // LazyVGrid hücreleri geri dönüştürmek yerine sıfırdan
+                        // kurar. Aksi halde eski listeye ait bir hücre (ve onun
+                        // aksiyon kapanışı) yeni listede yaşamaya devam
+                        // edebiliyor — "Kurgusal'a basınca Realistic olan Ivy'nin
+                        // kartı açılıyor" raporunun bilinen mekanizması bu
+                        // (Ivy, "Tümü" listesinin İLK kartıydı).
+                        .id(selectedCategory)
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 4)
@@ -113,7 +155,7 @@ struct ExploreView: View {
                 .popoverTip(CreateCharacterTip(), arrowEdge: .top)
             ForEach(filtered) { character in
                 Button {
-                    profileCharacter = character
+                    open(character)
                 } label: {
                     CharacterGridCard(character: character)
                 }
@@ -241,6 +283,29 @@ enum ExploreCategory: String, CaseIterable, Identifiable {
     case fictional = "Fictional"
 
     var id: String { rawValue }
+
+    /// Bir karakterin `category` alanı bu sekmeye ait mi.
+    ///
+    /// Düz `==` DEĞİL, üç sebeple: (1) büyük/küçük harf ve baştaki/sondaki
+    /// boşluk farkları eşleşmeyi sessizce bozuyordu, (2) eski taksonomiden
+    /// kalan "Fantasy"/"Anime"/"Sci-Fi" değerleri artık tek "Fictional"
+    /// sekmesinde toplanıyor ama bu değerler hem eski satırlarda hem de
+    /// istemcinin disk önbelleğinde (characters_cache.json) hâlâ duruyor
+    /// olabilir, (3) kategorisi boş/bilinmeyen bir karakter hiçbir sekmede
+    /// kaybolmasın diye "Realistic" sayılıyor (varsayılan kategori odur).
+    func matches(_ raw: String?) -> Bool {
+        if self == .all { return true }
+        let value = (raw ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        switch value {
+        case "fictional", "fantasy", "anime", "sci-fi", "scifi", "science fiction":
+            return self == .fictional
+        case "realistic", "":
+            return self == .realistic
+        default:
+            return value == rawValue.lowercased()
+        }
+    }
+
     var title: String {
         switch self {
         case .all: return String(localized: "All")
