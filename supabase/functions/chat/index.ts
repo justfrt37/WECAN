@@ -35,6 +35,7 @@ import {
   type NewMemory,
 } from "../_shared/directiveHelpers.ts";
 import { NO_ACKNOWLEDGEMENT_RULE } from "../_shared/promptRules.ts";
+import { resolveReviewMode } from "../_shared/reviewMode.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -1136,7 +1137,9 @@ Deno.serve(async (req: Request) => {
     const characterId: string = body.characterId;
     const systemPrompt: string = body.systemPrompt ?? "";
     const userMessage: string | undefined = body.userMessage;
-    const reviewMode: boolean = body.reviewMode === true;
+    // Server-authoritative review mode (bkz. _shared/reviewMode.ts) — a binary
+    // already in App Review may not send `reviewMode`, so trust app_config.
+    const reviewMode: boolean = await resolveReviewMode(db, body.reviewMode);
 
     if (body.clearConversation === true) {
       const keepLevel: boolean = body.keepLevel === true;

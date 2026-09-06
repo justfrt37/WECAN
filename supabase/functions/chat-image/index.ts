@@ -27,6 +27,7 @@ const corsHeaders = {
 
 const XAI_API_KEY = Deno.env.get("XAI_API_KEY") ?? "";
 import { callLLM } from "../_shared/llm.ts";
+import { resolveReviewMode } from "../_shared/reviewMode.ts";
 const TEXT_MODEL = "grok-4.3";
 
 const XAI_IMAGE_GENERATIONS_URL = "https://api.x.ai/v1/images/generations";
@@ -628,10 +629,12 @@ Deno.serve(async (req: Request) => {
     const history: { role: string; content: string }[] = Array.isArray(b.history) ? b.history : [];
     const summary: string | null = typeof b.summary === "string" ? b.summary : null;
     const currentActivity: string | null = typeof b.currentActivity === "string" ? b.currentActivity : null;
-    // App Store "review mode" (bkz. ReviewModeService / app_config.kokomombo):
-    // karakterler `characters_review` tablosundan gelir ve gönderilen HER foto
-    // zorla SFW üretilir (havuz kullanılmaz — review karakterlerinin havuzu yok).
-    const reviewMode: boolean = b.reviewMode === true;
+    // App Store "review mode" (bkz. app_config.kokomombo): karakterler
+    // `characters_review` tablosundan gelir ve gönderilen HER foto zorla SFW
+    // üretilir (havuz kullanılmaz — review karakterlerinin havuzu yok).
+    // SUNUCU-OTORİTER: DB flag'i esas alınır — App Review'daki eski binary
+    // `reviewMode` göndermeyebilir (bkz. _shared/reviewMode.ts).
+    const reviewMode: boolean = await resolveReviewMode(db, b.reviewMode);
     if (!characterId) return json({ error: "characterId required" }, 400);
     if (!userPrompt) return json({ error: "prompt required" }, 400);
 

@@ -16,6 +16,7 @@ import {
   fetchDirectiveMemoriesBehaviors, memoriesBlock, behaviorsBlock, REVIEW_DIRECTIVE,
 } from "../_shared/directiveHelpers.ts";
 import { elevenVoiceIdFor } from "../_shared/elevenVoiceMap.ts";
+import { resolveReviewMode } from "../_shared/reviewMode.ts";
 import { callVoiceSettingsFor } from "../_shared/elevenVoiceSettings.ts";
 import { requireVoiceEntitlement } from "../_shared/entitlements.ts";
 import { V3_AUDIO_TAGS, stripUnknownAudioTags } from "../_shared/voiceTags.ts";
@@ -273,7 +274,9 @@ Deno.serve(async (req: Request) => {
 
     const body = await req.json();
     const characterId: string = body.characterId;
-    const reviewMode: boolean = body.reviewMode === true;
+    // Server-authoritative review mode (bkz. _shared/reviewMode.ts) — a binary
+    // already in App Review may not send `reviewMode`, so trust app_config.
+    const reviewMode: boolean = await resolveReviewMode(db, body.reviewMode);
     const language: string = body.language ?? "en";
     if (!characterId) return json({ error: "characterId required" }, 400);
     if (!ELEVENLABS_AGENT_ID) return json({ error: "ELEVENLABS_AGENT_ID not configured" }, 500);
@@ -298,7 +301,7 @@ Deno.serve(async (req: Request) => {
     // boş (API'den doğrulandı), dolayısıyla başka bir yerden de gelmiyordu.
     // Sohbet tarafı (chat/index.ts) hep `ch.system_prompt + directive`
     // gönderiyordu; arama tarafı yıllardır jenerik bir personaydı.
-    const { data: character } = await db.from("characters")
+    const { data: character } = await db.from(reviewMode ? "characters_review" : "characters")
       .select("personality_role, voice_id, builder_selections, system_prompt").eq("id", characterId).maybeSingle();
     const personalityRole: string = character?.personality_role ?? "flirty";
     const vibe: string = (character?.builder_selections as { vibe?: string } | null)?.vibe ?? "Sweet";
