@@ -773,16 +773,22 @@ final class ChatViewModel {
         store?.setTyping(character.id, false)
     }
 
-    /// Düğme etiketini yerel bir kullanıcı mesajı olarak ekler — ekranda görünür
-    /// ve LocalConversationStore'a yazılır (bir sonraki gerçek `send()`'in
-    /// `realMessages()` geçmişine dahil olur), ama sunucuya AYRI bir istek
-    /// gönderilmez.
+    /// Düğme etiketini bir kullanıcı mesajı olarak ekler — ekranda anında
+    /// görünür, ve SUNUCUDA da kalıcılaştırılır (injectProactive, role: user) —
+    /// aksi halde LocalConversationStore artık kalıcı olmadığından (bkz. "sıfır
+    /// yerel" mimarisi) uygulama kapat-aç sonrası bu satır kayboluyordu (bkz.
+    /// kullanıcı raporu).
     private func appendLocalMediaRequestLine(_ text: String) {
         let msg = Message(role: .user, content: text)
         messages.append(msg)
         LocalConversationStore.shared.appendMessage(msg, for: character.id, defaultLevel: relationshipLevel, defaultLevelProgress: levelProgress)
         updateCache()
         NotificationScheduler.shared.noteUserSent(character: character)
+        Task {
+            await service.injectProactiveMessage(
+                character: character, kind: "media_request", text: text, createIfMissing: false, role: "user"
+            )
+        }
     }
 
     /// Kilitli sesli mesaj balonunu ekler — hem düğme akışı (`sendVoiceRequest`,
@@ -996,14 +1002,20 @@ final class ChatViewModel {
     /// Kalıcı değil — uygulama yeniden açılırsa kaybolur (kabul edilebilir).
     private var pendingPhotoAfterLines: [UUID: String] = [:]
 
-    /// Botun sohbete düşürdüğü kısa yerel mesaj — ekranda görünür ve
-    /// LocalConversationStore'a yazılır (geçmiş bağlamına dahil), sunucuya
-    /// ayrı bir istek gitmez.
+    /// Botun sohbete düşürdüğü kısa eşlik mesajı ("bi saniye…" / "işte 😊") —
+    /// ekranda anında görünür, ve SUNUCUDA da kalıcılaştırılır (injectProactive) —
+    /// aksi halde LocalConversationStore artık kalıcı olmadığından uygulama
+    /// kapat-aç sonrası bu satır kayboluyordu (bkz. kullanıcı raporu).
     private func appendBotLine(_ text: String) {
         let msg = Message(role: .assistant, content: text)
         messages.append(msg)
         LocalConversationStore.shared.appendMessage(msg, for: character.id, defaultLevel: relationshipLevel, defaultLevelProgress: levelProgress)
         updateCache()
+        Task {
+            await service.injectProactiveMessage(
+                character: character, kind: "media_accompany", text: text, createIfMissing: false
+            )
+        }
     }
 
     /// Kilitli foto balonunu ekler — hem düğme akışı (`sendImageRequest`) hem

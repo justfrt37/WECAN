@@ -1282,6 +1282,10 @@ Deno.serve(async (req: Request) => {
       const createIfMissing: boolean = body.injectProactive.createIfMissing === true;
       const messageKind: string = typeof body.injectProactive.messageKind === "string"
         ? body.injectProactive.messageKind : "text";
+      // Varsayılan "assistant" (proaktif bot bildirimleri) — client-only
+      // satırları (bkz. appendBotLine/appendLocalMediaRequestLine) da bu
+      // endpoint'e taşındığından kullanıcı rolüyle de eklenebilmesi lazım.
+      const role: string = body.injectProactive.role === "user" ? "user" : "assistant";
       if (!text.trim()) return json({ injected: false, conversationId: convo?.id ?? null });
       if (!convo) {
         if (!createIfMissing) return json({ injected: false, conversationId: null });
@@ -1294,7 +1298,7 @@ Deno.serve(async (req: Request) => {
         await seedDefaultUserGenderMemory(convo.id);
       }
       await db.from("messages").insert([
-        { conversation_id: convo.id, role: "assistant", content: text, kind: messageKind },
+        { conversation_id: convo.id, role, content: text, kind: messageKind },
       ]);
       const proactiveUpdate: Record<string, unknown> = { updated_at: new Date().toISOString() };
       if (kind === "ghosted") proactiveUpdate.ghosted_at = new Date().toISOString();
@@ -1476,6 +1480,10 @@ Deno.serve(async (req: Request) => {
       );
 
       await db.from("character_photos").update({ reacted: true }).eq("id", photoRow.id);
+      // Bu satır DAHA ÖNCE kaydedilmiyordu — app kapat-aç sonrası kayboluyordu
+      // (bkz. kullanıcı raporu: "chatteki her şey backend'de kalıcı olmalı").
+      await db.from("messages").insert({ conversation_id: conversationId, role: "assistant", content: reactionReply, kind: "text" });
+      await db.from("conversations").update({ updated_at: new Date().toISOString() }).eq("id", conversationId);
 
       return json({ reply: reactionReply });
     }

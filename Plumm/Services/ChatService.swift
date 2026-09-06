@@ -341,6 +341,10 @@ struct ChatService {
         /// Saklanacak mesajın DB `kind`'i ("text" | "image"). Üretilmiş fotoğraf
         /// mesajlarını kalıcılaştırmak için "image" gönderilir (bkz. generatePendingImage).
         let messageKind: String?
+        /// "assistant" (varsayılan, proaktif bildirimler) | "user" — kullanıcının
+        /// düğmeyle attığı "Send me a photo/voice" satırını da bu endpoint'ten
+        /// kalıcılaştırmak için (bkz. appendLocalMediaRequestLine).
+        let role: String?
     }
     private struct InjectProactiveRequest: Codable {
         let characterId: String
@@ -359,12 +363,12 @@ struct ChatService {
     /// (liked / firstHello) için true — silinmiş sohbeti DİRİLTMEMEK için diğer
     /// bildirimlerde false (var olmayan sohbete yazmaz). Dönen: mesaj eklendi mi.
     @discardableResult
-    func injectProactiveMessage(character: Character, kind: String, text: String, createIfMissing: Bool, messageKind: String = "text") async -> Bool {
+    func injectProactiveMessage(character: Character, kind: String, text: String, createIfMissing: Bool, messageKind: String = "text", role: String = "assistant") async -> Bool {
         var request = authorizedRequest(url: Config.chatFunctionURL, timeout: 20)
         guard let body = try? JSONEncoder().encode(InjectProactiveRequest(
             characterId: character.id.uuidString.lowercased(),
             systemPrompt: character.systemPrompt,
-            injectProactive: InjectProactivePayload(kind: kind, text: text, createIfMissing: createIfMissing, messageKind: messageKind)
+            injectProactive: InjectProactivePayload(kind: kind, text: text, createIfMissing: createIfMissing, messageKind: messageKind, role: role)
         )) else { return false }
         request.httpBody = body
         guard let (data, response) = try? await URLSession.shared.data(for: request),
