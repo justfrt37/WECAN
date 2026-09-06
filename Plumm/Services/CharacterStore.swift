@@ -268,8 +268,17 @@ final class CharacterStore {
             // yeni eklenmiş (ör. az önce yaratılmış) karakterleri KORU. Eskiden
             // tam değiştirme (`characters = fetched`) bunları her öne gelişte
             // düşürüyordu (bkz. CreateCharacterView.createCharacter).
+            //
+            // SADECE kullanıcı-yaratımı karakterler korunur: küratör (server)
+            // karakterleri HER ZAMAN `fetched` içinden gelir; `fetched`'te
+            // olmayan bir küratör karakteri ya silinmiştir ya da aktif tablo
+            // değişmiştir (review modu aç/kapa → `characters` vs
+            // `characters_review`). Eski id-only filtre, review moduna
+            // geçince normal roster'ın tamamını "localOnly" sanıp geri
+            // ekliyordu (10 review + 44 normal = 54 karakter, hem de disk
+            // önbelleğini zehirliyordu).
             let fetchedIDs = Set(fetched.map { $0.id })
-            let localOnly = characters.filter { !fetchedIDs.contains($0.id) }
+            let localOnly = characters.filter { !fetchedIDs.contains($0.id) && $0.isUserCreated }
             characters = fetched + localOnly
             saveCachedCharacters(characters)
         }
