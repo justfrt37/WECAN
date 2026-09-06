@@ -751,6 +751,16 @@ private struct ChatBubble: View {
     /// ChatViewModel.generatePendingImage'ın hemen sonrası).
     @State private var imageRevealed = false
 
+    /// `/generated/` (xAI, anlık üretim) 3:4 gerçek oranında — 9:16 zorlanınca
+    /// model vücudu/yüzü uzatıp inceltiyordu (bkz. chat-image/index.ts).
+    /// `/curated/` (önceden çekilmiş galeri fotoğrafları) gerçekten 9:16 —
+    /// onları 3:4 kutuya sıkıştırmak sadece gereksiz boşluk yaratır, bozulma
+    /// yaratmaz ama en iyisi kendi doğal oranında göstermek. Şema/DB
+    /// değişikliği gerekmiyor: kaynak zaten URL yolundan ayırt edilebiliyor.
+    private func photoBubbleHeight(for url: URL) -> CGFloat {
+        url.path.contains("/generated/") ? 293 : 390
+    }
+
     var body: some View {
         HStack(alignment: .bottom, spacing: 6) {
             if message.isUser { Spacer(minLength: 50) }
@@ -816,11 +826,15 @@ private struct ChatBubble: View {
                 // Foto mesajı (kızın gönderdiği fotoğraf) — WhatsApp tarzı KÜÇÜK
                 // önizleme kutusu. İlk gelişte bulanık + "Tap to view" — ilk
                 // dokunuş sadece bulanıklığı açar, sonraki dokunuş tam ekranı açar.
-                // Aspect ratio KORUNARAK gösterilir: üretilen fotolar 3:4 (bkz.
-                // chat-image/index.ts — 9:16 zorlanınca xAI vücudu/yüzü uzatıp
-                // inceltiyordu, kaldırıldı) — balon da 3:4 kutu + scaledToFit →
-                // foto KIRPILMAZ/GERİLMEZ, tam hâli doğru oranıyla görünür. Tam
-                // hâli yine tam ekranda da açılır (onTapImage).
+                // Aspect ratio KORUNARAK gösterilir, ama kaynak URL'e göre İKİ
+                // FARKLI oran var: `/generated/` (xAI, üretim anında) 3:4 —
+                // 9:16 zorlanınca xAI vücudu/yüzü uzatıp inceltiyordu, kaldırıldı
+                // (bkz. chat-image/index.ts). `/curated/` (önceden çekilmiş
+                // gerçek galeri fotoğrafları) hâlâ gerçekten 9:16, onları 3:4
+                // kutuya sıkıştırmak gereksiz boşluk yaratırdı — bkz.
+                // photoBubbleHeight. scaledToFit → foto hiçbir durumda KIRPILMAZ/
+                // GERİLMEZ, tam hâli doğru oranıyla görünür. Tam hâli yine tam
+                // ekranda da açılır (onTapImage).
                 ZStack {
                     CachedImage(url: imageURL) { img in
                         img.resizable().scaledToFit()
@@ -831,7 +845,7 @@ private struct ChatBubble: View {
                             ProgressView().tint(.white)
                         }
                     }
-                    .frame(width: 220, height: 293)
+                    .frame(width: 220, height: photoBubbleHeight(for: imageURL))
                     .blur(radius: imageRevealed ? 0 : 26)
 
                     if !imageRevealed {
@@ -843,7 +857,7 @@ private struct ChatBubble: View {
                             .background(.white, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                     }
                 }
-                .frame(width: 220, height: 293)
+                .frame(width: 220, height: photoBubbleHeight(for: imageURL))
                 .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                 .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(.white.opacity(0.1), lineWidth: 1))
                 .onTapGesture {
