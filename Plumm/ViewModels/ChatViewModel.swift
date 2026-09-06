@@ -866,6 +866,7 @@ final class ChatViewModel {
         messages.append(pendingMsg)
         LocalConversationStore.shared.appendMessage(pendingMsg, for: character.id, defaultLevel: relationshipLevel, defaultLevelProgress: levelProgress)
         store?.chatCache[character.id] = realMessages()
+        if isVisible { markReadNow() }
 
         // "Kilitli/açılmamış" sesi SUNUCUDA sakla (foto isteğindeki gibi) — üretmeden
         // çıkıp girse bile kilitli ses balonu olarak geri gelir (kind=voice_pending).
@@ -1111,6 +1112,7 @@ final class ChatViewModel {
         func drop() {
             messages.append(Message(id: pendingID, role: .assistant, content: "", pendingImagePrompt: prompt))
             updateCache()
+            if isVisible { markReadNow() }
             Task {
                 // Açılmamış (kilitli) foto'yu SUNUCUDA sakla — üretmeden çıkıp
                 // girse bile "üret" balonu olarak geri gelsin.
