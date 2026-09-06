@@ -34,6 +34,7 @@ import {
   REVIEW_DIRECTIVE,
   type NewMemory,
 } from "../_shared/directiveHelpers.ts";
+import { NO_ACKNOWLEDGEMENT_RULE } from "../_shared/promptRules.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -208,6 +209,22 @@ const STAGE_VERB_STEMS = [
   "smoke", "sip", "exhale", "inhale", "purr", "pout", "scoff",
 ];
 const STAGE_VERB_RE = new RegExp(`^(?:${STAGE_VERB_STEMS.join("|")})(?:s|es|ing)?$`, "i");
+
+// Cevabın BAŞINDAKİ onay kelimesini keser. NO_ACKNOWLEDGEMENT_RULE bunu
+// promptla yasaklıyor; bu ise ağdan geçeni yakalayan ikinci ağ. Canlı rapor:
+// mesajlar "Noted…", "Duly noted…" diye açılıyordu — bir AI asistanının
+// refleksi, karakterin değil.
+//
+// Sadece BAŞTAKİ kelime ve ardından gelen noktalama silinir; cümlenin geri
+// kalanı korunur. Geriye bir şey kalmıyorsa dokunulmaz (tek kelimelik "tamam"
+// cevabı meşru olabilir — "tamam, geliyorum" ile "tamam." farklı şeyler).
+const ACK_OPENERS =
+  /^(?:duly\s+noted|noted|understood|acknowledged|got\s+it|sure\s+thing|of\s+course|will\s+do|anla[sş][ıi]ld[ıi]|tamamd[ıi]r|not\s+al[ıi]nd[ıi]|elbette|entendido|compris|verstanden)\s*[.,!:…-]+\s*/iu;
+
+function stripAckOpener(text: string): string {
+  const stripped = text.replace(ACK_OPENERS, "");
+  return stripped.trim().length > 0 ? stripped : text;
+}
 
 function stripStageDirections(text: string): string {
   return text
@@ -1475,6 +1492,10 @@ Deno.serve(async (req: Request) => {
     system += VARIATION_RULE;
     system += CONTINUITY_RULE;
     system += ANTI_LEAK_RULE;
+    // turnContext'in köşeli parantezli blokları kullanıcı mesajının sonuna
+    // ekleniyor; bu kural olmadan model onlara "Noted…" diye cevap veriyor
+    // (bkz. promptRules.ts).
+    system += NO_ACKNOWLEDGEMENT_RULE;
     if (!reviewMode) {
       system += CONTENT_BOUNDARIES_RULE;
       system += levelBehaviorDirective(currentLevel);
@@ -1651,8 +1672,8 @@ Deno.serve(async (req: Request) => {
     // Voice and text diverge here on purpose — see sanitizeVoiceReply for why
     // square brackets must survive in one path and die in the other.
     const reply = voiceChat
-      ? collapseNewlines(sanitizeVoiceReply(mediaCleanedReply))
-      : collapseNewlines(stripStageDirections(mediaCleanedReply));
+      ? collapseNewlines(sanitizeVoiceReply(stripAckOpener(mediaCleanedReply)))
+      : collapseNewlines(stripStageDirections(stripAckOpener(mediaCleanedReply)));
 
     let tokenBalanceAfterCharge: number | undefined;
     if (!voiceChat && !imageReactionChat) {

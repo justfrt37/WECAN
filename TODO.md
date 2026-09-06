@@ -7,7 +7,7 @@
 > kuralı uygular: önce ne bittiğini kontrol et, bitenleri buradan çıkar, sadece
 > gerçekten açık kalanları/gündeme gelip ertelenenleri bırak.
 
-Son güncelleme: 2026-08-29.
+Son güncelleme: 2026-09-06.
 
 ---
 
@@ -30,22 +30,55 @@ Bugüne kadar: banka bilgisi girildi (İş Bankası — Apple'ın TR ödeme dizi
 yok, bu yüzden Garanti/Ziraat gibi bir banka gerekebilir), tax formları
 gönderildi.
 
-### 2. Sesli arama bağlanmıyor
-`voice-call-start`'ın 4. adımı (ElevenLabs conversation token) 502 ile
-patlıyor. Karakterlerin `voice_id`'siyle ilgisi yok — token isteği sadece
-agent ID + API key kullanıyor. Olasılıklar: agent silinmiş (404) / kota
-bitmiş (429) / key geçersiz (401).
-**Gereken:** `ELEVEN_LABS` secret'ının güncel/geçerli olduğunu doğrula, ya da:
-```bash
-curl -s -o /dev/null -w '%{http_code}\n' -H "xi-api-key: KEY" \
-  "https://api.elevenlabs.io/v1/convai/conversation/token?agent_id=agent_5701kyp1mydkfqnsfn9zw0c2jbqn"
-```
-Loglar: https://supabase.com/dashboard/project/ohpvhgwjmrfjclnumgnm/functions/voice-call-start/logs
-
 ### 3. Silinmiş ElevenLabs sesi var mı — bilinmiyor
 Ses havuzlarındaki (`elevenVoiceMap.ts`) ~22 ses ID'sinin hesapta hâlâ var
 olup olmadığı doğrulanmadı. Hazır script: `scratchpad/check_voices.sh`
 (`ELEVEN_LABS=<key> ./check_voices.sh`).
+
+---
+
+## 🟠 Kodu yazıldı, DEPLOY EDİLMEDİ (2026-09-06)
+
+Edge function'ların hepsi deploy edildi (chat v139, voice-call-start v28,
+voice-call-end v19, voice-call-llm-webhook v15, character-schedule v24).
+Aşağıdakiler bu makineden yapılamadı:
+
+### A. iOS uygulaması — satın alma hata mesajları
+`PurchaseService` + 3 paywall değişti (bkz. commit): App Store hesap
+doğrulaması patladığında artık `.storeAuthProblem` dönüyor ve kullanıcıya
+mesaj gösteriliyor; abonelik paywall'ları eskiden BAŞARISIZLIKTA hiçbir şey
+demeden kapanıyordu. Xcode'da derleniyor (`xcodebuild ... build` temiz).
+**Gereken:** yeni build alınıp TestFlight'a gönderilmeli.
+
+### B. ElevenLabs ajan ayarları — `ELEVEN_LABS` anahtarı gerekiyor
+Ajan: `agent_5701kyp1mydkfqnsfn9zw0c2jbqn` (Supabase'de `ELEVENLABS_AGENT_ID`
+secret'ı YOK, yani `voice-call-start`'taki hardcoded değer kullanılıyor).
+Ajan tarafındaki ayarlar repoda değil, üçü de elle set edilmeli — hazır
+script: `scripts/elevenlabs-agent.sh`.
+
+```bash
+ELEVEN_LABS=<key> scripts/elevenlabs-agent.sh get     # önce durumu oku
+ELEVEN_LABS=<key> scripts/elevenlabs-agent.sh raw     # language_presets tam hali
+ELEVEN_LABS=<key> scripts/elevenlabs-agent.sh set-model eleven_v3_conversational
+ELEVEN_LABS=<key> scripts/elevenlabs-agent.sh set-turn-timeout 10
+```
+
+1. **TTS modeli `eleven_v3_conversational` olmalı — hem EN hem TR.** Ses
+   etiketleri ([laughs], [whispers]) SADECE bu modelde performansa dönüşüyor;
+   flash/multilingual v2.5 onları KELİME olarak okuyor. ElevenLabs dokümanı
+   "additional languages switch the agent to use the v2.5 Multilingual model,
+   English will always use the v2 model" diyor — yani ajanda `tr` ek dil
+   olarak tanımlıysa Türkçe aramalar model_id'yi görmezden gelip v2.5'e
+   düşüyor olabilir. `language_presets` bu yüzden `raw` ile kontrol edilmeli;
+   gerekirse Türkçe preset'i içinde de model set edilmeli.
+2. **`turn_timeout` 10 saniye olmalı.** Kod tarafındaki re-engage promptu
+   ("about ten seconds", `voice-call-llm-webhook`) bu değere göre yazıldı;
+   biri değişirse diğeri de değişmeli.
+3. **Override izinleri kontrol edilmeli.** `get` çıktısındaki "İzin verilen
+   override'lar" bloğunda `tts.voice_id`, `tts.stability`, `tts.speed`,
+   `prompt.prompt`, `first_message`, `language` açık olmalı. `voice_id`
+   kapalıysa BÜTÜN karakterler ajanın varsayılan sesiyle konuşur — karakter
+   başına ses seçimi (`elevenVoiceMap.ts`) tamamen devre dışı kalır.
 
 ---
 
@@ -131,13 +164,15 @@ artık kırılmıyor ama taksonomi ikiliği duruyor.
 - ASC API key: `~/Downloads/AuthKey_72VZJFJ9JY.p8` (key `72VZJFJ9JY`,
   issuer `68f0580f-99da-480a-a4c1-46acfd3b4a74`) — çalıştığı doğrulandı.
   Yardımcı script: `scratchpad/asc.py` (JWT + GET/POST).
-- Supabase proje `ohpvhgwjmrfjclnumgnm` ("AI Girlfriend"). **CLI artık
-  kullanılabilir** — sistemde kurulu değil ama `npx -y supabase <komut>`
-  çalışıyor ve keychain'de zaten authenticate + proje `link`li
-  (`supabase/.temp/project-ref`). Edge function deploy'ları için MCP
-  tool yerine `npx -y supabase functions deploy <fn> --project-ref
-  ohpvhgwjmrfjclnumgnm` tercih edilmeli — büyük dosyalarda elle
-  kopyalamaktan çok daha güvenilir (yerelden okuyor, retyping riski yok).
+- Supabase proje `ohpvhgwjmrfjclnumgnm` ("AI Girlfriend"). CLI binary'si
+  `~/bin/supabase` (GitHub release'inden indirildi; node/brew gerekmiyor).
+  Deploy: `SUPABASE_ACCESS_TOKEN=<sbp_...> ~/bin/supabase functions deploy
+  <fn> --project-ref ohpvhgwjmrfjclnumgnm`. **`voice-call-llm-webhook` için
+  `--no-verify-jwt` ŞART** — ElevenLabs onu JWT'siz çağırıyor, bayrak
+  unutulursa her tur 401 alır ve arama komple kırılır.
+  Ham SQL için Management API de kullanılabilir:
+  `POST https://api.supabase.com/v1/projects/<ref>/database/query`
+  (aynı `sbp_` token, body `{"query":"..."}`).
 - RevenueCat proje `proj38579ac3` ("Plumm"), app `app340215e7c3`. v2 API
   secret key gerekiyor (v1 legacy key kabul etmiyor).
 - Beta grup "Testers" internal — build'leri otomatik alır, elle atanamaz (422)

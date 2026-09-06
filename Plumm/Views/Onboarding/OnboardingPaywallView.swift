@@ -37,6 +37,9 @@ struct OnboardingPaywallView: View {
     @State private var selectedTier: SubscriptionTier
     @State private var selectedPackageID: String?
     @State private var isPurchasing = false
+    /// bkz. SubscriptionPaywallView'daki aynı alan — başarısız satın alma
+    /// artık sessizce kapanmıyor.
+    @State private var resultMessage: PurchaseService.OutcomeMessage?
 
     /// Zaten Pro/Pro+/Max sahibi biri paywall'ı tekrar açarsa (bkz. kullanıcı
     /// talebi) kendi planını ya da daha düşüğünü göstermek yerine SADECE daha
@@ -189,6 +192,9 @@ struct OnboardingPaywallView: View {
             }
         }
         .animation(.easeInOut(duration: 0.2), value: isPurchasing)
+        .alert(item: $resultMessage) { alert in
+            Alert(title: Text(alert.title), message: Text(alert.message), dismissButton: .default(Text("OK")))
+        }
         .task {
             EventLogger.shared.log("paywall_shown", ["default_tier": selectedTier.displayName, "source": "onboarding"])
             if packages.isEmpty { await purchases.loadOfferings() }
@@ -377,10 +383,16 @@ struct OnboardingPaywallView: View {
         guard let pkg = selectedPackage else { close(); return }
         Task {
             isPurchasing = true
-            let ok = await purchases.purchase(pkg)
-            if ok { await tokenStore.refresh() }   // sunucu verdiği token'ları çek
+            let outcome = await purchases.purchaseDetailed(pkg)
             isPurchasing = false
-            if ok { close() }
+            if case .success = outcome {
+                await tokenStore.refresh()   // sunucu verdiği token'ları çek
+                close()
+                return
+            }
+            // Onboarding'de akışı KAPATMIYORUZ: mesaj gösterilir, kullanıcı
+            // aynı ekrandan tekrar deneyebilir ya da kendi kapatabilir.
+            resultMessage = PurchaseService.userMessage(for: outcome)
         }
     }
 

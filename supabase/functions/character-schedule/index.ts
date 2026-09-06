@@ -17,8 +17,6 @@ const corsHeaders = {
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 import { callLLM } from "../_shared/llm.ts";
-const XAI_URL = "https://api.x.ai/v1/chat/completions";
-const MODEL = "grok-4.3";
 
 // Üretilen rutini KALICI yazmak için (service-role → RLS baypas).
 const db = createClient(

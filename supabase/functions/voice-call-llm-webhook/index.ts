@@ -15,9 +15,8 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
-const XAI_API_KEY = Deno.env.get("XAI_API_KEY") ?? "";
-import { callLLM, callLLMStream } from "../_shared/llm.ts";
-const MODEL = "grok-4.3";
+import { callLLMStream } from "../_shared/llm.ts";
+import { createStreamTagSanitizer } from "../_shared/voiceTags.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -25,34 +24,101 @@ const db = createClient(SUPABASE_URL, SERVICE_ROLE, { auth: { persistSession: fa
 
 interface WireMessage { role: string; content: string }
 
-/// Reads an OpenAI-format SSE stream chunk-by-chunk, extracting each
-/// delta's text content, and returns the accumulated full reply once the
-/// stream ends. Used only for the background call_turns log — never blocks
-/// the response already being forwarded to ElevenLabs.
-async function accumulateReply(stream: ReadableStream<Uint8Array>): Promise<string> {
-  let replyText = "";
-  const reader = stream.getReader();
+/// Upstream SSE'yi ElevenLabs'e iletmeden ÖNCE süzen dönüştürücü.
+///
+/// NEDEN VAR: eskiden stream `tee()` ile ikiye ayrılıp bir kopyası ElevenLabs'e
+/// HAM olarak iletiliyordu; yani modelin uydurduğu bir ses etiketini
+/// yakalayacak hiçbir nokta yoktu ve "prompt disiplini tek savunma" diye
+/// yazılıydı. O savunma canlıda düştü: cevabın ortasındaki `[slow]` — hiçbir
+/// zaman var olmamış bir etiket — kullanıcıya "slow" diye okundu. Etiket
+/// listesi artık burada da uygulanıyor (bkz. _shared/voiceTags.ts), yani
+/// tanınmayan bir etiket sese dönüşemez.
+///
+/// Ayrıca `tee()` ihtiyacı da ortadan kalktı: temizlenmiş metin aynı geçişte
+/// birikiyor ve tur sonunda call_turns'e yazılıyor — loga giden metin artık
+/// kullanıcının GERÇEKTEN duyduğu metinle birebir aynı.
+function sanitizeSseStream(
+  upstream: ReadableStream<Uint8Array>,
+  onComplete: (replyText: string) => void,
+): ReadableStream<Uint8Array> {
   const decoder = new TextDecoder();
+  const encoder = new TextEncoder();
+  const sanitizer = createStreamTagSanitizer();
   let buffer = "";
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split("\n");
-    buffer = lines.pop() ?? "";
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed.startsWith("data: ") || trimmed === "data: [DONE]") continue;
-      try {
-        const delta = JSON.parse(trimmed.slice(6))?.choices?.[0]?.delta?.content;
-        if (delta) replyText += delta;
-      } catch {
-        // Partial/non-JSON chunk split across two reads — skip, the next
-        // read() call completes the line and buffer carries the remainder.
-      }
-    }
+  let replyText = "";
+  // Son görülen chunk'ın iskeleti: flush edilen artık metni aynı biçimde
+  // yollayabilmek için lazım (id/model/finish_reason alanlarını korur).
+  // deno-lint-ignore no-explicit-any
+  let lastChunk: any = null;
+
+  function emitLine(line: string, controller: TransformStreamDefaultController<Uint8Array>) {
+    controller.enqueue(encoder.encode(line + "\n"));
   }
-  return replyText.trim();
+
+  function handleLine(rawLine: string, controller: TransformStreamDefaultController<Uint8Array>) {
+    const trimmed = rawLine.trim();
+    if (!trimmed.startsWith("data: ")) {
+      // Yorum satırları (`: ping`) ve boş satırlar aynen geçer — SSE
+      // çerçevelemesini bozmamak için.
+      emitLine(rawLine, controller);
+      return;
+    }
+    if (trimmed === "data: [DONE]") {
+      const rest = sanitizer.flush();
+      if (rest && lastChunk) {
+        replyText += rest;
+        const tail = { ...lastChunk, choices: [{ ...lastChunk.choices[0], delta: { content: rest }, finish_reason: null }] };
+        emitLine("data: " + JSON.stringify(tail), controller);
+      }
+      emitLine(rawLine, controller);
+      return;
+    }
+    // deno-lint-ignore no-explicit-any
+    let parsed: any;
+    try {
+      parsed = JSON.parse(trimmed.slice(6));
+    } catch {
+      // Ayrıştırılamayan chunk'ı DEĞİŞTİRMEDEN geçir: sözleşmeyi bozmaktansa
+      // o parçayı süzmemek yeğdir.
+      emitLine(rawLine, controller);
+      return;
+    }
+    const choice = parsed?.choices?.[0];
+    const content = choice?.delta?.content;
+    if (typeof content !== "string" || content.length === 0) {
+      if (parsed?.choices) lastChunk = parsed;
+      emitLine(rawLine, controller);
+      return;
+    }
+    lastChunk = parsed;
+    const clean = sanitizer.push(content);
+    replyText += clean;
+    // İçerik tamamen tutulduysa (etiket ortada bölünmüş) boş delta gider —
+    // OpenAI biçiminde boş delta olağan, ElevenLabs bunu sorunsuz yutuyor.
+    choice.delta.content = clean;
+    emitLine("data: " + JSON.stringify(parsed), controller);
+  }
+
+  return upstream.pipeThrough(
+    new TransformStream<Uint8Array, Uint8Array>({
+      transform(chunk, controller) {
+        buffer += decoder.decode(chunk, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+        for (const line of lines) handleLine(line, controller);
+      },
+      flush(controller) {
+        if (buffer) handleLine(buffer, controller);
+        const rest = sanitizer.flush();
+        if (rest && lastChunk) {
+          replyText += rest;
+          const tail = { ...lastChunk, choices: [{ ...lastChunk.choices[0], delta: { content: rest }, finish_reason: null }] };
+          emitLine("data: " + JSON.stringify(tail), controller);
+        }
+        onComplete(replyText.trim());
+      },
+    }),
+  );
 }
 
 Deno.serve(async (req: Request) => {
@@ -93,7 +159,11 @@ Deno.serve(async (req: Request) => {
 
     // ElevenLabs also invokes this webhook on `turn_timeout` silence
     // re-engagement — no new user utterance arrived, the agent is just
-    // being asked to speak again. Detectable here: the LAST message in the
+    // being asked to speak again. The timeout itself is AGENT-SIDE config
+    // (`conversation_config.turn.turn_timeout`), not settable from here —
+    // it is set to 10s via scripts/elevenlabs-agent.sh; the wording below
+    // has to match that number or the character sounds like she's
+    // panicking after two seconds of quiet. Detectable here: the LAST message in the
     // running history isn't from the user (it's the agent's own prior
     // line). Without a signal, Grok would generate a reply as if
     // responding to something just said — flag it with a one-off
@@ -103,7 +173,7 @@ Deno.serve(async (req: Request) => {
     const grokMessages: WireMessage[] = isSilenceReengage
       ? [...messages, {
           role: "user",
-          content: "[The user has gone quiet for a few seconds — you're re-engaging, not responding to " +
+          content: "[The user has gone quiet for about ten seconds — you're re-engaging, not responding to " +
             "something they just said. Sound natural about noticing the silence, in character: check in, " +
             "tease them about going quiet, or just continue naturally, whatever actually fits your " +
             "personality right now. Keep it short.]",
@@ -111,7 +181,7 @@ Deno.serve(async (req: Request) => {
       : messages;
 
     // callLLMStream ham upstream Response'u veriyor, govdesi tuketilmemis
-    // halde -- asagidaki tee() ve ElevenLabs'e iletim aynen calisiyor.
+    // halde -- asagidaki sanitize + iletim onu tek gecişte tuketiyor.
     // DeepSeek de xAI de OpenAI bicimli SSE uretiyor, iletilen sozlesme ayni.
     let upstream: Response;
     try {
@@ -123,14 +193,18 @@ Deno.serve(async (req: Request) => {
       return new Response(JSON.stringify({ error: "empty stream body" }), { status: 502 });
     }
 
-    // Tee the upstream SSE stream: one copy forwarded to ElevenLabs untouched
-    // (xAI's stream is already OpenAI-format — the exact contract ElevenLabs
-    // expects), the other accumulated in the background to log the completed
-    // turn once streaming finishes, without delaying the forwarded response.
-    const [forwardStream, captureStream] = upstream.body.tee();
+    // Stream ElevenLabs'e İLETİLMEDEN önce ses etiketlerinden süzülüyor
+    // (bkz. sanitizeSseStream). Temizlenen metin aynı geçişte birikiyor;
+    // stream bitince aşağıdaki callback tur kaydını yazıyor.
+    // `!` kesin-atama işareti: Promise yürütücüsü senkron çalışıyor, yani
+    // resolveReply bir sonraki satırda kesinlikle atanmış oluyor; TS bunu
+    // kendi başına göremiyor.
+    let resolveReply!: (text: string) => void;
+    const replyPromise = new Promise<string>((res) => { resolveReply = res; });
+    const forwardStream = sanitizeSseStream(upstream.body, (text) => resolveReply(text));
 
     const logPromise = (async () => {
-      const replyText = await accumulateReply(captureStream);
+      const replyText = await replyPromise;
       if (replyText) {
         // Sıralama artık call_turns.seq'e (identity kolonu, migration 024)
         // dayanıyor, created_at'e DEĞİL — bu fonksiyon HER turda ayrı bir

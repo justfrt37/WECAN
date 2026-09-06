@@ -18,6 +18,8 @@ import {
 import { elevenVoiceIdFor } from "../_shared/elevenVoiceMap.ts";
 import { callVoiceSettingsFor } from "../_shared/elevenVoiceSettings.ts";
 import { requireVoiceEntitlement } from "../_shared/entitlements.ts";
+import { V3_AUDIO_TAGS, stripUnknownAudioTags } from "../_shared/voiceTags.ts";
+import { NO_ACKNOWLEDGEMENT_RULE } from "../_shared/promptRules.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -28,9 +30,7 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const db = createClient(SUPABASE_URL, SERVICE_ROLE, { auth: { persistSession: false } });
 
-const XAI_API_KEY = Deno.env.get("XAI_API_KEY") ?? "";
 import { callLLM } from "../_shared/llm.ts";
-const MODEL = "grok-4.3";
 
 const ELEVENLABS_API_KEY = Deno.env.get("ELEVEN_LABS") ?? "";
 // TEMP: hardcoded instead of the ELEVENLABS_AGENT_ID secret — CLI account
@@ -71,20 +71,25 @@ function languageRule(code: string): string {
 // performs it instead (the transcript comes back with an actual whisper and no
 // stray word), so the constraint is gone and the tags are now the point.
 //
-// The tag list is CLOSED on purpose. The webhook tees the model's SSE stream
-// straight to ElevenLabs, so there is no point at which an invented tag could
-// be stripped — the text path's sanitizeVoiceReply has no counterpart here.
-// Prompt discipline is the only defence.
-const V3_AUDIO_TAGS = ["laughs", "sighs", "whispers", "breathes", "excited", "slow"] as const;
+// LİSTE 2026-09-06'DA DÜZELTİLDİ ve _shared/voiceTags.ts'e taşındı: eski liste
+// altı elemanlıydı ve İKİSİ UYDURMAYDI (`[slow]`, `[breathes]`). Tanınmayan
+// etiket sese dönüşmüyor, KELİME olarak okunuyor — canlı rapor: mesajın
+// ortasındaki `[slow]` "slow" diye telaffuz edildi. Liste artık webhook'un
+// stream temizleyicisiyle AYNI kaynaktan geliyor (bkz. voiceTags.ts).
 
 const VOICE_CALL_STYLE_RULE =
   "\n\nVOICE STYLE RULE: This reply will be SPOKEN ALOUD in a real-time phone " +
   "call. Write it the way it should SOUND, not the way it would look in a chat.\n" +
   `AUDIO TAGS: you may use ONLY these exact tags: ${V3_AUDIO_TAGS.map((t) => `[${t}]`).join(", ")}. ` +
-  "Never invent another one — an unrecognised tag is read out loud as literal " +
-  "words and ruins the call. At most ONE per reply, and only where a real " +
-  "person would actually do it; a tag colours roughly the next few words. Most " +
-  "replies need no tag at all.\n" +
+  "Copy them character for character. Never invent one, never translate one, " +
+  "never inflect one ([slow], [slowly], [yavaş], [laughing], [sad voice] are " +
+  "ALL wrong) — an unrecognised tag is read out loud as literal words and ruins " +
+  "the call. At most ONE per reply, placed immediately before the words it " +
+  "colours; a tag affects roughly the next few words. Most replies need no tag " +
+  "at all.\n" +
+  "PACE: there is NO tag for speaking slowly or quickly. If you want a slower, " +
+  "heavier delivery, write it into the words — commas, ellipses, shorter " +
+  "sentences — or use [short pause] / [long pause]. Never invent a pace tag.\n" +
   "NEVER write a laugh, sigh or gasp as letters ('haha', 'hehe', 'ahah', " +
   "'heh', 'hah', 'pff', 'ahh') — those get pronounced as nonsense syllables. " +
   "If you mean a laugh, use [laughs]. This includes the first word of a reply: " +
@@ -175,21 +180,46 @@ function openerInstruction(recentChatGapMinutes: number | null): string {
 // same system prompt so it matches personality/relationship level. Falls
 // back to a plain greeting if Grok fails, since a missing first message
 // isn't worth failing the whole call start over.
-// The opener is the one reply on the call path that is NOT streamed — it is
-// generated here and returned as a plain string — so it is the one place an
-// invented audio tag can still be caught. Observed live: a generated opener
-// began with "[surprised but happy]", which is not in V3_AUDIO_TAGS, and the
-// first thing the user would hear on picking up is whatever v3 decides to do
-// with it. Every mid-call reply goes out as an SSE stream that is teed
-// straight to ElevenLabs, where no such interception point exists — there the
-// closed tag list in VOICE_CALL_STYLE_RULE is the only defence.
-function stripUnknownAudioTags(text: string): string {
-  return text
-    .replace(/\[([^\]\n]{1,40})\]/g, (whole, inner: string) =>
-      (V3_AUDIO_TAGS as readonly string[]).includes(inner.trim().toLowerCase()) ? whole : " ")
-    .replace(/\s{2,}/g, " ")
-    .trim();
+// Açılış repliği stream DEĞİL, düz metin döndüğü için buradaki temizlik tek
+// bir replace ile yapılıyor (bkz. _shared/voiceTags.ts). Canlı gözlem: üretilen
+// bir açılış "[surprised but happy]" ile başlamıştı — listede olmayan bir
+// etiket, ve telefonu açan kullanıcının duyacağı İLK şey oydu. Tur içi
+// cevaplarda da artık aynı liste geçerli; orası stream olduğu için
+// voice-call-llm-webhook parça parça temizliyor.
+// Açılış repliğinin SERT üst sınırı. Prompt "a few words, not a sentence"
+// diyordu ve maxTokens 16'ydı, ama ikisi de tavsiye: model düzenli olarak
+// tam cümlelik ("hey, sonunda aradın, seni özledim ya") açılışlar üretiyordu
+// ve 16 token Türkçede rahatça 8-10 kelime demek. Telefon açan biri o kadar
+// konuşmaz; ilk duyulan şey "alo"ya yakın olmalı. Bu yüzden kelime sayısı
+// kodda kesiliyor — prompt'a güvenilmiyor.
+//
+// [laughs] gibi ses etiketleri KELİME SAYILMAZ: konuşulan söz değiller,
+// v3'ün performans yönergesi. Etiketler yerinde bırakılır, kesim yalnızca
+// gerçek kelimelere uygulanır.
+const OPENER_MAX_WORDS = 5;
+
+function capOpenerWords(text: string): string {
+  let words = 0;
+  const kept: string[] = [];
+  for (const token of text.split(/\s+/).filter(Boolean)) {
+    if (/^\[[^\]]+\]$/.test(token)) { kept.push(token); continue; }
+    if (words >= OPENER_MAX_WORDS) break;
+    words++;
+    kept.push(token);
+  }
+  const capped = kept.join(" ").trim();
+  // Kesim cümlenin ortasında kaldıysa sonda asılı kalan virgül/bağlaç
+  // noktalaması sesli okunuşta tuhaf bir yarım cümle etkisi yapıyor —
+  // sondaki ayırıcıları at, ! ? . ... kalsın.
+  return capped.replace(/[,;:\-—]+$/u, "").trim();
 }
+
+// Açılış "Noted."/"Anlaşıldı." ile başlıyorsa o replik ÇÖPTİR: model,
+// köşeli parantezli açılış yönergesini kullanıcının talimatı sanmış demektir
+// (bkz. NO_ACKNOWLEDGEMENT_RULE). Beş kelimelik açılışta bunu kırpmak yerine
+// komple fallback'e düşmek doğru — geriye anlamlı bir selam kalmıyor.
+const ACK_OPENER =
+  /^\s*(?:duly\s+noted|noted|understood|acknowledged|got\s+it|sure\s+thing|of\s+course|anla[sş][ıi]ld[ıi]|tamamd[ıi]r|not\s+al[ıi]nd[ıi])\b/iu;
 
 async function generateFirstMessage(systemPrompt: string, recentChatGapMinutes: number | null): Promise<string> {
   const fallback = "Hey!";
@@ -200,14 +230,19 @@ async function generateFirstMessage(systemPrompt: string, recentChatGapMinutes: 
         {
           role: "user",
           content: `[The call just connected. ${openerInstruction(recentChatGapMinutes)} Now say your ` +
-            "opening line the way someone actually answers the phone: a few words, not a sentence. " +
-            "Think 'hey you', 'heyyy finally', 'oh hi', 'you there?'. NO full sentences, no questions " +
-            "longer than two words, no explaining. Just the greeting, in character, nothing else.]",
+            `opening line the way someone actually answers the phone: AT MOST ${OPENER_MAX_WORDS} words, ` +
+            "and fewer is better — one or two words is a perfect answer. Think 'alo', 'hey you', " +
+            "'heyyy finally', 'oh hi', 'you there?'. NO sentences, no questions longer than two words, " +
+            "no explaining, no follow-up. Just the greeting, in character, nothing else. Anything past " +
+            `${OPENER_MAX_WORDS} words is cut off mid-air, so do not write it.]`,
         },
       ],
-      { maxTokens: 16, temperature: 0.9 },
+      // 16'dan 12'ye: bu tur zaten 5 kelimeyle sınırlı, fazlası kesilecek
+      // çıktı için ödenen token.
+      { maxTokens: 12, temperature: 0.9 },
     )).trim();
-    return stripUnknownAudioTags(text) || fallback;
+    if (ACK_OPENER.test(text)) return fallback;
+    return capOpenerWords(stripUnknownAudioTags(text)) || fallback;
   } catch {
     return fallback;
   }
@@ -330,6 +365,10 @@ Deno.serve(async (req: Request) => {
     systemPrompt += memoriesBlock(memories);
     systemPrompt += behaviorsBlock(behaviors);
     systemPrompt += VOICE_CALL_STYLE_RULE;
+    // Açılış ve sessizlik yönergeleri köşeli parantezli `user` mesajı olarak
+    // gidiyor; bu kural olmadan karakter "Noted…" diye KONUŞUYOR
+    // (bkz. promptRules.ts).
+    systemPrompt += NO_ACKNOWLEDGEMENT_RULE;
     systemPrompt += languageRule(language);
 
     const voiceId = character?.voice_id || elevenVoiceIdFor(personalityRole, vibe, characterId);

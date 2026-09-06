@@ -259,12 +259,12 @@ struct TokenStoreView: View {
             case .cancelled:
                 // Kullanıcının kendi kapattığı diyalog hata değil — sessiz geç.
                 break
-            case .failed(let reason):
-                resultMessage = PurchaseAlert(
-                    title: String(localized: "Purchase failed"),
-                    message: reason,
-                    isError: true
-                )
+            case .failed, .storeAuthProblem:
+                // Metinler PurchaseService.userMessage'ta, tek yerde
+                // (abonelik paywall'ları da aynısını gösteriyor).
+                if let m = PurchaseService.userMessage(for: outcome) {
+                    resultMessage = PurchaseAlert(title: m.title, message: m.message, isError: m.isError)
+                }
             case .paidButNotGranted:
                 // En kritik durum: para gitti, token yazılamadı. Kullanıcı
                 // bunu MUTLAKA görmeli ve ne yapacağını bilmeli.

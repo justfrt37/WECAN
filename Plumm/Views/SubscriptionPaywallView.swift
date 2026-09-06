@@ -14,6 +14,11 @@ struct SubscriptionPaywallView: View {
     @State private var selectedTier: SubscriptionTier = .pro
     @State private var selectedPackageID: String?
     @State private var isPurchasing = false
+    /// Satın alma sonucu mesajı. Eskiden bu ekran `purchase()`in Bool'unu
+    /// kullanıyordu: iptal, mağaza hatası ve App Store kimlik doğrulama
+    /// çöküşü aynı `false` idi ve ekran HİÇBİR ŞEY söylemeden kapanıyordu
+    /// (bkz. PurchaseService.PurchaseOutcome.storeAuthProblem).
+    @State private var resultMessage: PurchaseService.OutcomeMessage?
 
     private let tiers: [(tier: SubscriptionTier, label: String)] = [
         (.pro, "Pro"), (.proPlus, "Pro+"), (.max, "Pro Max"),
@@ -111,6 +116,9 @@ struct SubscriptionPaywallView: View {
             }
         }
         .animation(.easeInOut(duration: 0.2), value: isPurchasing)
+        .alert(item: $resultMessage) { alert in
+            Alert(title: Text(alert.title), message: Text(alert.message), dismissButton: .default(Text("OK")))
+        }
         .task {
             EventLogger.shared.log("paywall_shown", ["default_tier": selectedTier.displayName])
             if packages.isEmpty { await purchases.loadOfferings() }
@@ -216,10 +224,16 @@ struct SubscriptionPaywallView: View {
         guard let pkg = selectedPackage else { return }
         Task {
             isPurchasing = true
-            let ok = await purchases.purchase(pkg)
-            if ok { await tokenStore.refresh() }
+            let outcome = await purchases.purchaseDetailed(pkg)
             isPurchasing = false
-            if ok { dismiss() }
+            if case .success = outcome {
+                await tokenStore.refresh()
+                dismiss()
+                return
+            }
+            // Başarısızlıkta ekran AÇIK kalır ki kullanıcı mesajı okuyup
+            // tekrar deneyebilsin; `nil` (gerçek iptal) sessizdir.
+            resultMessage = PurchaseService.userMessage(for: outcome)
         }
     }
 

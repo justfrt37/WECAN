@@ -44,8 +44,33 @@ function extractJson(raw: string): any | null {
   try { return JSON.parse(match[0]); } catch { return null; }
 }
 
-function callText(messages: { role: string; content: string }[], maxTokens: number): Promise<string> {
-  return callLLM(messages, { maxTokens, temperature: 0.7 });
+// Sıcaklık artık iş başına, chat/index.ts'teki LlmMode ayrımıyla aynı
+// gerekçeyle: tek bir 0.7 hem JSON çıkarımını hem de hafıza birleştirmeyi
+// sürüyordu, ikisinde de örnekleme gürültüsü saf zarar. Çıkarımda azıcık
+// örnekleme payı bırakılıyor (chat'te ölçülen: recall 0.1'e göre biraz daha
+// iyi), birleştirmede yok — orada kayıtlı olguları bozmaktan başka işe
+// yaramıyor.
+const EXTRACT_TEMPERATURE = 0.4;
+const CONSOLIDATE_TEMPERATURE = 0.1;
+
+// Budget da chat ile eşitlendi: 500 token, sekiz olgu içeren bir çağrıda
+// listeyi ortadan kesiyordu (chat'te ölçülen aynı açlık — bkz. chat/index.ts
+// "SPLIT, extraction alone 8.0/8").
+const EXTRACT_MAX_TOKENS = 800;
+
+function extractCall(messages: { role: string; content: string }[], maxTokens: number): Promise<string> {
+  return callLLM(messages, { maxTokens, temperature: EXTRACT_TEMPERATURE });
+}
+
+function consolidateCall(messages: { role: string; content: string }[], maxTokens: number): Promise<string> {
+  return callLLM(messages, { maxTokens, temperature: CONSOLIDATE_TEMPERATURE });
+}
+
+// Arama transkriptindeki [laughs]/[whispers] gibi ses etiketleri konuşulan
+// söz değil, v3'e verilen performans yönergesi — hafızaya olgu olarak
+// sızmamalı (chat/index.ts fold'dan önce aynısını stripVoiceTags ile yapıyor).
+function stripVoiceTags(text: string): string {
+  return text.replace(/\[[^\]]*\]/g, "").replace(/[ \t]{2,}/g, " ").trim();
 }
 
 async function extractAndStoreMemories(conversationId: string, callSessionId: string) {
@@ -56,36 +81,67 @@ async function extractAndStoreMemories(conversationId: string, callSessionId: st
   const activeMemories = await fetchActiveMemories(db, conversationId);
   const existingMemoryLines = numberedMemoryLines(activeMemories);
 
-  const transcript = turns.map((t) => `${t.role === "user" ? "User" : "You"}: ${t.content}`).join("\n");
+  // Konuşmanın yürüyen özeti — chat/index.ts çıkarım promptuna aynı şekilde
+  // veriyor. Karakterin daha önce yerleştirdiği davranış/taahhütleri gösterir,
+  // yani arama sırasında bunların TEKRARI yeni bir hafıza olarak yazılmaz.
+  const { data: convoRow } = await db.from("conversations")
+    .select("summary").eq("id", conversationId).maybeSingle();
+  const previousSummary: string = convoRow?.summary || "(none)";
 
-  const raw = await callText([
+  const transcript = turns
+    .map((t) => `${t.role === "user" ? "User" : "You"}: ${stripVoiceTags(t.content)}`)
+    .join("\n");
+
+  const raw = await extractCall([
     {
       role: "system",
       content:
-        "Extract NEW durable facts worth permanently remembering from this voice call transcript, that are " +
-        "NOT already covered by the existing memories list you'll be given (numbered, one per line, each " +
-        "tagged with when it was first/last noted). Favor identity, personality, and life facts — who " +
-        "someone IS (job, living situation, relationships, values, recurring habits, how they tend to feel " +
-        "or act) — over one-off day-to-day small talk that has no lasting relevance. This isn't a strict " +
-        "filter: a passing detail is still worth keeping if it's the kind of thing that should color how " +
-        "the character responds days later. If there's nothing worth keeping, return an empty array. " +
+        "You extract durable facts worth permanently remembering from a voice call between a user and " +
+        "an AI companion character. Write them in English regardless of the language the call was in.\n" +
+        // Bu kural aramada chat'tekinden DAHA kritik: arama transkripti STT
+        // çıktısı, yani özel adlar zaten konuşmadan geldiği gibi yazılıyor.
+        // Retrieval'ın leksik ayağı ('simple' tokenizer, çeviri yok) bu
+        // yazımı birebir arıyor — "Rome" diye saklanan bir hafıza, kullanıcı
+        // sohbette "Roma" yazdığında bir daha bulunamıyor (chat tarafında
+        // canlı doğrulandı).
+        "ONE EXCEPTION to writing in English: keep every proper noun EXACTLY as it was said — places, " +
+        "people, brands, dishes, venues. Write 'Roma' if they said Roma (not 'Rome'), 'İstanbul' if they " +
+        "said İstanbul (not 'Istanbul'). Those are the words they will type again later in chat, and " +
+        "literal spelling is what makes the memory findable. If the English name is genuinely useful, put " +
+        "it in parentheses after: 'Roma (Rome)'.\n\n" +
+        "Extract any NEW durable facts that are NOT already covered by the existing memories list you'll " +
+        "be given (numbered, one per line, each tagged with when it was first/last noted). Favor identity, " +
+        "personality, and life facts — who someone IS (job, living situation, relationships, values, " +
+        "recurring habits, how they tend to feel or act) — over one-off day-to-day small talk that has no " +
+        "lasting relevance. This isn't a strict filter: a passing detail is still worth keeping if it's the " +
+        "kind of thing that should color how the character responds days later. If there's nothing worth " +
+        "keeping, return an empty array.\n" +
+        "BE THOROUGH — this is the only pass over this call. The transcript is not stored anywhere the " +
+        "character can read later, so a fact dropped here is lost for good. If the user stated a durable " +
+        "fact about themselves anywhere in this call, it belongs in the list. Silently dropping a stated " +
+        "allergy, family member, birthday or job is a failure, not brevity.\n" +
+        // Konuşma dili yazıya göre daha dağınık: aynı olgu tek cümlede değil,
+        // araya girmeler ve yarım cümleler arasına yayılmış olabilir.
+        "Speech is messier than text: a fact may be split across several short turns, interrupted, or " +
+        "corrected mid-sentence. Read the whole transcript before deciding, and record the CORRECTED " +
+        "version when the user walks something back.\n" +
         "Include BOTH sides:\n" +
         "- USER facts: name, preferences, promises, key relationship moments, recurring patterns.\n" +
-        "- CHARACTER facts: things the character herself established/committed to on this call — a pet " +
-        "name she used, a boundary she set, a backstory detail she improvised that should stay consistent, " +
-        "a promise she made. These matter just as much as the user's.\n\n" +
+        "- CHARACTER facts: things the character herself has established/committed to on this call — a pet " +
+        "name she's adopted for the user, a boundary she's set, a backstory detail she's improvised (job, " +
+        "hobby, living situation, etc.) that should stay consistent, a promise she made. These matter just " +
+        "as much — a character who forgets her own established details reads as inconsistent, not just one " +
+        "who forgets the user's.\n\n" +
         "RECURRENCE: if the new content restates or reinforces something an existing memory already says " +
-        "(even worded differently), do NOT add it as a separate new memory. Instead put a single MERGED " +
-        "replacement fact in newMemories that folds in the recurrence as an observed pattern (naming both " +
-        "dates), and put that existing memory's number in staleIndexes so the old single-instance version " +
-        "gets replaced by the merged one.\n\n" +
-        "ALSO identify any existing memories (by their number) that this transcript now CONTRADICTS — e.g. " +
-        "the user previously said they're a barista and now say they just started a nursing job. Return " +
-        "those numbers in staleIndexes. If nothing is contradicted, return an empty array.\n\n" +
-        // is_pinned 2026-09-02'de eklendi ve chat/index.ts'in fold prompt'unda
-        // zaten vardı; burada yoktu, yani sesli aramadan çıkan hiçbir kimlik
-        // bilgisi pinlenmiyordu ve zamanla budanabiliyordu. Metin sohbetiyle
-        // aynı ölçüt kullanılıyor ki iki yol aynı hafızayı aynı şekilde doldursun.
+        "(even worded differently, e.g. \"tired again today\" vs. a prior \"was tired today\"), do NOT add it " +
+        "as a separate new memory. Instead put a single MERGED replacement fact in newMemories that folds " +
+        "in the recurrence as an observed pattern (e.g. \"User has mentioned feeling tired more than once " +
+        "(first 2026-08-28, again 2026-09-01) — seems to run low on energy often\"), and put that existing " +
+        "memory's number in staleIndexes so the old single-instance version gets replaced by the merged " +
+        "one.\n\n" +
+        "ALSO identify any existing memories (by their number) that this call now CONTRADICTS — e.g. the " +
+        "user previously said they're a barista and now say they just started a nursing job. Return those " +
+        "numbers in staleIndexes. If nothing is contradicted, return an empty array.\n\n" +
         "PINNING: mark each new memory with \"pinned\": true ONLY if it is an identity-level fact " +
         "that should survive forever — the user's name, age, city, job, family members, pets, " +
         "birthday, allergies or medical constraints, and the equivalent permanent facts the " +
@@ -95,15 +151,28 @@ async function extractAndStoreMemories(conversationId: string, callSessionId: st
         "be strict: if you'd still want it known a year from now, pin it; otherwise don't.\n\n" +
         'Respond with ONLY this JSON shape, nothing else: {"newMemories":' +
         '[{"content":"fact one","pinned":true},{"content":"fact two","pinned":false}],' +
-        '"staleIndexes":[0,2]}',
+        '"staleIndexes":[0,2]} — both arrays can be empty.',
     },
     {
       role: "user",
-      content: `Existing memories (numbered — do not repeat these, but flag contradicted ones in staleIndexes):\n${existingMemoryLines}\n\nCall transcript:\n${transcript}\n\nJSON:`,
+      content:
+        `Previous conversation summary:\n${previousSummary}\n\n` +
+        `Existing memories (numbered — do not repeat these, but flag contradicted ones in staleIndexes):\n${existingMemoryLines}\n\n` +
+        `Voice call transcript:\n${transcript}\n\nJSON:`,
     },
-  ], 500);
+  ], EXTRACT_MAX_TOKENS);
 
   const parsed = extractJson(raw);
+  // Ayrıştırılamayan cevapta HİÇBİR ŞEY yazma — chat/index.ts'teki aynı
+  // koruma. Eskiden parsed null olsa bile aşağıdaki iki dizi sessizce boş
+  // kabul ediliyor, applyMemoryExtraction boş boş çağrılıyordu; ayrıca
+  // ayrıştırma hatası hiç loglanmıyordu, yani sağlayıcı kaynaklı sürekli bir
+  // bozulma "aramalardan hiç hafıza çıkmıyor" diye ancak canlıda fark
+  // edilirdi.
+  if (!parsed) {
+    console.error("call memory extraction: unparseable response:", raw.slice(0, 200));
+    return;
+  }
   // Her iki şekli de kabul ediyor: prompt'un istediği {content, pinned}
   // nesneleri ve model eski biçime dönerse düz string — string düşürülmüyor,
   // sadece pinlenmemiş sayılıyor. chat/index.ts ile birebir aynı davranış.
@@ -127,7 +196,7 @@ async function extractAndStoreMemories(conversationId: string, callSessionId: st
     ? parsed.staleIndexes.filter((i: unknown): i is number => typeof i === "number" && Number.isInteger(i))
     : [];
   await applyMemoryExtraction(db, conversationId, activeMemories, newMemories, staleIndexes);
-  await pruneMemoriesIfOverCap(db, conversationId, callText);
+  await pruneMemoriesIfOverCap(db, conversationId, consolidateCall);
 }
 
 Deno.serve(async (req: Request) => {

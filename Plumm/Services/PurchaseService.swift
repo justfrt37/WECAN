@@ -351,10 +351,64 @@ final class PurchaseService {
         case cancelled
         /// Mağaza reddetti ya da istek patladı.
         case failed(String)
+        /// App Store HESAP DOĞRULAMASI patladı — para alınmadı, kullanıcı da
+        /// hiçbir şey yapmadı. Kendi başına bir vaka çünkü kullanıcıya
+        /// söylenecek şey farklı: "tekrar dene" değil, "App Store hesabınla
+        /// ilgili bir sorun var".
+        ///
+        /// Canlı örnek (sandbox, pro -> pro_plus yükseltme): Apple'ın
+        /// `ConfirmBuySubscription.Upgrade.CPS.Auth` diyaloğu açılıyor,
+        /// `sandbox.itunes.apple.com/.../authenticate` 502 dönüyor,
+        /// `AKAuthenticationError -7013` → `AMSErrorDomain 100 Authentication
+        /// Failed` → `ASDErrorDomain 530` ile satın alma iptal ediliyor.
+        /// Kullanıcının gördüğü: ekran hiçbir şey demeden kapanıyor.
+        case storeAuthProblem
         /// Ödeme alındı ama sunucu token'ı yazamadı (ağ/sunucu hatası).
         /// En kritik durum: kullanıcıya "restore ile geri gelir" denmeli,
         /// sessizce yutulmamalı.
         case paidButNotGranted
+    }
+
+    /// Sonucun kullanıcıya gösterilecek hali — `nil` ise gösterilecek bir şey
+    /// yok. TEK YERDE duruyor çünkü üç ayrı paywall (abonelik, onboarding,
+    /// token mağazası) aynı sonuçları farklı şekilde ele alıyordu: token
+    /// mağazası hata gösteriyor, diğer ikisi `Bool` sarmalayıcısını kullanıp
+    /// BAŞARISIZLIKTA HİÇBİR ŞEY GÖSTERMEDEN ekranı kapatıyordu (bkz.
+    /// storeAuthProblem'in yorumu — kullanıcının "hata almıyorum, ekran direkt
+    /// kapanıyor" dediği durum).
+    struct OutcomeMessage: Identifiable {
+        let id = UUID()
+        let title: String
+        let message: String
+        let isError: Bool
+    }
+
+    static func userMessage(for outcome: PurchaseOutcome) -> OutcomeMessage? {
+        switch outcome {
+        case .success:
+            return nil
+        case .cancelled:
+            // Kullanıcının KENDİ kapattığı diyalog hata değil — sessiz geç.
+            return nil
+        case .failed(let reason):
+            return OutcomeMessage(
+                title: String(localized: "Purchase failed"),
+                message: reason,
+                isError: true
+            )
+        case .storeAuthProblem:
+            return OutcomeMessage(
+                title: String(localized: "Couldn't verify your App Store account"),
+                message: String(localized: "The App Store couldn't confirm your account, so the purchase didn't go through and you weren't charged. Sign out of the App Store in Settings, sign back in, and try again."),
+                isError: true
+            )
+        case .paidButNotGranted:
+            return OutcomeMessage(
+                title: String(localized: "Couldn't add your tokens"),
+                message: String(localized: "Your payment went through, but we couldn't add the tokens. Check your connection and tap Restore Purchases — nothing is lost."),
+                isError: true
+            )
+        }
     }
 
     /// `purchaseDetailed`in geriye-uyumlu sarmalayıcısı — mevcut paywall
@@ -380,10 +434,53 @@ final class PurchaseService {
             EventLogger.shared.log("paywall_purchase_cancelled", ["package_id": package.id])
         case .failed(let error):
             EventLogger.shared.log("paywall_purchase_failed", ["package_id": package.id, "error": error])
+        case .storeAuthProblem:
+            EventLogger.shared.log("paywall_purchase_failed", ["package_id": package.id, "error": "store_auth"])
         case .paidButNotGranted:
             EventLogger.shared.log("paywall_purchase_failed", ["package_id": package.id, "error": "paid_but_not_granted"])
         }
         return outcome
+    }
+
+    /// Hatanın App Store HESAP DOĞRULAMASI kaynaklı olup olmadığı.
+    ///
+    /// StoreKit bu durumu bize düz bir "iptal" gibi veriyor: en üstte
+    /// `ASDErrorDomain 530`, altında `AMSErrorDomain 100 (Authentication
+    /// Failed)` ve `AKAuthenticationError`. Kullanıcının bir şeye basması
+    /// gerekmiyor — dolayısıyla gerçek iptalden ayırmanın tek yolu hata
+    /// zincirine bakmak. Zinciri gezmek şart: ilgili alan çoğu zaman
+    /// `NSUnderlyingError`in iki-üç kat altında duruyor
+    /// (`NSMultipleUnderlyingErrorsKey` dahil).
+    private static func isStoreAuthFailure(_ error: Error) -> Bool {
+        var queue: [NSError] = [error as NSError]
+        var visited = 0
+        while let err = queue.first {
+            queue.removeFirst()
+            visited += 1
+            if visited > 32 { return false }   // döngüye karşı sert tavan
+
+            switch err.domain {
+            case "AKAuthenticationError":
+                return true
+            case "AMSErrorDomain" where err.code == 100:
+                return true
+            case "ASDErrorDomain" where err.code == 530:
+                // 530 tek başına "satın alma iptal" da olabilir; sadece
+                // altında bir kimlik hatası varsa auth vakası sayılır, o da
+                // zincirin devamında yakalanıyor. Burada erken dönmüyoruz.
+                break
+            default:
+                break
+            }
+
+            if let under = err.userInfo[NSUnderlyingErrorKey] as? NSError {
+                queue.append(under)
+            }
+            if let multiple = err.userInfo[NSMultipleUnderlyingErrorsKey] as? [NSError] {
+                queue.append(contentsOf: multiple)
+            }
+        }
+        return false
     }
 
     private func purchaseDetailedInner(_ package: PaywallPackage) async -> PurchaseOutcome {
@@ -437,6 +534,10 @@ final class PurchaseService {
             return .success(granted: 0)
         } catch {
             PurchaseService.diag.error("[PW-DIAG] purchase hatası: \(error.localizedDescription, privacy: .public)")
+            if PurchaseService.isStoreAuthFailure(error) {
+                PurchaseService.diag.error("[PW-DIAG] purchase: App Store hesap doğrulaması patladı (auth zinciri tespit edildi)")
+                return .storeAuthProblem
+            }
             return .failed(error.localizedDescription)
         }
         #else
