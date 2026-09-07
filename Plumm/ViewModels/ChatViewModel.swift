@@ -1259,6 +1259,16 @@ final class ChatViewModel {
 
         updateCache(msgCounter: counter)
         if isVisible { markReadNow() }
+        // Sohbet listesi SADECE bu sayaç değişince yeniden yüklenir (bkz.
+        // ChatListView .onChange). Burada artırılmıyordu — kullanıcı mesaj
+        // atıp chatten çıktığında (ya da listedeyken) cevap arka planda
+        // gelince liste "yazıyor" göstergesini kapatır ama önizleme/okunmadı
+        // rozetini DONUK bırakırdı, listeden çıkıp tekrar girene kadar (bkz.
+        // kullanıcı raporu). isVisible koşuluna BAĞLI DEĞİL: liste her
+        // durumda güncel önizleme/sıralama görmeli, hem sohbet açıkken hem
+        // kapalıyken — sık değildir (mesaj başına bir), pahalı bir reload
+        // değildir.
+        store?.conversationsVersion += 1
 
         triggerSummarizationIfNeeded()
     }
