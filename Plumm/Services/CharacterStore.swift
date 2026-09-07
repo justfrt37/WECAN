@@ -144,8 +144,14 @@ final class CharacterStore {
         } else if ReviewModeService.shared.isEnabled {
             // Review modunda sunucu boş döndü / hata verdi — NORMAL roster'a
             // ya da örnek karakterlere ASLA düşme (App Store review'da yasak
-            // içerik görünürdü). Boş liste, yanlış listeden iyidir.
-            characters = []
+            // içerik görünürdü) — AMA elimizde zaten adım 1'den (disk önbelleği)
+            // GEÇERLİ bir review-mode listesi varsa ONA DA DOKUNMA: bilinçli
+            // olarak hiçbir şey yapılmıyor. O liste zaten aynı güvenli kaynaktan
+            // (characters_review) geldi; geçici bir ağ/token hatası yüzünden
+            // onu `[]`'a çevirmek gereksiz kayıptı (bkz. kullanıcı raporu:
+            // "review modda kapat-aç sonrası tüm karakterler gidiyor, silip
+            // yükleyene kadar gelmiyor" — kök neden buydu). Elimizde HİÇ cache
+            // yoksa `characters` zaten boş kalır, ekstra atama gerekmez.
         } else if characters.isEmpty {
             characters = Character.samples
         }
