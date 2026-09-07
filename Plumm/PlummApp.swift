@@ -83,6 +83,10 @@ struct PlummApp: App {
         .onChange(of: scenePhase) { _, newPhase in
             switch newPhase {
             case .active:
+                // Klavye kapatma jesti pencereye burada takılıyor: `.task`
+                // çalıştığında UIWindow henüz hazır olmayabiliyor. Idempotent,
+                // her .active'de çağırmak zararsız (bkz. KeyboardDismisser).
+                KeyboardDismisser.shared.install()
                 // Soğuk açılıştaki İLK .active geçişi zaten .task'ta bir kez
                 // damgalanıyor (app_launch + startNewSession) — burası arka
                 // plandan DÖNÜŞLERİ de kapsıyor, bu yüzden her .active'de
