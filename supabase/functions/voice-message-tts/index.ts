@@ -53,6 +53,13 @@ async function chargeOrReject(uid: string, amount: number, reason: string): Prom
   return { ok: true, balance: row?.balance ?? 0 };
 }
 
+/// CLAIM edilmiş ama sentez/ücretlendirme başarısız olan bir satırı serbest
+/// bırakır — kullanıcı tekrar dokunabilsin diye "voice_pending"e geri döner.
+async function revertClaim(rowId: string | null): Promise<void> {
+  if (!rowId) return;
+  await db.from("messages").update({ kind: "voice_pending" }).eq("id", rowId);
+}
+
 /// Üretilen sesi `characters` public bucket'ına yükler → kalıcı public URL döner.
 /// Böylece chate tekrar girildiğinde ses (metin değil) geri gelir. Hata → null
 /// (istemci yine yerel dosyayla anlık çalar; sadece reload kalıcılığı kaybolur).
@@ -80,6 +87,14 @@ Deno.serve(async (req) => {
     // Per-character override (characters.voice_id). Null/absent keeps the
     // existing role+vibe auto-map below (elevenVoiceIdFor).
     const voiceIdOverride: string | undefined = typeof body.voiceId === "string" && body.voiceId.trim() ? body.voiceId.trim() : undefined;
+    // İkisi de yeni istemcilerde gelir (bkz. chat-image'daki simetrik CLAIM
+    // mantığı, aynı kök nedeni çözüyor): karakter kimliği konuşmayı bulmak,
+    // clientRequestId ise kilitli balonun kendisini KESİN olarak eşleştirmek
+    // için. Eski istemciler ikisini de göndermez — bu durumda claim/finalize
+    // tamamen atlanır, persist adımı client'ın eski reveal=true çağrısına
+    // (chat/index.ts) kalır, GERİYE DÖNÜK UYUMLU.
+    const characterId: string | undefined = typeof body.characterId === "string" && body.characterId.trim() ? body.characterId.trim() : undefined;
+    const clientRequestId: string | undefined = typeof body.clientRequestId === "string" && body.clientRequestId.trim() ? body.clientRequestId.trim() : undefined;
 
     if (!text || !text.trim() || !role || !vibe || !lang) {
       return new Response(
@@ -116,8 +131,63 @@ Deno.serve(async (req) => {
       });
     }
 
+    // CLAIM: bu bekleyen satırı atomik olarak "işleniyor" durumuna çeker —
+    // aynı balona iki eşzamanlı dokunuş SADECE birini geçirir, diğeri
+    // sentez/ücretlendirmeye hiç girmeden erken döner (bkz. chat-image'daki
+    // simetrik mantık ve kullanıcı raporu: "aynı bekleyen balona çift
+    // dokununca çift ücret"). Daha önce tamamlanmışsa aynı sonucu tekrar
+    // ücretlendirmeden döner (ağ kopması sonrası client'ın yeniden denemesi
+    // güvenli hale gelir).
+    let claimedRowId: string | null = null;
+    let claimedConvoId: string | null = null;
+    if (characterId && clientRequestId) {
+      let { data: convo } = await db.from("conversations")
+        .select("id").eq("user_id", uid).eq("character_id", characterId).maybeSingle();
+      if (!convo) {
+        const ins = await db.from("conversations")
+          .upsert({ user_id: uid, character_id: characterId }, { onConflict: "user_id,character_id" })
+          .select("id").single();
+        convo = ins.data!;
+      }
+      claimedConvoId = convo.id;
+      const { data: claimed } = await db.from("messages")
+        .update({ kind: "voice_claimed" })
+        .eq("conversation_id", convo.id)
+        .eq("kind", "voice_pending")
+        .eq("client_request_id", clientRequestId)
+        .select("id");
+      if (claimed && claimed[0]) {
+        claimedRowId = claimed[0].id;
+      } else {
+        const { data: existing } = await db.from("messages")
+          .select("id, kind, content")
+          .eq("conversation_id", convo.id)
+          .eq("client_request_id", clientRequestId)
+          .maybeSingle();
+        if (existing?.kind === "voice") {
+          const { data: balanceRow } = await db.from("token_balances").select("balance").eq("user_id", uid).maybeSingle();
+          return new Response(null, {
+            status: 200,
+            headers: {
+              ...corsHeaders, "Content-Type": "audio/mpeg",
+              "X-Token-Balance": String(balanceRow?.balance ?? ""),
+              "X-Voice-Url": existing.content ?? "",
+              "X-Already-Revealed": "true",
+            },
+          });
+        }
+        if (existing?.kind === "voice_claimed") {
+          return new Response(JSON.stringify({ error: "already_processing" }), {
+            status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+        // Satır bulunamadı — eski davranışa düş, claim edilmeden devam et.
+      }
+    }
+
     if (useElevenLabs) {
       if (!ELEVENLABS_API_KEY) {
+        await revertClaim(claimedRowId);
         return new Response(
           JSON.stringify({ error: "ELEVENLABS_API_KEY not configured" }),
           { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
@@ -134,6 +204,7 @@ Deno.serve(async (req) => {
       });
       if (!elevenResp.ok) {
         const errBody = await elevenResp.text();
+        await revertClaim(claimedRowId);
         return new Response(
           JSON.stringify({ error: `ElevenLabs TTS error: ${errBody}` }),
           { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } },
@@ -145,11 +216,22 @@ Deno.serve(async (req) => {
       // aynı düzeltme, aynı bug sınıfı).
       const charge = await chargeOrReject(uid, 12, "voice");
       if (!charge.ok) {
+        await revertClaim(claimedRowId);
         return new Response(JSON.stringify({ error: "insufficient_tokens" }), {
           status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
       const voiceUrl = await uploadVoice(bytes, uid);
+      // FINALIZE: pending satırı doğrudan burada gerçek sese çevir — client
+      // AYRICA bir reveal=true çağrısı atmasın, cevap ağda kaybolsa bile
+      // içerik zaten kalıcı (bkz. chat-image'daki aynı düzeltme).
+      if (claimedRowId && voiceUrl) {
+        await db.from("messages").update({ kind: "voice", content: voiceUrl }).eq("id", claimedRowId);
+        if (claimedConvoId) await db.from("conversations").update({ updated_at: new Date().toISOString() }).eq("id", claimedConvoId);
+      } else if (claimedRowId) {
+        // Yükleme başarısız (voiceUrl nil) — kalıcılaşmadı, tekrar denenebilsin.
+        await revertClaim(claimedRowId);
+      }
       return new Response(bytes, {
         status: 200,
         headers: {
@@ -161,6 +243,7 @@ Deno.serve(async (req) => {
     }
 
     if (!GOOGLE_TTS_API_KEY) {
+      await revertClaim(claimedRowId);
       return new Response(
         JSON.stringify({ error: "GOOGLE_TTS_API_KEY not configured" }),
         { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
@@ -182,6 +265,7 @@ Deno.serve(async (req) => {
 
     if (!googleResp.ok) {
       const errBody = await googleResp.text();
+      await revertClaim(claimedRowId);
       return new Response(
         JSON.stringify({ error: `Google TTS error: ${errBody}` }),
         { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } },
@@ -193,11 +277,18 @@ Deno.serve(async (req) => {
 
     const charge = await chargeOrReject(uid, 12, "voice");
     if (!charge.ok) {
+      await revertClaim(claimedRowId);
       return new Response(JSON.stringify({ error: "insufficient_tokens" }), {
         status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
     const voiceUrl = await uploadVoice(bytes, uid);
+    if (claimedRowId && voiceUrl) {
+      await db.from("messages").update({ kind: "voice", content: voiceUrl }).eq("id", claimedRowId);
+      if (claimedConvoId) await db.from("conversations").update({ updated_at: new Date().toISOString() }).eq("id", claimedConvoId);
+    } else if (claimedRowId) {
+      await revertClaim(claimedRowId);
+    }
     return new Response(bytes, {
       status: 200,
       headers: {

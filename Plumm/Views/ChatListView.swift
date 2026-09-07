@@ -101,7 +101,6 @@ struct ChatListView: View {
                 }
             }
         }
-        .task { await load() }
         // NOT: "Yazıyor…" durumu satırda zaten CANLI okunuyor (bkz. ~86
         // store.typingCharacterIDs.contains). Eskiden burada typingCharacterIDs
         // değişiminde TAM reload (iki ağ isteği + reparse + regroup + tüm
@@ -109,7 +108,15 @@ struct ChatListView: View {
         // göstergesi yanıt başına iki kez açılıp kapandığından bu her seferinde
         // gereksiz bir reload'a yol açıyordu. Kaldırıldı — yalnızca gerçekten
         // sohbet listesini değiştiren conversationsVersion reload'u kalsın.
-        .onChange(of: store.conversationsVersion) { Task { await load() } }
+        //
+        // `.task(id:)` — eski `.task { } .onChange { Task { } }` ikilisi HER
+        // conversationsVersion artışında ÖNCEKİ Task'ı iptal ETMEDEN yeni bir
+        // tane başlatıyordu; ağ cevapları sıra dışı dönerse geç-başlayan-hızlı-
+        // biten bir Task, erken-başlayan-yavaş-biten Task'ın üzerine bayat
+        // veriyle yazabiliyordu (bkz. denetim bulgusu 3.1). `.task(id:)`
+        // id değişince ÖNCEKİ Task'ı otomatik iptal eder — bu riski ortadan
+        // kaldırır, ayrıca ilk açılışı da (id'nin ilk değeri) kapsar.
+        .task(id: store.conversationsVersion) { await load() }
     }
 
     private func load() async {

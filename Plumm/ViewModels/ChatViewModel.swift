@@ -100,6 +100,12 @@ final class ChatViewModel {
         return false
     }
     var isVisible = false
+    /// "Sohbeti Temizle" her çağrıldığında artar — o anda HÂLÂ bekleyen bir
+    /// `send()` cevabı (deliverSegments) varsa, tamamlandığında bu sayacın
+    /// değiştiğini görüp mesajı sessizce ATAR — aksi halde "temizlenmiş"
+    /// sohbete az önce silinmeden ÖNCE atılmış bir mesajın cevabı sızıyordu
+    /// (bkz. denetim bulgusu 1.2, kullanıcı raporu).
+    private var chatEpoch = 0
     private var hasSyntheticOpening = false
     /// PRO gerektiren bir gönderim denendiğinde açılır (bkz. PurchaseService.isPro) —
     /// düğmelere basmak SERBEST, sadece gerçek GÖNDERIM anında kontrol edilir.
@@ -262,6 +268,7 @@ final class ChatViewModel {
         // ilk-selam yalnızca sohbet BİR SONRAKİ açılışında gelir.
         messages = []
         hasSyntheticOpening = false
+        chatEpoch += 1
         Task {
             if let store {
                 await ChatMaintenance.clearChat(
@@ -298,7 +305,13 @@ final class ChatViewModel {
 
     var canSend: Bool {
         let hasText = !inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        return hasText && !isSending && !isLoadingHistory
+        // `isAwaitingMediaBubble`: foto/ses düğmesine basılmış, kilitli balon
+        // henüz düşmemiş (bkz. sendImageRequest/sendVoiceRequest'in kendi
+        // guard'ı). Bunu burada da kontrol etmezsek kullanıcı o birkaç
+        // saniyede paralel bir metin mesajı da gönderebiliyordu — iki Task
+        // aynı `showsTypingBubble`/`typingCharacterIDs`'i sırasız değiştiriyordu
+        // (bkz. denetim bulgusu 1.3).
+        return hasText && !isSending && !isLoadingHistory && !isAwaitingMediaBubble
     }
 
     // MARK: - Geçmişi yükle
@@ -438,7 +451,10 @@ final class ChatViewModel {
 
     func send(_ preset: String? = nil) {
         let text = (preset ?? inputText).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, !isSending, !isLoadingHistory else { return }
+        // `isAwaitingMediaBubble`: bkz. canSend'deki aynı gerekçe (denetim
+        // bulgusu 1.3) — `send()` doğrudan (retrySend/preset ile) `canSend`
+        // kontrolünü ATLAYARAK da çağrılabildiği için burada AYRICA kontrol edilir.
+        guard !text.isEmpty, !isSending, !isLoadingHistory, !isAwaitingMediaBubble else { return }
         let cost = 1
         // Kredi yetmiyorsa istek ATMA — paywall aç (PRO→coin, değilse→PRO).
         guard hasTokensOrPaywall(cost: cost) else { return }
@@ -456,6 +472,7 @@ final class ChatViewModel {
         isSending = true
         errorMessage = nil
         deductBadgeOptimistically(cost)
+        let startEpoch = chatEpoch
 
         Task {
             await handleWakeUpIfAsleep()
@@ -487,7 +504,7 @@ final class ChatViewModel {
                 // üretim/blur/token maliyeti (bkz. generatePendingImage/Voice)
                 // BİREBİR aynı, düğmelerin kendisi de değişmeden çalışmaya devam
                 // eder (bkz. kullanıcı talebi 2026-08-26).
-                await deliverSegments(result, bubbleStartedAt: bubbleStartedAt)
+                await deliverSegments(result, bubbleStartedAt: bubbleStartedAt, startEpoch: startEpoch)
                 handleTokenBalance(result.tokenBalance)
                 triggerAutoMediaIfNeeded(result.autoMedia)
 
@@ -590,7 +607,11 @@ final class ChatViewModel {
     /// aralarında `delaySeconds` kadar "yazıyor..." göstererek art arda ekler;
     /// boşsa/nil ise eski tek-balon davranışına düşer (voice/image-reaction
     /// turları ve her türlü eski sunucu cevabı için sıfır riskli geri dönüş).
-    private func deliverSegments(_ result: ChatReply, bubbleStartedAt: Date) async {
+    private func deliverSegments(_ result: ChatReply, bubbleStartedAt: Date, startEpoch: Int) async {
+        // Bu Task başladıktan SONRA "Sohbeti Temizle" çağrıldıysa (bkz.
+        // chatEpoch), bu cevabı artık boş/yeni bir sohbete EKLEME — sessizce
+        // at (bkz. denetim bulgusu 1.2).
+        guard startEpoch == chatEpoch else { return }
         let serverSegments: [ReplySegment]
         if let paced = result.replySegments, !paced.isEmpty {
             serverSegments = paced
@@ -661,6 +682,7 @@ final class ChatViewModel {
         NotificationScheduler.shared.noteUserSent(character: character)
         isSending = true
         errorMessage = nil
+        let startEpoch = chatEpoch
 
         Task {
             await handleWakeUpIfAsleep()
@@ -683,7 +705,7 @@ final class ChatViewModel {
                     nearSleepTime: isNearSleepTime()
                 )
 
-                await deliverSegments(result, bubbleStartedAt: bubbleStartedAt)
+                await deliverSegments(result, bubbleStartedAt: bubbleStartedAt, startEpoch: startEpoch)
                 handleTokenBalance(result.tokenBalance)
                 // `gotPhoto: nil` — bu bir GELEN fotoğraf. Seviye/ilerleme sunucudan gelir.
                 applyPostReplyEffects(gotPhoto: nil, stored: stored,
@@ -809,7 +831,13 @@ final class ChatViewModel {
 
         // "Kilitli/açılmamış" sesi SUNUCUDA sakla (foto isteğindeki gibi) — üretmeden
         // çıkıp girse bile kilitli ses balonu olarak geri gelir (kind=voice_pending).
-        Task { await service.saveVoiceMessage(character: character, requestText: requestText, url: nil) }
+        // `pendingID` sunucuya client_request_id olarak gider — reveal artık
+        // bu KESİN kimlikle eşleşiyor (bkz. generatePendingVoice, kullanıcı
+        // raporu: "birden fazla bekleyen balondan yanlışı açılıyordu").
+        Task {
+            await service.saveVoiceMessage(character: character, requestText: requestText, url: nil,
+                                            clientRequestId: pendingID.uuidString.lowercased())
+        }
 
         // ~3 sn "hazırlanıyor" (yanıp sönen mikrofon) — sonra kalp/kilit
         // animasyonlu belirir (bkz. PendingVoiceBubble transition).
@@ -847,9 +875,6 @@ final class ChatViewModel {
         let text = "[The user tapped \"send me a voice\". Send them a voice note now — "
             + "just say something natural in your own voice, picking up wherever the chat is. "
             + "Don't answer it like a question, don't narrate that you're recording, just talk. Keep it short.]"
-        // Sunucudaki kilitli (voice_pending) satırı gerçek sese çevirmek için
-        // pending balonun requestText'i (her zaman dolu) kullanılır.
-        let serverRequestText = messages[idx].pendingVoiceRequestText ?? String(localized: "Send me a voice")
         let lastMessageAt = idx > 0 ? messages[idx - 1].createdAt : nil
 
         // Bu pending balon YERİNDE güncellenir (kendi "üretiliyor" durumunu
@@ -890,7 +915,8 @@ final class ChatViewModel {
                 let lang = VoiceLanguage.detect(from: cleanedReply)
                 let ttsResult = await TTSService().synthesizeVoiceMessage(
                     text: result.reply, role: character.personalityRole, vibe: character.vibe, lang: lang,
-                    useElevenLabs: true, voiceId: character.voiceId
+                    useElevenLabs: true, voiceId: character.voiceId,
+                    characterId: character.id.uuidString.lowercased(), clientRequestId: messageID.uuidString.lowercased()
                 )
                 let audioData: Data
                 let voiceRemoteURL: URL?
@@ -946,11 +972,10 @@ final class ChatViewModel {
                 store?.chatCache[character.id] = realMessages()
                 generatingVoiceMessageIDs.remove(messageID)
                 updateCache()
-
-                // Sesi SUNUCUDA sakla: aynı requestText'li "kilitli" (voice_pending)
-                // satır gerçek sese (kind=voice, content=URL) çevrilir. Böylece chate
-                // tekrar girince METİN değil SES balonu görünür (foto ile simetrik).
-                await service.saveVoiceMessage(character: character, requestText: serverRequestText, url: voiceRemoteURL?.absoluteString, reveal: true)
+                // NOT: sunucudaki pending satır artık AYRICA bir reveal çağrısı
+                // gerektirmiyor — voice-message-tts az önce bunu kendi içinde
+                // (CLAIM+finalize, `clientRequestId` ile) kalıcılaştırdı. Bkz.
+                // synthesizeVoiceMessage çağrısı yukarıda.
 
                 applyPostReplyEffects(gotPhoto: nil, stored: stored)
             } catch {
@@ -1060,8 +1085,11 @@ final class ChatViewModel {
             if isVisible { markReadNow() }
             Task {
                 // Açılmamış (kilitli) foto'yu SUNUCUDA sakla — üretmeden çıkıp
-                // girse bile "üret" balonu olarak geri gelsin.
-                await service.savePhotoMessage(character: character, prompt: prompt, url: nil)
+                // girse bile "üret" balonu olarak geri gelsin. `pendingID`
+                // client_request_id olarak gider — reveal artık bu KESİN
+                // kimlikle eşleşiyor (bkz. generatePendingImage).
+                await service.savePhotoMessage(character: character, prompt: prompt, url: nil,
+                                                clientRequestId: pendingID.uuidString.lowercased())
             }
         }
         guard withTypingPreamble else { drop(); return pendingID }
@@ -1109,7 +1137,8 @@ final class ChatViewModel {
                 let imageResult = try await service.generateChatImage(
                     character: character, prompt: prompt,
                     localMessages: realMessages(), summary: stored?.summary ?? "",
-                    currentActivity: currentActivity?.detail
+                    currentActivity: currentActivity?.detail,
+                    clientRequestId: messageID.uuidString.lowercased()
                 )
 
                 // Gerçekten indirildi garantisi — CachedImage boş kare göstermesin.
@@ -1127,14 +1156,10 @@ final class ChatViewModel {
                 generatingImageMessageIDs.remove(messageID)
                 handleTokenBalance(imageResult.tokenBalance)
 
-                // Üretilen fotoğrafı SUNUCUDA sakla: aynı prompt'lu "açılmamış"
-                // (image_pending) satır gerçek görsele (kind=image) çevrilir; yoksa
-                // yeni image satırı eklenir (bkz. chat/index.ts photoMessage). Böylece
-                // hem açılmamış hem açılmış foto reload sonrası doğru durumda görünür.
-                // Caption turundan ÖNCE saklanır ki sıralama doğru olsun.
-                await service.savePhotoMessage(
-                    character: character, prompt: prompt, url: imageResult.url.absoluteString, reveal: true
-                )
+                // NOT: sunucudaki pending satır artık AYRICA bir reveal çağrısı
+                // gerektirmiyor — chat-image/index.ts az önce bunu kendi içinde
+                // (CLAIM+finalize, `clientRequestId` ile) kalıcılaştırdı. Bkz.
+                // generateChatImage çağrısı yukarıda.
 
                 // "Send me a photo" düğmesiyle düşen bir kutuysa ve eşlik mesajı
                 // FOTO SONRASI seçildiyse ("işte 😊") şimdi gönder (bkz.
