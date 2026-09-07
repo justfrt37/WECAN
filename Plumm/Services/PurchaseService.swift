@@ -922,11 +922,17 @@ final class PurchaseService {
         case "pro":      tier = .pro
         default:         tier = .none
         }
-        tierExpiresAt = row.currentPeriodEnd.flatMap {
-            ISO8601DateFormatter().date(from: $0) ?? {
-                let f = ISO8601DateFormatter(); f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-                return f.date(from: $0)
-            }()
+        // Parametre AÇIKÇA adlandırılıyor: iç içe kapanışta `$0`, dıştaki
+        // kapanışın parametresine erişmiyor (iç kapanışın kendi — var olmayan —
+        // parametresini arıyor) ve derleme "missing argument for parameter #1"
+        // ile patlıyordu.
+        tierExpiresAt = row.currentPeriodEnd.flatMap { raw -> Date? in
+            if let date = ISO8601DateFormatter().date(from: raw) { return date }
+            // Postgres kesirli saniye döndürüyor (…:16.696+00), düz
+            // ISO8601DateFormatter bunu ayrıştırmıyor — ikinci deneme onun için.
+            let fractional = ISO8601DateFormatter()
+            fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            return fractional.date(from: raw)
         }
         PurchaseService.diag.log("""
             [PW-DIAG] serverTier kaynak=Supabase uid=\(uid, privacy: .public) \
