@@ -54,7 +54,7 @@ final class ReviewModeService {
         let request = SupabaseRequest.authorized(url: url, bearer: SupabaseRequest.sessionBearer, timeout: 8)
 
         do {
-            let (data, response) = try await URLSession.shared.data(for: request)
+            let (data, response) = try await URLSession.shared.logged(for: request)
             guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
                 return nil
             }

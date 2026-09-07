@@ -35,7 +35,7 @@ final class TokenStore {
               let url = URL(string: "\(Config.supabaseURL)/rest/v1/token_balances?select=balance")
         else { return }
         let request = SupabaseRequest.authorized(url: url, bearer: accessToken)
-        guard let (data, response) = try? await URLSession.shared.data(for: request),
+        guard let (data, response) = try? await URLSession.shared.logged(for: request),
               let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode)
         else { return }
         struct Row: Decodable { let balance: Int }

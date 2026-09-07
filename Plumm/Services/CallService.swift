@@ -21,7 +21,7 @@ struct CallService {
     private func request(url: URL, body: [String: Any]) async throws -> (Data, HTTPURLResponse) {
         var req = SupabaseRequest.post(url: url, bearer: SupabaseRequest.sessionBearer, timeout: 30)
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
-        let (data, response) = try await URLSession.shared.data(for: req)
+        let (data, response) = try await URLSession.shared.logged(for: req)
         guard let http = response as? HTTPURLResponse else { throw CallServiceError.decoding }
         return (data, http)
     }

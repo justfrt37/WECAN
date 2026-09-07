@@ -340,7 +340,7 @@ final class NotificationScheduler {
         request.httpBody = try? JSONEncoder().encode(Req(prompt: prompt, maxTokens: 60))
 
         let fallback = Self.jealousyEscalationFallback[language] ?? Self.jealousyEscalationFallback["en"]!
-        guard let (data, response) = try? await URLSession.shared.data(for: request),
+        guard let (data, response) = try? await URLSession.shared.logged(for: request),
               let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
               let decoded = try? JSONDecoder().decode(Resp.self, from: data),
               let text = decoded.text?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty

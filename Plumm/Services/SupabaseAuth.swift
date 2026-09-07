@@ -128,7 +128,7 @@ enum SupabaseAuth {
     private static func attemptRefresh() async -> RefreshOutcome {
         guard let request = refreshRequest() else { return .noToken }
         do {
-            let (data, resp) = try await URLSession.shared.data(for: request)
+            let (data, resp) = try await URLSession.shared.logged(for: request)
             let code = (resp as? HTTPURLResponse)?.statusCode ?? -1
             if (200..<300).contains(code) {
                 guard let session = try? JSONDecoder().decode(Session.self, from: data),
@@ -149,7 +149,7 @@ enum SupabaseAuth {
 
     private static func perform(_ request: URLRequest, label: String) async -> Bool {
         do {
-            let (data, resp) = try await URLSession.shared.data(for: request)
+            let (data, resp) = try await URLSession.shared.logged(for: request)
             let code = (resp as? HTTPURLResponse)?.statusCode ?? -1
             guard (200..<300).contains(code) else {
                 let body = String(data: data, encoding: .utf8) ?? ""

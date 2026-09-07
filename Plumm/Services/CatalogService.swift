@@ -63,7 +63,7 @@ final class CatalogService {
         var req = URLRequest(url: url)
         req.setValue(Config.supabaseAnonKey, forHTTPHeaderField: "apikey")
         req.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
-        guard let (data, resp) = try? await URLSession.shared.data(for: req),
+        guard let (data, resp) = try? await URLSession.shared.logged(for: req),
               let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode),
               let payload = try? JSONDecoder().decode(Payload.self, from: data)
         else {

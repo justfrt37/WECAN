@@ -130,7 +130,7 @@ final class ImageCache {
             while index < pending.count && index < maxConcurrent {
                 let url = pending[index]
                 group.addTask {
-                    guard let (data, _) = try? await URLSession.shared.data(from: url) else { return }
+                    guard let (data, _) = try? await URLSession.shared.logged(from: url) else { return }
                     ImageCache.shared.insert(data: data, for: url)
                 }
                 index += 1
@@ -140,7 +140,7 @@ final class ImageCache {
                 guard index < pending.count else { continue }
                 let url = pending[index]
                 group.addTask {
-                    guard let (data, _) = try? await URLSession.shared.data(from: url) else { return }
+                    guard let (data, _) = try? await URLSession.shared.logged(from: url) else { return }
                     ImageCache.shared.insert(data: data, for: url)
                 }
                 index += 1

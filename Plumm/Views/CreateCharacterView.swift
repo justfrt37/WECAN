@@ -1192,7 +1192,7 @@ struct CreateCharacterView: View {
             if let url = URL(string: photoURLString) {
                 var req = URLRequest(url: url)
                 req.timeoutInterval = 20
-                if let (data, _) = try? await URLSession.shared.data(for: req) {
+                if let (data, _) = try? await URLSession.shared.logged(for: req) {
                     // Büyük AI görselini ana aktörde çözme — UI'ı bloklar.
                     // Arka planda çöz, yalnızca sonucu main'e ata.
                     let ui = await Task.detached { UIImage(data: data) }.value

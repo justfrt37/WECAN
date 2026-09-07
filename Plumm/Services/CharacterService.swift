@@ -16,7 +16,7 @@ struct CharacterService {
         // Falls back to anon key if not signed in (anon can only see system chars).
         let request = SupabaseRequest.authorized(url: url, bearer: SupabaseRequest.sessionBearer)
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await URLSession.shared.logged(for: request)
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
             let code = (response as? HTTPURLResponse)?.statusCode ?? -1
             throw NSError(domain: "CharacterService", code: code,

@@ -121,7 +121,7 @@ final class EventLogger {
             request.httpBody = body
             // Sessizce yut — analytics hiçbir kullanıcı akışını asla engellemez/
             // uyarı göstermez, en kötü ihtimalle o parti kaybolur.
-            _ = try? await URLSession.shared.data(for: request)
+            _ = try? await URLSession.shared.logged(for: request)
         }
     }
 }

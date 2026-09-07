@@ -33,7 +33,7 @@ enum StreakService {
         let localDate = localDateFormatter.string(from: Date())
         request.httpBody = try? JSONSerialization.data(withJSONObject: ["localDate": localDate])
 
-        guard let (data, response) = try? await URLSession.shared.data(for: request),
+        guard let (data, response) = try? await URLSession.shared.logged(for: request),
               let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode)
         else { return nil }
         return try? JSONDecoder().decode(StreakClaimResult.self, from: data)

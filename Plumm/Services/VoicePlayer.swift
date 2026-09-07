@@ -181,7 +181,7 @@ struct TTSService {
         guard let url = URL(string: "\(Config.supabaseURL)/functions/v1/tts"),
               let req = Self.request(url: url, payload: ["text": text], timeout: 20) else { return nil }
 
-        guard let (data, resp) = try? await URLSession.shared.data(for: req),
+        guard let (data, resp) = try? await URLSession.shared.logged(for: req),
               let http = resp as? HTTPURLResponse, http.statusCode == 200,
               http.value(forHTTPHeaderField: "Content-Type")?.contains("audio") == true,
               !data.isEmpty
@@ -223,7 +223,7 @@ extension TTSService {
         guard let req = Self.request(url: Config.voiceMessageTTSFunctionURL, payload: payload, timeout: 30)
         else { return .failure }
 
-        guard let (data, resp) = try? await URLSession.shared.data(for: req),
+        guard let (data, resp) = try? await URLSession.shared.logged(for: req),
               let http = resp as? HTTPURLResponse
         else { return .failure }
 
@@ -287,7 +287,7 @@ extension VoicePlayer {
             return
         }
         Task {
-            guard let (data, _) = try? await URLSession.shared.data(from: remoteURL) else { return }
+            guard let (data, _) = try? await URLSession.shared.logged(from: remoteURL) else { return }
             try? data.write(to: localURL, options: .atomic)
             playFile(at: filename, id: id)
         }

@@ -127,7 +127,7 @@ struct ConversationsService {
     private func get<T: Decodable>(_ endpoint: String, retrying: Bool = true) async -> T? {
         guard let url = URL(string: endpoint) else { return nil }
         let request = SupabaseRequest.authorized(url: url, bearer: SupabaseRequest.sessionBearer, timeout: 20)
-        guard let (data, response) = try? await URLSession.shared.data(for: request),
+        guard let (data, response) = try? await URLSession.shared.logged(for: request),
               let http = response as? HTTPURLResponse
         else { return nil }
         // Bir bildirimden SAATLER sonra (ör. Ghosted, 48 saate kadar) uygulama

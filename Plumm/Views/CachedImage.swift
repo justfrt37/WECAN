@@ -63,10 +63,10 @@ struct CachedImage<Content: View, Placeholder: View>: View {
         var request = URLRequest(url: url)
         request.timeoutInterval = 20
         var data: Data?
-        data = try? await URLSession.shared.data(for: request).0
+        data = try? await URLSession.shared.logged(for: request).0
         if data == nil {
             try? await Task.sleep(nanoseconds: 500_000_000)
-            data = try? await URLSession.shared.data(for: request).0
+            data = try? await URLSession.shared.logged(for: request).0
         }
         guard let data else { return }
         let img = await Task.detached(priority: .userInitiated) {

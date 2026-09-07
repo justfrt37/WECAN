@@ -278,7 +278,7 @@ final class PurchaseService {
     private func logOfferings(_ offerings: Offerings) {
         let current = offerings.current?.identifier ?? "yok"
         PurchaseService.diag.log("""
-            [PW-DIAG] offerings yüklendi offeringSayısı=\(offerings.all.count, privacy: .public) \
+            [g-DIAG] offerings yüklendi offeringSayısı=\(offerings.all.count, privacy: .public) \
             current=\(current, privacy: .public) \
             eşlenen: pro=\(self.proPackages.count, privacy: .public) \
             plus=\(self.proPlusPackages.count, privacy: .public) \
@@ -624,7 +624,7 @@ final class PurchaseService {
             req.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
             let payload: [String: Any] = transactionId.map { ["transactionId": $0] } ?? [:]
             req.httpBody = try? JSONSerialization.data(withJSONObject: payload)
-            guard let (data, resp) = try? await URLSession.shared.data(for: req),
+            guard let (data, resp) = try? await URLSession.shared.logged(for: req),
                   let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode),
                   let decoded = try? JSONDecoder().decode(GrantResponse.self, from: data)
             else {
@@ -688,7 +688,7 @@ final class PurchaseService {
         let appUserId = Purchases.shared.appUserID
         req.httpBody = try? JSONSerialization.data(withJSONObject: ["appUserId": appUserId])
         struct SyncResponse: Decodable { let tier: String?; let balance: Int? }
-        guard let (data, resp) = try? await URLSession.shared.data(for: req) else {
+        guard let (data, resp) = try? await URLSession.shared.logged(for: req) else {
             print("[PW-DIAG] sync ağ hatası")
             return false
         }
@@ -763,7 +763,7 @@ final class PurchaseService {
         req.httpBody = try? JSONSerialization.data(withJSONObject: [
             "action": "set_tier", "tier": wire, "tokens": tokens, "periodStart": periodStart,
         ])
-        _ = try? await URLSession.shared.data(for: req)
+        _ = try? await URLSession.shared.logged(for: req)
         tier = mapped
         print("[PW-DIAG] DEBUG grant tier=\(wire) tokens=\(tokens) period=\(periodStart)")
     }
@@ -865,7 +865,7 @@ final class PurchaseService {
         var req = URLRequest(url: url)
         req.setValue(Config.supabaseAnonKey, forHTTPHeaderField: "apikey")
         req.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
-        guard let (data, resp) = try? await URLSession.shared.data(for: req),
+        guard let (data, resp) = try? await URLSession.shared.logged(for: req),
               let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode)
         else {
             PurchaseService.diag.log("[PW-DIAG] serverTier: istek BAŞARISIZ, tier korunuyor (\(self.tier.rawValue, privacy: .public))")

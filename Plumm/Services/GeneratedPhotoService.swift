@@ -29,7 +29,7 @@ struct GeneratedPhotoService {
 
         let request = SupabaseRequest.authorized(url: url, bearer: accessToken, timeout: 20)
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await URLSession.shared.logged(for: request)
         guard let http = response as? HTTPURLResponse else {
             throw NSError(domain: "GeneratedPhotoService", code: -1,
                           userInfo: [NSLocalizedDescriptionKey: "Couldn't fetch generated photos"])

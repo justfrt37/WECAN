@@ -273,7 +273,7 @@ struct ChatService {
             AddNoteRequest(characterId: characterId.uuidString.lowercased(), kind: kind, content: content)
         )
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await URLSession.shared.logged(for: request)
         guard let http = response as? HTTPURLResponse else { throw ChatServiceError.decoding }
         if (200..<300).contains(http.statusCode) {
             let decoded = try? JSONDecoder().decode(AddNoteResponse.self, from: data)
@@ -297,7 +297,7 @@ struct ChatService {
             SetNicknameRequest(characterId: characterId.uuidString.lowercased(), kind: kind, content: content)
         )
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await URLSession.shared.logged(for: request)
         guard let http = response as? HTTPURLResponse else { throw ChatServiceError.decoding }
         if (200..<300).contains(http.statusCode) {
             let decoded = try? JSONDecoder().decode(AddNoteResponse.self, from: data)
@@ -314,7 +314,7 @@ struct ChatService {
         var request = authorizedRequest(url: Config.levelBoostFunctionURL, timeout: 20)
         request.httpBody = try? JSONEncoder().encode(LevelBoostRequest(characterId: characterId.uuidString.lowercased()))
 
-        guard let (data, response) = try? await URLSession.shared.data(for: request),
+        guard let (data, response) = try? await URLSession.shared.logged(for: request),
               let http = response as? HTTPURLResponse
         else { return .failed }
 
@@ -371,7 +371,7 @@ struct ChatService {
             injectProactive: InjectProactivePayload(kind: kind, text: text, createIfMissing: createIfMissing, messageKind: messageKind, role: role)
         )) else { return false }
         request.httpBody = body
-        guard let (data, response) = try? await URLSession.shared.data(for: request),
+        guard let (data, response) = try? await URLSession.shared.logged(for: request),
               let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode)
         else { return false }
         let decoded = try? JSONDecoder().decode(InjectProactiveResponse.self, from: data)
@@ -405,7 +405,7 @@ struct ChatService {
             photoMessage: PhotoMessagePayload(prompt: prompt, url: url, reveal: reveal)
         )) else { return false }
         request.httpBody = body
-        guard let (_, response) = try? await URLSession.shared.data(for: request),
+        guard let (_, response) = try? await URLSession.shared.logged(for: request),
               let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode)
         else { return false }
         return true
@@ -438,7 +438,7 @@ struct ChatService {
             voiceMessage: VoiceMessagePayload(requestText: requestText, url: url, reveal: reveal)
         )) else { return false }
         request.httpBody = body
-        guard let (_, response) = try? await URLSession.shared.data(for: request),
+        guard let (_, response) = try? await URLSession.shared.logged(for: request),
               let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode)
         else { return false }
         return true
@@ -628,7 +628,7 @@ struct ChatService {
             )
         )
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await URLSession.shared.logged(for: request)
         guard let http = response as? HTTPURLResponse else { throw ChatServiceError.decoding }
         guard (200..<300).contains(http.statusCode) else {
             throw ChatServiceError.badStatus(http.statusCode, String(data: data, encoding: .utf8) ?? "")
@@ -778,7 +778,7 @@ struct ChatService {
         func attempt() async throws -> (Data, HTTPURLResponse) {
             var request = authorizedRequest(url: url, timeout: timeout)
             request.httpBody = body
-            let (data, response) = try await URLSession.shared.data(for: request)
+            let (data, response) = try await URLSession.shared.logged(for: request)
             guard let http = response as? HTTPURLResponse else { throw ChatServiceError.decoding }
             return (data, http)
         }
