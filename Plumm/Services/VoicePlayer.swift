@@ -212,7 +212,10 @@ extension TTSService {
     /// sunucuda (Supabase secret), istemcide hiç bulunmaz. Token bakiyesi
     /// bir JSON alanı değil, `X-Token-Balance` cevap başlığından okunur —
     /// başarı gövdesi ham ses baytları (bkz. voice-message-tts/index.ts).
-    func synthesizeVoiceMessage(text: String, role: String, vibe: String, lang: String, useElevenLabs: Bool = false, voiceId: String? = nil) async -> TTSResult {
+    func synthesizeVoiceMessage(
+        text: String, role: String, vibe: String, lang: String, useElevenLabs: Bool = false, voiceId: String? = nil,
+        characterId: String? = nil, clientRequestId: String? = nil
+    ) async -> TTSResult {
         var payload: [String: Any] = [
             "text": text, "role": role, "vibe": vibe, "lang": lang, "useElevenLabs": useElevenLabs,
         ]
@@ -220,6 +223,15 @@ extension TTSService {
         // uses it directly when present, else falls back to the role+vibe
         // map (bkz. voice-message-tts/index.ts).
         if let voiceId, !voiceId.isEmpty { payload["voiceId"] = voiceId }
+        // İkisi de sunucudaki CLAIM/finalize (atomik reveal) için — pending
+        // balonun kendi kimliği ile eşleştirilip, yükleme SUNUCUDA kalıcı
+        // hale getirilir (bkz. voice-message-tts/index.ts, kullanıcı raporu:
+        // "aynı bekleyen balona çift dokununca çift ücret" / "sunucuda
+        // üretim bitti ama client'a ulaşmadı, içerik hiç görünmüyor").
+        if let characterId, let clientRequestId {
+            payload["characterId"] = characterId
+            payload["clientRequestId"] = clientRequestId
+        }
         guard let req = Self.request(url: Config.voiceMessageTTSFunctionURL, payload: payload, timeout: 30)
         else { return .failure }
 

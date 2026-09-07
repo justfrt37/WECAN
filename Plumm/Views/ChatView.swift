@@ -22,6 +22,7 @@ struct ChatView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(CharacterStore.self) private var store
     @Environment(TokenStore.self) private var tokenStore
+    @Environment(\.scenePhase) private var scenePhase
 
     @State private var showProfile = false
     @State private var showTokenStore = false
@@ -116,6 +117,20 @@ struct ChatView: View {
             // Sohbetten çıkınca ses çalmaya devam etmesin — oynatıcıyı durdur
             // (ses oturumunu da bırakır).
             voice.stop()
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            // Home tuşuna basılıp uygulama arka plana alındığında (ekran
+            // kilitlense/başka app'e geçilse bile) ChatView view hiyerarşisinde
+            // hâlâ "üstte" kalır — onDisappear TETİKLENMEZ, isVisible true
+            // takılı kalırdı. Bu durumda arka planda gelen bir cevap yanlışlıkla
+            // "kullanıcı gördü" sayılıyordu (bkz. kullanıcı raporu ve denetim
+            // bulgusu 1.1). Uygulama tekrar öne gelince (hâlâ bu ekrandaysak)
+            // isVisible yeniden true'ya çekilir.
+            switch newPhase {
+            case .active: viewModel.isVisible = true
+            case .background, .inactive: viewModel.isVisible = false
+            @unknown default: break
+            }
         }
         .task {
             viewModel.store = store

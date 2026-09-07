@@ -382,6 +382,10 @@ struct ChatService {
         let prompt: String
         let url: String?
         let reveal: Bool
+        /// Balonun kendi kimliği (pendingID) — sunucudaki CLAIM/finalize
+        /// mantığı artık content+FIFO tahmini yerine bunu kullanıyor (bkz.
+        /// chat-image/index.ts, kullanıcı raporu: "yanlış balon açılıyor").
+        let clientRequestId: String?
     }
     private struct PhotoMessageRequest: Codable {
         let characterId: String
@@ -390,19 +394,17 @@ struct ChatService {
     }
 
     /// Foto balonunun kalıcı durumunu sunucuya yazar (bkz. chat/index.ts
-    /// photoMessage). `reveal == false` → yeni "açılmamış/kilitli" foto satırı
-    /// oluştur; `reveal == true` → var olan pending satırı gerçek görsele çevir
-    /// (`url` doluysa içerik URL olur, üretim/yükleme başarısız olup `url` nil
-    /// gelse BİLE var olan satır kilitten çıkar — sunucu bunu YENİ istek sanıp
-    /// sonsuz pending satırı biriktirmesin, bkz. kullanıcı raporu: "sesi/fotoyu
-    /// görsem bile okunmadı diyor" kök nedeni).
+    /// photoMessage). SADECE "açılmamış/kilitli" foto satırı oluşturmak için
+    /// (`reveal` her zaman false) — gerçek görsele çevirme artık AYRI bir
+    /// çağrı değil, chat-image/index.ts'in kendisi (CLAIM+finalize) yapıyor
+    /// (bkz. generateChatImage).
     @discardableResult
-    func savePhotoMessage(character: Character, prompt: String, url: String?, reveal: Bool = false) async -> Bool {
+    func savePhotoMessage(character: Character, prompt: String, url: String?, reveal: Bool = false, clientRequestId: String? = nil) async -> Bool {
         var request = authorizedRequest(url: Config.chatFunctionURL, timeout: 20)
         guard let body = try? JSONEncoder().encode(PhotoMessageRequest(
             characterId: character.id.uuidString.lowercased(),
             systemPrompt: character.systemPrompt,
-            photoMessage: PhotoMessagePayload(prompt: prompt, url: url, reveal: reveal)
+            photoMessage: PhotoMessagePayload(prompt: prompt, url: url, reveal: reveal, clientRequestId: clientRequestId)
         )) else { return false }
         request.httpBody = body
         guard let (_, response) = try? await URLSession.shared.logged(for: request),
@@ -415,6 +417,7 @@ struct ChatService {
         let requestText: String
         let url: String?
         let reveal: Bool
+        let clientRequestId: String?
     }
     private struct VoiceMessageRequest: Codable {
         let characterId: String
@@ -423,19 +426,16 @@ struct ChatService {
     }
 
     /// Sesli mesaj balonunun kalıcı durumunu sunucuya yazar (bkz. chat/index.ts
-    /// voiceMessage — foto ile simetrik). `reveal == false` → yeni kilitli ses
-    /// satırı oluştur (kind=voice_pending); `reveal == true` → var olan pending
-    /// satırı gerçek sese çevir (`url` doluysa content=URL, kind=voice; upload
-    /// başarısız olup `url` nil gelse BİLE aynı satır kilitten çıkar — aksi
-    /// halde sunucu bunu yeni istek sanıp aynı balon her açılışta bir pending
-    /// satır daha ekliyordu, bkz. kullanıcı raporu kök nedeni).
+    /// voiceMessage — foto ile simetrik). SADECE kilitli ses satırı oluşturmak
+    /// için (`reveal` her zaman false) — gerçek sese çevirme artık
+    /// voice-message-tts'in kendisi (CLAIM+finalize) yapıyor.
     @discardableResult
-    func saveVoiceMessage(character: Character, requestText: String, url: String?, reveal: Bool = false) async -> Bool {
+    func saveVoiceMessage(character: Character, requestText: String, url: String?, reveal: Bool = false, clientRequestId: String? = nil) async -> Bool {
         var request = authorizedRequest(url: Config.chatFunctionURL, timeout: 20)
         guard let body = try? JSONEncoder().encode(VoiceMessageRequest(
             characterId: character.id.uuidString.lowercased(),
             systemPrompt: character.systemPrompt,
-            voiceMessage: VoiceMessagePayload(requestText: requestText, url: url, reveal: reveal)
+            voiceMessage: VoiceMessagePayload(requestText: requestText, url: url, reveal: reveal, clientRequestId: clientRequestId)
         )) else { return false }
         request.httpBody = body
         guard let (_, response) = try? await URLSession.shared.logged(for: request),
@@ -531,6 +531,11 @@ struct ChatService {
         /// App Store review modu (bkz. ReviewModeService / chat-image reviewMode):
         /// sunucu karakteri `characters_review`'dan çeker ve fotoyu zorla SFW üretir.
         let reviewMode: Bool?
+        /// Bekleyen balonun kendi kimliği — sunucu bunu bulup CLAIM edip
+        /// üretim+ücretlendirme+kalıcılaştırmayı TEK adımda, atomik yapar
+        /// (bkz. chat-image/index.ts, kullanıcı raporu: "aynı bekleyen
+        /// balona çift dokununca çift ücret" / "yanlış balon açılıyor").
+        let clientRequestId: String?
     }
 
     private struct ChatImageResponse: Codable {
@@ -556,7 +561,7 @@ struct ChatService {
     /// `summary` — sohbette daha önce kurulmuş gerçekleri (ör. "laboratuvarda
     /// çalışıyorum") görsel üretim promptuna taşımak için, `sendWithLocalHistory`
     /// ile aynı amaçla gönderilir.
-    func generateChatImage(character: Character, prompt: String, localMessages: [Message], summary: String, currentActivity: String? = nil) async throws -> ChatImageResult {
+    func generateChatImage(character: Character, prompt: String, localMessages: [Message], summary: String, currentActivity: String? = nil, clientRequestId: String? = nil) async throws -> ChatImageResult {
         let bodyData = try JSONEncoder().encode(
             ChatImageRequest(
                 characterId: character.id.uuidString.lowercased(),
@@ -564,7 +569,8 @@ struct ChatService {
                 history: wireHistory(from: localMessages),
                 summary: summary.isEmpty ? nil : summary,
                 currentActivity: currentActivity,
-                reviewMode: ReviewModeService.isEnabledSnapshot ? true : nil
+                reviewMode: ReviewModeService.isEnabledSnapshot ? true : nil,
+                clientRequestId: clientRequestId
             )
         )
 

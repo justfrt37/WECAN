@@ -1323,6 +1323,8 @@ Deno.serve(async (req: Request) => {
       const prompt: string = String(body.photoMessage.prompt ?? "");
       const url: string | null = typeof body.photoMessage.url === "string" ? body.photoMessage.url : null;
       const reveal: boolean = body.photoMessage.reveal === true;
+      const clientRequestId: string | null = typeof body.photoMessage.clientRequestId === "string" && body.photoMessage.clientRequestId.trim()
+        ? body.photoMessage.clientRequestId.trim() : null;
       if (reveal) {
         // OLDEST unrevealed pending first (FIFO). The one-tap "send me a photo"
         // flow makes every image_pending row share the same generic prompt, so
@@ -1349,7 +1351,10 @@ Deno.serve(async (req: Request) => {
         }
       } else {
         await db.from("messages").insert({ conversation_id: convo.id, role: "user", content: prompt, kind: "image_request" });
-        await db.from("messages").insert({ conversation_id: convo.id, role: "assistant", content: prompt, kind: "image_pending" });
+        await db.from("messages").insert({
+          conversation_id: convo.id, role: "assistant", content: prompt, kind: "image_pending",
+          client_request_id: clientRequestId,
+        });
       }
       await db.from("conversations").update({ updated_at: new Date().toISOString() }).eq("id", convo.id);
       return json({ ok: true, conversationId: convo.id });
@@ -1360,6 +1365,8 @@ Deno.serve(async (req: Request) => {
       const reqText: string = String(body.voiceMessage.requestText ?? "");
       const url: string | null = typeof body.voiceMessage.url === "string" ? body.voiceMessage.url : null;
       const reveal: boolean = body.voiceMessage.reveal === true;
+      const clientRequestId: string | null = typeof body.voiceMessage.clientRequestId === "string" && body.voiceMessage.clientRequestId.trim()
+        ? body.voiceMessage.clientRequestId.trim() : null;
       if (reveal) {
         // OLDEST unrevealed voice_pending first (FIFO) — the one-tap flow gives
         // every voice_pending the same generic requestText, so newest-first
@@ -1385,7 +1392,10 @@ Deno.serve(async (req: Request) => {
         }
       } else {
         await db.from("messages").insert({ conversation_id: convo.id, role: "user", content: reqText, kind: "voice_request" });
-        await db.from("messages").insert({ conversation_id: convo.id, role: "assistant", content: reqText, kind: "voice_pending" });
+        await db.from("messages").insert({
+          conversation_id: convo.id, role: "assistant", content: reqText, kind: "voice_pending",
+          client_request_id: clientRequestId,
+        });
       }
       await db.from("conversations").update({ updated_at: new Date().toISOString() }).eq("id", convo.id);
       return json({ ok: true, conversationId: convo.id });

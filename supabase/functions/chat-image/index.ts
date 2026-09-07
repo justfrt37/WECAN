@@ -18,6 +18,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { uploadToR2 } from "../_shared/r2.ts";
+import { activeTier } from "../_shared/entitlements.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -66,6 +67,14 @@ async function chargeOrReject(uid: string, amount: number, reason: string): Prom
   if (!charged) return { ok: false };
   const { data: row } = await db.from("token_balances").select("balance").eq("user_id", uid).single();
   return { ok: true, balance: row?.balance ?? 0 };
+}
+
+/// CLAIM edilmiş ama üretim/ücretlendirme başarısız olan bir satırı serbest
+/// bırakır — bulan tekrar dokunabilsin diye "image_pending"e geri döner.
+/// `rowId` null ise (claim hiç yapılmadıysa) no-op.
+async function revertClaim(rowId: string | null): Promise<void> {
+  if (!rowId) return;
+  await db.from("messages").update({ kind: "image_pending" }).eq("id", rowId);
 }
 
 function userIdFromJWT(authHeader: string | null): string | null {
@@ -621,9 +630,26 @@ Deno.serve(async (req: Request) => {
     const uid = userIdFromJWT(req.headers.get("Authorization"));
     if (!uid) return json({ error: "unauthorized" }, 401);
 
+    // Foto Pro özelliği — istemci tarafında zaten kapılı ama sunucuda HİÇ
+    // gerçek kontrol yoktu (bkz. voice-message-tts'teki simetrik kontrol —
+    // ses tarafı sunucuda da doğrulanıyordu, foto tarafı sadece client UI'a
+    // güveniyordu, atlanabilirdi). Sesli mesajla aynı kural: herhangi bir
+    // abonelik (Pro dahil) yeterli.
+    const tier = await activeTier(db, uid);
+    if (tier === "none") return json({ error: "photo_requires_pro", tier, required_tier: "pro" }, 403);
+
     const b = await req.json();
     const characterId: string = b.characterId;
     const userPrompt: string = (b.prompt ?? "").toString().trim();
+    // Balonun kendi kimliği (istemcide UUID() ile üretilir, pending satırı
+    // OLUŞTURURKEN de aynısı gönderilir) — reveal artık content+FIFO tahminine
+    // değil bu KESİN kimliğe dayanıyor (bkz. kullanıcı raporu: "yanlış balon
+    // açılıyor, tekrar ücretlendiriliyor"). Eski istemciler bunu göndermez —
+    // o durumda aşağıdaki claim adımı atlanır, eski davranış (sunucu bu
+    // isteği kalıcılaştırmaz, istemci ayrıca eski reveal=true çağrısını
+    // chat/index.ts'e atar) AYNEN sürer, GERİYE DÖNÜK UYUMLU.
+    const clientRequestId: string | null = typeof b.clientRequestId === "string" && b.clientRequestId.trim()
+      ? b.clientRequestId.trim() : null;
     // İstemcinin yerel sohbet geçmişi/özeti — chat/index.ts'nin clientHistory
     // modundakiyle aynı şekle sahip, sadece görsel üretim promptu için kullanılır.
     const history: { role: string; content: string }[] = Array.isArray(b.history) ? b.history : [];
@@ -643,12 +669,68 @@ Deno.serve(async (req: Request) => {
     const { data: preCheckBalance } = await db.from("token_balances").select("balance").eq("user_id", uid).maybeSingle();
     if ((preCheckBalance?.balance ?? 0) < 25) return json({ error: "insufficient_tokens" }, 402);
 
+    // Konuşmayı bul ya da oluştur — CLAIM adımı için burada, üretimden ÖNCE
+    // lazım (eskiden bu blok en sonda, character_photos insert'ten hemen
+    // önceydi — sadece taşındı, mantığı aynı).
+    let { data: convo } = await db
+      .from("conversations")
+      .select("id")
+      .eq("user_id", uid)
+      .eq("character_id", characterId)
+      .maybeSingle();
+    if (!convo) {
+      const ins = await db
+        .from("conversations")
+        .upsert({ user_id: uid, character_id: characterId }, { onConflict: "user_id,character_id" })
+        .select("id")
+        .single();
+      convo = ins.data!;
+    }
+
+    // CLAIM (yeni istemci, clientRequestId gönderdiyse): bu pending satırı
+    // ATOMİK olarak "işleniyor" durumuna çeker — iki eşzamanlı dokunuş (iki
+    // cihaz, çift tıklama) aynı satırı claim etmeye çalışırsa SADECE biri
+    // kazanır, kaybeden üretim/ücretlendirmeye HİÇ girmeden erken döner (bkz.
+    // kullanıcı raporu: "aynı bekleyen balona çift dokununca çift ücret").
+    // Daha önce claim edilip TAMAMLANMIŞSA (kind zaten "image"), aynı sonucu
+    // TEKRAR ÜCRETLENDİRMEDEN idempotent şekilde döner — client cevabı
+    // kaybedip yeniden denerse (ağ kopması) para/foto kaybı olmaz.
+    let claimedRowId: string | null = null;
+    if (clientRequestId) {
+      const { data: claimed } = await db.from("messages")
+        .update({ kind: "image_claimed" })
+        .eq("conversation_id", convo.id)
+        .eq("kind", "image_pending")
+        .eq("client_request_id", clientRequestId)
+        .select("id");
+      if (claimed && claimed[0]) {
+        claimedRowId = claimed[0].id;
+      } else {
+        const { data: existing } = await db.from("messages")
+          .select("id, kind, content")
+          .eq("conversation_id", convo.id)
+          .eq("client_request_id", clientRequestId)
+          .maybeSingle();
+        if (existing?.kind === "image") {
+          // Zaten tamamlanmış — aynı sonucu tekrar ücretlendirmeden dön.
+          const { data: balanceRow } = await db.from("token_balances").select("balance").eq("user_id", uid).maybeSingle();
+          return json({ url: existing.content, redirected: false, tokenBalance: balanceRow?.balance ?? null });
+        }
+        if (existing?.kind === "image_claimed") {
+          // Başka bir istek şu an üretiyor — kısa süre sonra tekrar denesin.
+          return json({ error: "already_processing" }, 409);
+        }
+        // Satır bulunamadı (ör. çok eski istemci ya da yarış) — eski davranışa
+        // düş: claim edilmeden devam et, persist adımı chat/index.ts'e kalır.
+      }
+    }
+
     const { data: character, error: charErr } = await db
       .from(reviewMode ? "characters_review" : "characters")
       .select("name, profession, tagline, category, builder_selections, photo_url, avatar_url, created_by")
       .eq("id", characterId)
       .maybeSingle();
-    if (charErr || !character) return json({ error: "character not found" }, 400);
+    if (charErr || !character) { await revertClaim(claimedRowId); return json({ error: "character not found" }, 400); }
 
     // "Most of the time use the profile picture" — karakterin mevcut fotoğrafı
     // varsa image-to-image baseline olarak kullanılır (bkz. fetchGeneratedImageBytes).
@@ -723,6 +805,7 @@ Deno.serve(async (req: Request) => {
           if (reviewMode && await classifyPrivacy(safePrompt)) {
             // Yumuşatılmış yeniden-yazım bile review modu için yeterince SFW
             // değil → foto GÖNDERME, token DÜŞME (charge henüz yapılmadı).
+            await revertClaim(claimedRowId);
             return json({ error: "review_mode_photo_blocked" }, 422);
           }
           photoUrl = await uploadGeneratedImage(bytes);
@@ -730,6 +813,7 @@ Deno.serve(async (req: Request) => {
           redirected = true;
         } catch (e2) {
           console.error("chat-image safe fallback also failed:", String(e2));
+          await revertClaim(claimedRowId);
           return json({ error: "image_generation_failed" }, 502);
         }
       }
@@ -772,16 +856,10 @@ Deno.serve(async (req: Request) => {
     // NEVER send the same photo twice in a conversation (bkz. kullanıcı talebi
     // 2026-09-05). Exclude every url already delivered here; once the whole
     // pool has been sent, reset and allow repeats again (least-bad fallback).
-    const { data: convoForSent } = await db.from("conversations")
-      .select("id").eq("user_id", uid).eq("character_id", characterId)
-      .order("updated_at", { ascending: false }).limit(1);
-    const sentConvoId: string | undefined = convoForSent?.[0]?.id;
-    let sentUrls = new Set<string>();
-    if (sentConvoId) {
-      const { data: sent } = await db.from("messages")
-        .select("content").eq("conversation_id", sentConvoId).eq("kind", "image");
-      sentUrls = new Set((sent ?? []).map((m: { content: string }) => m.content));
-    }
+    // `convo` üretimden ÖNCE (claim adımı için) zaten çözüldü — ayrıca sorgu yok.
+    const { data: sent } = await db.from("messages")
+      .select("content").eq("conversation_id", convo.id).eq("kind", "image");
+    const sentUrls = new Set((sent ?? []).map((m: { content: string }) => m.content));
     const unsent = fullPool.filter((p) => !sentUrls.has(p.url));
     // Shuffle so the ORDER isn't fixed — a generic "Send me a photo" prompt
     // would otherwise let the matcher settle on the same first entry every time.
@@ -794,28 +872,12 @@ Deno.serve(async (req: Request) => {
     // Kullanıcı talebi: Grok'tan foto ÜRETME. SADECE havuzdan seç; havuzda
     // uygun/hiç foto yoksa (ya da seçilemezse) HATA dön — üretime ASLA düşme.
     if (!curatedMatch) {
+      await revertClaim(claimedRowId);
       return json({ error: "no_photo_available" }, 422);
     }
     photoUrl = curatedMatch.url;
     // Gizlilik bilgisi foto satırında (küratör ayarladı) → classifyPrivacy GEREKMEZ.
     isPrivate = curatedMatch.is_private === true;
-    }
-
-    // Konuşmayı bul ya da oluştur. upsert, not insert — conversations(user_id,
-    // character_id) UNIQUE (bkz. chat/index.ts'deki aynı düzeltme).
-    let { data: convo } = await db
-      .from("conversations")
-      .select("id")
-      .eq("user_id", uid)
-      .eq("character_id", characterId)
-      .maybeSingle();
-    if (!convo) {
-      const ins = await db
-        .from("conversations")
-        .upsert({ user_id: uid, character_id: characterId }, { onConflict: "user_id,character_id" })
-        .select("id")
-        .single();
-      convo = ins.data!;
     }
 
     // Charge ÖNCE — pre-check ile buradaki gerçek atomik düşüm arasında bakiye
@@ -825,7 +887,17 @@ Deno.serve(async (req: Request) => {
     // (ve tokenBalance undefined dönmesine rağmen url'in geçerli kalmasına)
     // izin veren bir bug'dı.
     const charge = await chargeOrReject(uid, 25, "photo");
-    if (!charge.ok) return json({ error: "insufficient_tokens" }, 402);
+    if (!charge.ok) { await revertClaim(claimedRowId); return json({ error: "insufficient_tokens" }, 402); }
+
+    // FINALIZE (yeni istemci, claim başarılıysa): pending satırı doğrudan
+    // burada gerçek görsele çevir — istemcinin AYRICA bir reveal=true çağrısı
+    // atmasına gerek kalmaz, cevap ağda kaybolsa BİLE içerik zaten kalıcı
+    // (bkz. kullanıcı raporu: "sunucuda üretim bitti ama client'a ulaşmadı,
+    // içerik hiç görünmüyor, tekrar dokununca yeniden ücretlendiriliyor").
+    if (claimedRowId) {
+      await db.from("messages").update({ kind: "image", content: photoUrl }).eq("id", claimedRowId);
+      await db.from("conversations").update({ updated_at: new Date().toISOString() }).eq("id", convo.id);
+    }
 
     // `generated_photos` was dropped (014_drop_generated_photos.sql) — per-user
     // delivery record now lives as its own `character_photos` row (user_id set,
