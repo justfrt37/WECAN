@@ -197,6 +197,12 @@ final class PurchaseService {
     /// Eski `isPro` çağrı yerleri (CreateCharacterView, LikesView,
     /// CharacterProfileView, PaywallHostView) hiç değişmeden derlenmeye devam etsin diye korunuyor.
     var isPro: Bool { tier != .none }
+    /// Sunucudaki aboneliğin bitiş tarihi (`subscriptions.current_period_end`)
+    /// — `refreshServerTier` ile birlikte dolar. `tier == .none` iken (satır
+    /// yok ya da süresi dolmuş) `nil`. Yeni alan, mevcut hiçbir çağrı yerini
+    /// değiştirmez (bkz. kullanıcı talebi: "üyeliğin türü dönüyor, süresi de
+    /// dönsün").
+    private(set) var tierExpiresAt: Date?
     /// Ses (sesli mesaj + sesli arama) hakkı — Pro'da YOK, Pro+/Max'te var.
     /// Sunucu da aynı kuralı uygular; bu yalnızca boşuna istek atmamak için.
     var canUseVoice: Bool { tier.canUseVoice }
@@ -857,7 +863,7 @@ final class PurchaseService {
         let nowISO = ISO8601DateFormatter().string(from: Date())
         let encodedNow = nowISO.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? nowISO
         guard let accessToken = UserDefaultsManager.shared.accessToken,
-              let url = URL(string: "\(Config.supabaseURL)/rest/v1/subscriptions?select=tier&current_period_end=gte.\(encodedNow)")
+              let url = URL(string: "\(Config.supabaseURL)/rest/v1/subscriptions?select=tier,current_period_end&current_period_end=gte.\(encodedNow)")
         else {
             PurchaseService.diag.log("[PW-DIAG] serverTier: oturum yok, atlandı (uid=\(uid, privacy: .public))")
             return
@@ -875,7 +881,20 @@ final class PurchaseService {
         // fark, "sunucuda satır yok ama uygulama PRO görünüyor" durumunu tek
         // bakışta ayırt ettiriyor (bkz. kullanıcı talebi).
         let body = String(data: data, encoding: .utf8) ?? "<okunamadı>"
-        struct Row: Decodable { let tier: String }
+        // `[]` (boş dizi) — PostgREST'in "eşleşen satır yok" için STANDART
+        // cevabı, bir hata DEĞİL (bkz. kullanıcı sorusu: "boş dönüyor, hata
+        // dönmeli mi?"). Aşağıdaki `guard let t = rows.first?.tier` bunu zaten
+        // doğru yorumluyor — İSTEK BAŞARILI + satır yok = üyelik yok, tier
+        // .none'a düşer. Burada gerçek bir hata/özel mesaj döndürmek REST
+        // semantiğine aykırı olurdu VE bu decode zincirini kırardı (aşağıdaki
+        // `[Row]` decode'u bir hata objesini çözemez, "gövde çözümlenemedi"
+        // dalına düşer — o dal tier'a HİÇ DOKUNMAZ, yani asıl "üyelik yok"
+        // durumu artık algılanamaz hale gelirdi).
+        struct Row: Decodable {
+            let tier: String
+            let currentPeriodEnd: String?
+            enum CodingKeys: String, CodingKey { case tier; case currentPeriodEnd = "current_period_end" }
+        }
         guard let rows = try? JSONDecoder().decode([Row].self, from: data) else {
             PurchaseService.diag.log("[PW-DIAG] serverTier: gövde çözümlenemedi status=\(http.statusCode, privacy: .public) body=\(body, privacy: .public)")
             return
@@ -887,8 +906,9 @@ final class PurchaseService {
         // Artık RC tier yazmadığından o ağ gereksiz — ve tam da o yüzden
         // sunucuda kayıt olmadan Max görünüyordu.) Ağ/HTTP hatasında yukarıdaki
         // guard'lar erken dönüyor, yani ÇEVRİMDIŞIYKEN tier düşmez.
-        guard let t = rows.first?.tier else {
+        guard let row = rows.first else {
             tier = .none
+            tierExpiresAt = nil
             PurchaseService.diag.log("""
                 [PW-DIAG] serverTier kaynak=Supabase uid=\(uid, privacy: .public) \
                 status=\(http.statusCode, privacy: .public) body=\(body, privacy: .public) \
@@ -896,17 +916,23 @@ final class PurchaseService {
                 """)
             return
         }
-        switch t {
+        switch row.tier {
         case "max":      tier = .max
         case "pro_plus": tier = .proPlus
         case "pro":      tier = .pro
         default:         tier = .none
         }
+        tierExpiresAt = row.currentPeriodEnd.flatMap {
+            ISO8601DateFormatter().date(from: $0) ?? {
+                let f = ISO8601DateFormatter(); f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+                return f.date(from: $0)
+            }()
+        }
         PurchaseService.diag.log("""
             [PW-DIAG] serverTier kaynak=Supabase uid=\(uid, privacy: .public) \
             status=\(http.statusCode, privacy: .public) body=\(body, privacy: .public) \
             tier \(before.rawValue, privacy: .public)->\(self.tier.rawValue, privacy: .public) \
-            isPro=\(self.isPro, privacy: .public)
+            isPro=\(self.isPro, privacy: .public) expiresAt=\(String(describing: self.tierExpiresAt), privacy: .public)
             """)
     }
 
