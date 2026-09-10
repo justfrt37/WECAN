@@ -922,11 +922,14 @@ final class PurchaseService {
         case "pro":      tier = .pro
         default:         tier = .none
         }
-        tierExpiresAt = row.currentPeriodEnd.flatMap {
-            ISO8601DateFormatter().date(from: $0) ?? {
-                let f = ISO8601DateFormatter(); f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-                return f.date(from: $0)
-            }()
+        tierExpiresAt = row.currentPeriodEnd.flatMap { periodEnd in
+            if let date = ISO8601DateFormatter().date(from: periodEnd) {
+                return date
+            }
+
+            let fractionalFormatter = ISO8601DateFormatter()
+            fractionalFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            return fractionalFormatter.date(from: periodEnd)
         }
         PurchaseService.diag.log("""
             [PW-DIAG] serverTier kaynak=Supabase uid=\(uid, privacy: .public) \

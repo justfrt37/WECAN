@@ -46,6 +46,9 @@ struct SplashView: View {
                 }
             }
         }
+        .onAppear {
+            AnalyticsService.shared.trackSplashScreenViewed()
+        }
         .task {
             await loadAll()
         }
