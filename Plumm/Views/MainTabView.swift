@@ -17,7 +17,7 @@ enum MainTab: Int, CaseIterable, Identifiable {
     case discover, chat, explore, likes, profile
     var id: Int { rawValue }
 
-    /// Analytics'te okunabilir olsun diye (bkz. `tab_switched`) — Int rawValue
+    /// Analytics'te okunabilir olsun diye (bkz. `page_transfer`) — Int rawValue
     /// SQL'de anlamsız kalırdı.
     var analyticsName: String {
         switch self {
@@ -200,7 +200,13 @@ struct MainTabView: View {
                 ChatView(character: request.character, prefillText: request.prefillText)
             }
             .onChange(of: selection) { old, new in
-                EventLogger.shared.log("tab_switched", ["from": old.analyticsName, "to": new.analyticsName])
+                // Sayfalar arası her geçiş, nereden nereye gidildiği bilgisiyle
+                // (bkz. kullanıcı talebi). Ad snake_case — diğer tüm olaylarla
+                // aynı stil, Amplitude'da iki adlandırma yan yana durmasın.
+                EventLogger.shared.log("page_transfer", [
+                    "from": old.analyticsName,
+                    "to": new.analyticsName,
+                ])
             }
             .onChange(of: store.pendingMeetRequest) { _, request in
                 if let request {

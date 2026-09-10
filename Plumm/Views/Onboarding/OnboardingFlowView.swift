@@ -21,32 +21,36 @@ struct OnboardingFlowView: View {
             case .name:
                 OnboardingNameView()
                     .transition(.opacity)
-                    .onAppear { logStepViewed("name", 0) }
+                    .onAppear { logStepViewed("name") }
             case .socialProof:
                 OnboardingSocialProofView()
                     .transition(.opacity)
-                    .onAppear { logStepViewed("social_proof", 1) }
+                    .onAppear { logStepViewed("social_proof") }
             case .characterSelect:
                 OnboardingCharacterSelectView()
                     .transition(.opacity)
-                    .onAppear { logStepViewed("character_select", 2) }
+                    .onAppear { logStepViewed("character_select") }
             case .questions:
                 OnboardingQuestionsView()
                     .transition(.opacity)
-                    .onAppear { logStepViewed("questions", 3) }
+                    .onAppear { logStepViewed("questions") }
             case .finalTease:
                 OnboardingReadyView()
                     .transition(.opacity)
-                    .onAppear { logStepViewed("final_tease", 4) }
+                    .onAppear { logStepViewed("final_tease") }
             case .paywall:
                 OnboardingPaywallView()
                     .transition(.opacity)
-                    .onAppear { logStepViewed("paywall", 5) }
+                    .onAppear { logStepViewed("paywall") }
             }
         }
     }
 
-    private func logStepViewed(_ step: String, _ index: Int) {
-        EventLogger.shared.log("onboarding_step_viewed", ["step": step, "step_index": index])
+    /// Adımın SIRASI değil ADI loglanıyor (bkz. kullanıcı talebi). Sayısal
+    /// indeks, araya yeni bir adım eklendiğinde geçmiş veriyi sessizce
+    /// kaydırıyordu: dünün "3"ü ile bugünün "3"ü farklı ekranlar oluyor ve
+    /// funnel geriye dönük yanlış okunuyordu. Ad sabit kalır.
+    private func logStepViewed(_ step: String) {
+        EventLogger.shared.log("onboarding_step_viewed", ["step": step])
     }
 }
