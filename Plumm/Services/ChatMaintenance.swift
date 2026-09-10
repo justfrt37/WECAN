@@ -21,7 +21,7 @@ enum ChatMaintenance {
         } else {
             LocalConversationStore.shared.clear(for: character.id)
         }
-        ReadTracker.setSeen(character.id, 0)
+        ReadTracker.reset(character.id)
         try? await ChatService().clearConversation(character: character, keepLevel: keepLevel, keepMemories: keepMemories, keepBehaviors: keepBehaviors)
     }
 

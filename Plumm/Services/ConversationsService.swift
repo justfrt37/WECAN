@@ -27,15 +27,14 @@ struct LastMessage: Codable {
     /// yereldir). Yerel (cihaz) mesajlarından türetilirken medya bayraklarına
     /// göre elle set edilir (bkz. ChatListView.load()).
     let kind: String?
-    /// Bot mesajının okunma zamanı (`messages.read_at`, bkz. migration 030).
-    /// `nil` = okunmadı. Kullanıcı mesajlarında anlamsız — okunmamış sayımı
-    /// yalnızca `role = "assistant"` satırlarına bakıyor.
+    /// Bot mesajı okundu mu (`messages.is_read`, bkz. migration 031).
+    /// Kullanıcı mesajlarında anlamsız — okunmamış sayımı yalnızca
+    /// `role = "assistant"` satırlarına bakıyor.
     ///
     /// Optional ve varsayılanı nil: yereldeki mesajlardan türetilen
     /// LastMessage'larda (bkz. ChatListView.load) böyle bir bilgi yok.
-    let readAt: String?
-
-    var isRead: Bool { readAt != nil }
+    /// `nil` = bilinmiyor → okunmamış SAYILMAZ, karar yerel damgaya kalır.
+    let isRead: Bool?
 
     var isUser: Bool { role == "user" }
     var isImage: Bool { kind == "image" || kind == "image_pending" }
@@ -56,20 +55,20 @@ struct LastMessage: Codable {
     }
 
     init(conversationID: UUID, content: String, role: String, createdAt: String,
-         kind: String? = nil, readAt: String? = nil) {
+         kind: String? = nil, isRead: Bool? = nil) {
         self.conversationID = conversationID
         self.content = content
         self.role = role
         self.createdAt = createdAt
         self.kind = kind
-        self.readAt = readAt
+        self.isRead = isRead
     }
 
     private enum CodingKeys: String, CodingKey {
         case conversationID = "conversation_id"
         case content, role, kind
         case createdAt = "created_at"
-        case readAt = "read_at"
+        case isRead = "is_read"
     }
 }
 
@@ -132,7 +131,7 @@ struct ConversationsService {
 
     /// Tüm mesajlar (RLS ile yalnızca kullanıcınınki), en yeni üstte.
     func fetchAllMessages() async -> [LastMessage] {
-        let url = "\(Config.supabaseURL)/rest/v1/messages?select=conversation_id,content,role,created_at,kind,read_at&order=created_at.desc"
+        let url = "\(Config.supabaseURL)/rest/v1/messages?select=conversation_id,content,role,created_at,kind,is_read&order=created_at.desc"
         return await get(url) ?? []
     }
 

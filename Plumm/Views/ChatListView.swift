@@ -103,6 +103,19 @@ struct ChatListView: View {
                         .padding(.bottom, 100) // tab bar boşluğu
                     }
                     .scrollIndicators(.hidden)
+                    // Listeyi en üstteyken aşağı çekmek sunucudan tazeler
+                    // (bkz. kullanıcı talebi). `load()` zaten iki isteği
+                    // paralel atıp `items`'ı baştan kuruyor, o yüzden ayrı bir
+                    // yenileme yoluna gerek yok — TEK yol olması, iki yolun
+                    // birbirinin üzerine bayat veri yazma riskini de ortadan
+                    // kaldırıyor (bkz. aşağıdaki `.task(id:)` notu).
+                    //
+                    // Tam ekran ProgressView'a (isLoading) dokunulmuyor:
+                    // SwiftUI'nin kendi çekme göstergesi zaten dönüyor, ve
+                    // listeyi ProgressView ile değiştirmek çekme jestini
+                    // ortasında iptal ederdi. `isLoading` bu dalda zaten
+                    // false — ilk açılış dışında hiç true olmuyor.
+                    .refreshable { await load() }
                 }
             }
         }
@@ -124,6 +137,11 @@ struct ChatListView: View {
         .task(id: store.conversationsVersion) { await load() }
     }
 
+    /// Sohbet listesini sunucudan kurar. Üç yerden çağrılıyor: ilk açılış,
+    /// `conversationsVersion` değişimi (bkz. `.task(id:)`) ve aşağı-çekme
+    /// yenilemesi (`.refreshable`). Üçü de AYNI yol — ikinci bir yenileme
+    /// yolu olmaması, iki yolun birbirinin üzerine bayat veri yazma riskini
+    /// de ortadan kaldırıyor.
     private func load() async {
         // "Sıfır yerel": TEK kaynak sunucu. Disk önbelleği / yerel-birleşim /
         // tombstone YOK — yalnızca sunucudaki konuşmalar + mesajlar gösterilir.
@@ -174,25 +192,31 @@ struct ChatListView: View {
                 store.chatCache[ch.id] = displayMessages
             }
 
-            // Okunmamış sayısı İKİ kaynaktan, ikisinin de KÜÇÜĞÜ alınıyor:
-            //   • sunucu: `messages.read_at is null` olan bot mesajları
-            //     (kalıcı — cihaz değişse/uygulama silinse de korunur,
-            //     bkz. migration 030)
-            //   • yerel: bot mesajı sayısı − ReadTracker'ın gördüğü sayı
-            //     (anında — sohbetten çıkınca rozet ağ turunu beklemeden söner)
+            // Okunmamış = sunucuda `is_read = false` olan bot mesajları
+            // (bkz. migration 031), ÜSTÜNE yerel "buraya kadar okudum"
+            // damgasıyla süzülmüş hali.
             //
-            // `min` bilinçli: rozet ancak İKİ kaynak da "okunmadı" derse
-            // görünür. Böylece iki eski hata sınıfı da kapanıyor — yeniden
-            // kurulumda yerel sayaç 0'a düşüp TÜM geçmişi okunmamış
-            // gösteriyordu (sunucu 0 der, min 0), ve başarısız bir işaretleme
-            // sunucuda kalıcı rozet bırakabilirdi (yerel 0 der, min 0).
+            // Yerel damganın işi SADECE hızlanma: kullanıcı sohbetten çıkar
+            // çıkmaz rozet, sunucudaki işaretleme turu tamamlanmasını
+            // beklemeden söner. Damga bir mesajı okunmamış YAPAMAZ, yalnızca
+            // okunmuş sayabilir.
+            //
+            // Karşılaştırma MESAJ ZAMANI üzerinden, sayı üzerinden DEĞİL —
+            // eski sayaç yaklaşımı iki tarafın aynı şeyi saymamasından dolayı
+            // gerçek okunmamışı susturuyordu (bkz. ReadTracker'daki uzun not:
+            // sunucuda 26 assistant / 1 okunmamış varken rozet 0 çıkıyordu).
             let assistantMessages = convMsgs.filter { !$0.isUser }
-            let assistantCount = assistantMessages.count
-            let serverUnread = assistantMessages.filter { !$0.isRead }.count
-            let localUnread = max(0, assistantCount - ReadTracker.seen(conv.characterID))
-            let unread = min(serverUnread, localUnread)
+            let lastReadAt = ReadTracker.lastReadAt(conv.characterID)
+            let unread = assistantMessages.filter { msg in
+                guard msg.isRead == false else { return false }      // sunucu okundu dedi (ya da bilmiyor)
+                guard let lastReadAt, let created = msg.date else { return true }
+                return created > lastReadAt                          // damgadan yeniyse okunmamış
+            }.count
             #if DEBUG
-            Self.diag.debug("\(ch.name, privacy: .public): assistant=\(assistantCount, privacy: .public) sunucu-okunmamis=\(serverUnread, privacy: .public) yerel-okunmamis=\(localUnread, privacy: .public) rozet=\(unread, privacy: .public)")
+            // .log(), .debug() DEĞİL: OSLog'da debug seviyesi kalıcı değil ve
+            // Xcode konsolunda varsayılan olarak görünmüyor — bu satırın hiç
+            // görünmemesi teşhisi tam bu yüzden zorlaştırdı.
+            Self.diag.log("\(ch.name, privacy: .public): assistant=\(assistantMessages.count, privacy: .public) sunucu-okunmamis=\(assistantMessages.filter { $0.isRead == false }.count, privacy: .public) damga=\(lastReadAt.map { ISO8601DateFormatter().string(from: $0) } ?? "yok", privacy: .public) rozet=\(unread, privacy: .public)")
             #endif
             // Önizleme en yeni mesajdan (convMsgs desc → .first) — sunucudaki
             // `kind` (text/image/voice) korunur, WhatsApp tarzı önizleme için.

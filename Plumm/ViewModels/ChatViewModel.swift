@@ -266,21 +266,22 @@ final class ChatViewModel {
     private var lastMarkedReadCount = -1
 
     func markReadNow() {
-        let count = realAssistantCount
-        // Yerel (anında) kısım: rozet ağ turunu beklemeden söner.
-        ReadTracker.setSeen(character.id, count)
+        // Yerel (anında) kısım: rozet ağ turunu beklemeden söner. Damga
+        // EN SON MESAJIN zamanı, `Date()` DEĞİL — cihaz saati sunucudan ileriyse
+        // `Date()` henüz gelmemiş mesajları da okunmuş sayardı.
+        let newestAt = messages.map(\.createdAt).max() ?? Date()
+        ReadTracker.markRead(character.id, at: newestAt)
 
         // Kalıcı (sunucu) kısım: cihaz değişse/uygulama silinse de korunur
-        // (bkz. migration 030 — okunmamış bilgisi eskiden YALNIZCA cihazdaydı,
+        // (bkz. migration 031 — okunmamış bilgisi eskiden YALNIZCA cihazdaydı,
         // yeniden kurulumda tüm geçmiş okunmamış görünüyordu).
+        let count = realAssistantCount
         guard count != lastMarkedReadCount else { return }
         lastMarkedReadCount = count
         let characterID = character.id
         Task {
             let updated = await ConversationsService().markConversationRead(characterID: characterID)
-            if let updated, updated > 0 {
-                Self.diag.debug("\(characterID.uuidString, privacy: .public): \(updated, privacy: .public) mesaj okundu isaretlendi")
-            }
+            Self.diag.log("\(characterID.uuidString, privacy: .public): sunucuda \(updated.map(String.init) ?? "HATA", privacy: .public) mesaj okundu isaretlendi")
         }
     }
 
