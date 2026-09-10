@@ -47,7 +47,13 @@ struct SplashView: View {
             }
         }
         .onAppear {
-            AnalyticsService.shared.trackSplashScreenViewed()
+            // Splash de artık EventLogger üzerinden gidiyor — böylece olay hem
+            // Amplitude'a hem `event_log`a düşüyor ve funnel'ın ilk adımı iki
+            // tarafta da aynı isimle görünüyor. Eskiden burada Amplitude'a
+            // DOĞRUDAN "Viewed Splash Screen" yazılıyordu (ve içinde Plumm'da
+            // hiçbir şeye karşılık gelmeyen `prompt_version: "BA400.4"` vardı —
+            // başka bir projeden kopyalanmış şablon kalıntısı).
+            EventLogger.shared.log("splash_shown")
         }
         .task {
             await loadAll()

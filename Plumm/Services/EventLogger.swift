@@ -41,12 +41,23 @@ final class EventLogger {
     }
 
     func log(_ name: String, _ properties: [String: Any] = [:]) {
+        // TEE: aynı olay Amplitude'a da gidiyor (funnel'lar orada kuruluyor,
+        // bkz. AnalyticsService). Olay adı ve özellikleri TEK yerde tanımlı
+        // kalsın diye burada dallanıyor — Amplitude için ikinci bir çağrı seti
+        // yazmak iki taksonominin zamanla ayrışması demekti.
+        //
+        // jsonSafe'ten GEÇMİŞ hali gönderiliyor: Amplitude SDK'sı da UUID gibi
+        // tipleri kendi serileştirmesinde taşımıyor, ve iki taraf birebir aynı
+        // değeri görsün ki funnel ile event_log karşılaştırılabilir olsun.
+        let safeProperties = Self.jsonSafe(properties) as? [String: Any] ?? [:]
+        AnalyticsService.shared.track(name, safeProperties)
+
         lock.lock()
         var row: [String: Any] = [
             "device_id": deviceId,
             "session_id": sessionId,
             "event_name": name,
-            "properties": Self.jsonSafe(properties),
+            "properties": safeProperties,
             "platform": "ios",
         ]
         if let userId = UserDefaultsManager.shared.userId { row["user_id"] = userId }

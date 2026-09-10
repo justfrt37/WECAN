@@ -96,6 +96,10 @@ struct PlummApp: App {
                 // plandan DÖNÜŞLERİ de kapsıyor, bu yüzden her .active'de
                 // yeniden çağırmak zararsız (yeni sessionId = yeni "ziyaret").
                 EventLogger.shared.startNewSession()
+                // Anonim giriş açılışta tamamlandığı için uid ilk .active'te
+                // henüz olmayabiliyor; identify idempotent, her öne gelişte
+                // çağırmak ucuz ve kimliği ilk fırsatta bağlıyor.
+                AnalyticsService.shared.identify()
                 EventLogger.shared.log("app_foreground")
                 NotificationScheduler.shared.onForeground(characters: store.characters)
                 notificationDelegate?.catchUpOnDeliveredNotifications()
@@ -106,6 +110,9 @@ struct PlummApp: App {
             case .background:
                 EventLogger.shared.log("app_background")
                 EventLogger.shared.flush()
+                // Amplitude'un kendi kuyruğu da boşaltılıyor: askıya alınan
+                // oturumdaki funnel adımları kaybolmasın.
+                AnalyticsService.shared.flush()
                 NotificationScheduler.shared.onBackground(characters: store.characters)
             default:
                 break
