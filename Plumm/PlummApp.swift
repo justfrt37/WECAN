@@ -23,6 +23,10 @@ struct PlummApp: App {
     @Environment(\.scenePhase) private var scenePhase
     @State private var notificationDelegate: NotificationDelegate?
 
+    init() {
+        _ = AnalyticsService.shared
+    }
+
     var body: some Scene {
         WindowGroup {
             Group {

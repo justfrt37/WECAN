@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		244B4E503019BD5700D0E6BB /* ElevenLabs in Frameworks */ = {isa = PBXBuildFile; productRef = 244B4E4F3019BD5700D0E6BB /* ElevenLabs */; };
+		A11D3E0E4D2B4F40A0000001 /* AmplitudeUnified in Frameworks */ = {isa = PBXBuildFile; productRef = A11D3E0E4D2B4F40A0000002 /* AmplitudeUnified */; };
 		71CD6CC030164B07001566D5 /* ReceiptParser in Frameworks */ = {isa = PBXBuildFile; productRef = 71CD6CBF30164B07001566D5 /* ReceiptParser */; };
 		71CD6CC230164B07001566D5 /* RevenueCat in Frameworks */ = {isa = PBXBuildFile; productRef = 71CD6CC130164B07001566D5 /* RevenueCat */; };
 		71CD6CC430164B07001566D5 /* RevenueCatUI in Frameworks */ = {isa = PBXBuildFile; productRef = 71CD6CC330164B07001566D5 /* RevenueCatUI */; };
@@ -30,6 +31,7 @@
 				71CD6CC030164B07001566D5 /* ReceiptParser in Frameworks */,
 				71CD6CC430164B07001566D5 /* RevenueCatUI in Frameworks */,
 				244B4E503019BD5700D0E6BB /* ElevenLabs in Frameworks */,
+				A11D3E0E4D2B4F40A0000001 /* AmplitudeUnified in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -76,6 +78,7 @@
 				71CD6CC330164B07001566D5 /* RevenueCatUI */,
 				71CD6CBF30164B07001566D5 /* ReceiptParser */,
 				244B4E4F3019BD5700D0E6BB /* ElevenLabs */,
+				A11D3E0E4D2B4F40A0000002 /* AmplitudeUnified */,
 			);
 			productName = Plumm;
 			productReference = AA0000000000000000000001 /* Plumm.app */;
@@ -110,6 +113,7 @@
 			packageReferences = (
 				71CD6CBE30164B07001566D5 /* XCRemoteSwiftPackageReference "purchases-ios" */,
 				244B4E4E3019BD5700D0E6BB /* XCRemoteSwiftPackageReference "elevenlabs-swift-sdk" */,
+				A11D3E0E4D2B4F40A0000003 /* XCRemoteSwiftPackageReference "AmplitudeUnified-Swift" */,
 			);
 			productRefGroup = AA0000000000000000000005 /* Products */;
 			projectDirPath = "";
@@ -296,6 +300,14 @@
 				minimumVersion = 5.81.2;
 			};
 		};
+		A11D3E0E4D2B4F40A0000003 /* XCRemoteSwiftPackageReference "AmplitudeUnified-Swift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/amplitude/AmplitudeUnified-Swift";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.0.3;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -318,6 +330,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 71CD6CBE30164B07001566D5 /* XCRemoteSwiftPackageReference "purchases-ios" */;
 			productName = RevenueCatUI;
+		};
+		A11D3E0E4D2B4F40A0000002 /* AmplitudeUnified */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A11D3E0E4D2B4F40A0000003 /* XCRemoteSwiftPackageReference "AmplitudeUnified-Swift" */;
+			productName = AmplitudeUnified;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

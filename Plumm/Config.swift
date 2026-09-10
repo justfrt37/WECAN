@@ -10,6 +10,9 @@
 import Foundation
 
 enum Config {
+    // Amplitude ingestion key — public by design; move to an env var when you set up environments.
+    static let amplitudeAPIKey = "e36a8402fbdc8d734d38ef6c4d5cc688"
+
     // Supabase proje ayarların (Supabase Dashboard > Project Settings > API Keys)
     static let supabaseURL = "https://ohpvhgwjmrfjclnumgnm.supabase.co"
     // ↓ Dashboard > Settings > API Keys > "anon / public" anahtarını buraya yapıştır
