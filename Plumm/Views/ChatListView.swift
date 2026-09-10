@@ -5,6 +5,7 @@
 //
 
 import SwiftUI
+import OSLog
 
 /// Salt bellek-içi satır modeli — "sıfır yerel" geçişinden beri hiçbir yere
 /// serileştirilmiyor (bkz. `load()`), o yüzden `Codable` da gerekmiyor.
@@ -22,6 +23,10 @@ private struct ChatItem: Identifiable {
 }
 
 struct ChatListView: View {
+    /// Rozet hesabının tanılama kanalı (bkz. HTTPLogger/PurchaseService.diag
+    /// ile aynı desen; print DEĞİL, Console.app'ten de okunabilsin diye).
+    private static let diag = Logger(subsystem: "com.firat.Plumm", category: "unread")
+
     @Environment(CharacterStore.self) private var store
     @State private var items: [ChatItem] = []
     @State private var isLoading = true
@@ -169,10 +174,25 @@ struct ChatListView: View {
                 store.chatCache[ch.id] = displayMessages
             }
 
-            let assistantCount = convMsgs.filter { !$0.isUser }.count
-            let unread = max(0, assistantCount - ReadTracker.seen(conv.characterID))
+            // Okunmamış sayısı İKİ kaynaktan, ikisinin de KÜÇÜĞÜ alınıyor:
+            //   • sunucu: `messages.read_at is null` olan bot mesajları
+            //     (kalıcı — cihaz değişse/uygulama silinse de korunur,
+            //     bkz. migration 030)
+            //   • yerel: bot mesajı sayısı − ReadTracker'ın gördüğü sayı
+            //     (anında — sohbetten çıkınca rozet ağ turunu beklemeden söner)
+            //
+            // `min` bilinçli: rozet ancak İKİ kaynak da "okunmadı" derse
+            // görünür. Böylece iki eski hata sınıfı da kapanıyor — yeniden
+            // kurulumda yerel sayaç 0'a düşüp TÜM geçmişi okunmamış
+            // gösteriyordu (sunucu 0 der, min 0), ve başarısız bir işaretleme
+            // sunucuda kalıcı rozet bırakabilirdi (yerel 0 der, min 0).
+            let assistantMessages = convMsgs.filter { !$0.isUser }
+            let assistantCount = assistantMessages.count
+            let serverUnread = assistantMessages.filter { !$0.isRead }.count
+            let localUnread = max(0, assistantCount - ReadTracker.seen(conv.characterID))
+            let unread = min(serverUnread, localUnread)
             #if DEBUG
-            print("[UNREAD-DEBUG] \(ch.name): assistantCount=\(assistantCount) seen=\(ReadTracker.seen(conv.characterID)) unread=\(unread) kinds=\(convMsgs.filter { !$0.isUser }.map { $0.kind ?? "nil" })")
+            Self.diag.debug("\(ch.name, privacy: .public): assistant=\(assistantCount, privacy: .public) sunucu-okunmamis=\(serverUnread, privacy: .public) yerel-okunmamis=\(localUnread, privacy: .public) rozet=\(unread, privacy: .public)")
             #endif
             // Önizleme en yeni mesajdan (convMsgs desc → .first) — sunucudaki
             // `kind` (text/image/voice) korunur, WhatsApp tarzı önizleme için.

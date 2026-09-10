@@ -27,6 +27,15 @@ struct LastMessage: Codable {
     /// yereldir). Yerel (cihaz) mesajlarından türetilirken medya bayraklarına
     /// göre elle set edilir (bkz. ChatListView.load()).
     let kind: String?
+    /// Bot mesajının okunma zamanı (`messages.read_at`, bkz. migration 030).
+    /// `nil` = okunmadı. Kullanıcı mesajlarında anlamsız — okunmamış sayımı
+    /// yalnızca `role = "assistant"` satırlarına bakıyor.
+    ///
+    /// Optional ve varsayılanı nil: yereldeki mesajlardan türetilen
+    /// LastMessage'larda (bkz. ChatListView.load) böyle bir bilgi yok.
+    let readAt: String?
+
+    var isRead: Bool { readAt != nil }
 
     var isUser: Bool { role == "user" }
     var isImage: Bool { kind == "image" || kind == "image_pending" }
@@ -46,18 +55,21 @@ struct LastMessage: Codable {
             ?? LastMessage.plainFormatter.date(from: createdAt)
     }
 
-    init(conversationID: UUID, content: String, role: String, createdAt: String, kind: String? = nil) {
+    init(conversationID: UUID, content: String, role: String, createdAt: String,
+         kind: String? = nil, readAt: String? = nil) {
         self.conversationID = conversationID
         self.content = content
         self.role = role
         self.createdAt = createdAt
         self.kind = kind
+        self.readAt = readAt
     }
 
     private enum CodingKeys: String, CodingKey {
         case conversationID = "conversation_id"
         case content, role, kind
         case createdAt = "created_at"
+        case readAt = "read_at"
     }
 }
 
@@ -120,8 +132,36 @@ struct ConversationsService {
 
     /// Tüm mesajlar (RLS ile yalnızca kullanıcınınki), en yeni üstte.
     func fetchAllMessages() async -> [LastMessage] {
-        let url = "\(Config.supabaseURL)/rest/v1/messages?select=conversation_id,content,role,created_at,kind&order=created_at.desc"
+        let url = "\(Config.supabaseURL)/rest/v1/messages?select=conversation_id,content,role,created_at,kind,read_at&order=created_at.desc"
         return await get(url) ?? []
+    }
+
+    /// Bu karakterle olan konuşmanın okunmamış bot mesajlarını SUNUCUDA
+    /// okundu işaretler (bkz. mark_conversation_read, migration 030).
+    /// Güncellenen satır sayısını döner; hata/oturum yoksa nil.
+    ///
+    /// `characterID` alıyor, conversationID DEĞİL: istemci bir conversationId
+    /// takip etmiyor, sunucu (uid, characterId)'den çözüyor.
+    ///
+    /// Fire-and-forget çağrılmak üzere tasarlandı: rozetin anında sıfırlanması
+    /// zaten yerel ReadTracker'dan geliyor, bu çağrı kalıcılığı sağlıyor.
+    /// Başarısız olursa bir sonraki sohbet açılışında tekrar denenir.
+    @discardableResult
+    func markConversationRead(characterID: UUID) async -> Int? {
+        guard let url = URL(string: "\(Config.supabaseURL)/rest/v1/rpc/mark_conversation_read") else { return nil }
+        var request = SupabaseRequest.post(url: url, bearer: SupabaseRequest.sessionBearer, timeout: 15)
+        request.httpBody = try? JSONSerialization.data(
+            withJSONObject: ["p_character_id": characterID.uuidString]
+        )
+        guard let (data, response) = try? await URLSession.shared.logged(for: request),
+              let http = response as? HTTPURLResponse
+        else { return nil }
+        if http.statusCode == 401 {
+            _ = await SupabaseAuth.recover()
+            return nil   // bir sonraki açılışta tekrar denenir
+        }
+        guard (200..<300).contains(http.statusCode) else { return nil }
+        return Int(String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "")
     }
 
     private func get<T: Decodable>(_ endpoint: String, retrying: Bool = true) async -> T? {

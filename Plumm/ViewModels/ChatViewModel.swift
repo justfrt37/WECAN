@@ -9,6 +9,7 @@
 
 import Foundation
 import Observation
+import OSLog
 import AVFoundation
 import UIKit
 import SwiftUI
@@ -253,11 +254,34 @@ final class ChatViewModel {
         return max(0, c - (hasSyntheticOpening ? 1 : 0))
     }
 
+    /// Okundu işaretlemenin tanılama kanalı (ChatListView.diag ile aynı
+    /// kategori — rozetin iki ucu tek yerden okunsun).
+    private static let diag = Logger(subsystem: "com.firat.Plumm", category: "unread")
+
+    /// Sunucuya en son hangi sayıda işaretleme yapıldığı. Aynı durum için
+    /// tekrar tekrar RPC atmayı engelliyor: markReadNow altı ayrı yerden
+    /// çağrılıyor (geçmiş yükleme dalları, her yeni cevap, uygulama öne
+    /// gelişi) ve hepsi ağa çıksaydı sohbet başına onlarca gereksiz istek
+    /// olurdu.
+    private var lastMarkedReadCount = -1
+
     func markReadNow() {
-        #if DEBUG
-        print("[UNREAD-DEBUG] markReadNow \(character.name): realAssistantCount=\(realAssistantCount) isVisible=\(isVisible) hasSyntheticOpening=\(hasSyntheticOpening) totalMessages=\(messages.count)")
-        #endif
-        ReadTracker.setSeen(character.id, realAssistantCount)
+        let count = realAssistantCount
+        // Yerel (anında) kısım: rozet ağ turunu beklemeden söner.
+        ReadTracker.setSeen(character.id, count)
+
+        // Kalıcı (sunucu) kısım: cihaz değişse/uygulama silinse de korunur
+        // (bkz. migration 030 — okunmamış bilgisi eskiden YALNIZCA cihazdaydı,
+        // yeniden kurulumda tüm geçmiş okunmamış görünüyordu).
+        guard count != lastMarkedReadCount else { return }
+        lastMarkedReadCount = count
+        let characterID = character.id
+        Task {
+            let updated = await ConversationsService().markConversationRead(characterID: characterID)
+            if let updated, updated > 0 {
+                Self.diag.debug("\(characterID.uuidString, privacy: .public): \(updated, privacy: .public) mesaj okundu isaretlendi")
+            }
+        }
     }
 
     func clearChat(keepLevel: Bool = false, keepMemories: Bool = false, keepBehaviors: Bool = false) {
