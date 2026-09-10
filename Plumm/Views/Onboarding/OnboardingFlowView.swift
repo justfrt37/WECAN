@@ -31,9 +31,11 @@ struct OnboardingFlowView: View {
                     .transition(.opacity)
                     .onAppear { logStepViewed("character_select") }
             case .questions:
+                // Bu adımın olayı BURADAN atılmıyor: ekran iki soru gösteriyor
+                // ve her biri kendi adımı olarak loglanıyor (question1 /
+                // question2, bkz. OnboardingQuestionsView).
                 OnboardingQuestionsView()
                     .transition(.opacity)
-                    .onAppear { logStepViewed("questions") }
             case .finalTease:
                 OnboardingReadyView()
                     .transition(.opacity)

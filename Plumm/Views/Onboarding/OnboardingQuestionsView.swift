@@ -76,6 +76,19 @@ struct OnboardingQuestionsView: View {
             }
         }
         .task(id: qIndex) { await runQuestionTimer() }
+        // Bu ADIM tek ekran ama İKİ soru gösteriyor (qIndex 0/1). Olay
+        // OnboardingFlowView'da tek "questions" olarak atılıyordu, yani ikinci
+        // soruyu gören ile yalnızca birincisini gören kullanıcı funnel'da
+        // AYNI görünüyordu — iki soru arasındaki terk oranı ölçülemiyordu.
+        // Artık her soru kendi adımı: question1 / question2.
+        //
+        // `onChange`, `onAppear` DEĞİL: `onAppear` yalnızca ekran ilk
+        // kurulduğunda çalışır, qIndex değişiminde çalışmaz (ZStack bilerek
+        // yeniden kurulmuyor — video baştan başlamasın diye, bkz. yukarıdaki
+        // not). `initial: true` ilk soruyu da kapsıyor.
+        .onChange(of: qIndex, initial: true) { _, index in
+            EventLogger.shared.log("onboarding_step_viewed", ["step": "question\(index + 1)"])
+        }
     }
 
     // MARK: - Bileşenler
